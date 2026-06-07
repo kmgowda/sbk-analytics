@@ -1,0 +1,285 @@
+"""Parse the input YML driving the orchestration.
+
+The YML contains the following groups (see README):
+
+    mode:             serial | parallel
+    sbk:              shared SBK / SBK-GEM-YAL defaults
+    classes:          list of benchmark instance entries
+    class_params:     (optional) per-class defaults
+    sbk-charts:       options for the sbk-charts invocation
+      output:         output xlsx file
+      ai_model:       huggingface | ollama | lmstudio | noai
+      ai_params:      params passed to the AI sub-command
+      chat:           true | false (sbk-charts -chat mode)
+      # The input CSV files for sbk-charts are ALWAYS the unique CSVs produced
+      # by the SBK instances above. They are not set in the YAML.
+
+The legacy top-level keys ``output``, ``ai_model``, ``ai_params`` and ``chat``
+are still accepted for backwards compatibility but emit a deprecation warning.
+
+Two styles are supported for declaring the benchmark instances:
+
+Style A - one instance per class (legacy)::
+
+    classes: [file, hdfs]
+    class_params:
+      file: {fname: /tmp/sbk-test, writers: 1}
+      hdfs: {uri: hdfs://localhost:9000, writers: 1}
+
+Style B - multiple instances allowed per class, each with its own params::
+
+    classes:
+      - class: file
+        writers: 1
+        fname: /tmp/a
+      - class: file
+        readers: 1
+        fname: /tmp/a
+      - class: file
+        writers: 1
+        size: 1000
+        fname: /tmp/b
+      - class: rocksdb
+        writers: 1
+        rfile: /tmp/rdb
+
+Each list entry becomes one SBK invocation with its own intermediate YAML and
+CSV. Entry-level params are merged on top of the shared ``sbk:`` block.
+
+Optionally each entry may set ``name:`` to override the auto-generated label
+(used for the YAML/CSV filenames and the summary table); otherwise the name is
+``<class>`` for the first occurrence and ``<class>-<n>`` for subsequent ones.
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
+
+import yaml
+
+
+VALID_MODES = ("serial", "parallel")
+VALID_AI = ("huggingface", "ollama", "lmstudio", "noai")
+
+
+@dataclass
+class Instance:
+    """One SBK benchmark invocation."""
+    name: str            # unique label, also used for YAML/CSV filenames
+    class_name: str      # SBK storage class (e.g. 'file', 'rocksdb')
+    params: dict[str, Any]  # already merged with shared sbk-params
+
+
+@dataclass
+class OrchestratorConfig:
+    mode: str = "serial"
+    sbk_params: dict[str, Any] = field(default_factory=dict)
+    instances: list[Instance] = field(default_factory=list)
+    output: str = "sbk-analytics.xlsx"
+    ai_model: str = "noai"
+    ai_params: dict[str, Any] = field(default_factory=dict)
+    chat: bool = False
+
+    @property
+    def uses_gem(self) -> bool:
+        """True if SBK-GEM-YAL should be used (i.e. 'nodes' is set in shared
+        sbk params or in *any* instance's params)."""
+        def _has(v: Any) -> bool:
+            if v is None:
+                return False
+            if isinstance(v, (list, tuple)):
+                return len(v) > 0
+            return bool(str(v).strip())
+
+        if _has(self.sbk_params.get("nodes")):
+            return True
+        return any(_has(i.params.get("nodes")) for i in self.instances)
+
+
+def _first(d: dict, *names: str, default=None):
+    for n in names:
+        if n in d:
+            return d[n]
+    return default
+
+
+def load_config(path: str | Path) -> OrchestratorConfig:
+    p = Path(path)
+    raw = yaml.safe_load(p.read_text()) or {}
+    if not isinstance(raw, dict):
+        raise ValueError(f"{p}: expected top-level mapping, got {type(raw).__name__}")
+
+    mode = str(_first(raw, "mode", default="serial")).strip().lower() or "serial"
+    if mode not in VALID_MODES:
+        raise ValueError(f"mode must be one of {VALID_MODES}, got {mode!r}")
+
+    sbk_params = _first(raw, "sbk", "sbk_params", "sbk-params", default={}) or {}
+    if not isinstance(sbk_params, dict):
+        raise ValueError("'sbk' must be a mapping of SBK parameters")
+
+    classes = _first(raw, "classes", "class_list", "class-list", default=[]) or []
+    if isinstance(classes, str):
+        classes = [c.strip() for c in classes.split(",") if c.strip()]
+    if not classes:
+        raise ValueError("'classes' must list at least one storage class")
+
+    class_params = (
+        _first(raw, "class_params", "class-params", "classparams", default={}) or {}
+    )
+    if not isinstance(class_params, dict):
+        raise ValueError("'class_params' must be a mapping of class -> params")
+
+    instances = _build_instances(classes, class_params, sbk_params)
+
+    output, ai_model, ai_params, chat = _parse_sbk_charts_group(raw)
+
+    return OrchestratorConfig(
+        mode=mode,
+        sbk_params=dict(sbk_params),
+        instances=instances,
+        output=output,
+        ai_model=ai_model,
+        ai_params=dict(ai_params),
+        chat=chat,
+    )
+
+
+def _parse_sbk_charts_group(raw: dict) -> tuple[str, str, dict[str, Any], bool]:
+    """Extract the sbk-charts options from the YAML.
+
+    Canonical location is the ``sbk-charts:`` (or ``sbk_charts:``) group::
+
+        sbk-charts:
+          output: results.xlsx
+          ai_model: noai
+          ai_params: {}
+          chat: false
+
+    For backwards compatibility, the top-level keys ``output``, ``ai_model``,
+    ``ai_params`` and ``chat`` are still accepted (with a deprecation warning).
+    The CSV inputs for sbk-charts are never specified here -- they are
+    automatically the unique CSVs produced by the SBK instances.
+    """
+    import logging
+    _log = logging.getLogger(__name__)
+
+    group = _first(raw, "sbk-charts", "sbk_charts", "sbkcharts", default=None)
+
+    legacy_keys = ("output", "ai_model", "ai-model", "ai_params", "ai-params",
+                   "chat", "chat_mode")
+    has_legacy = any(k in raw for k in legacy_keys)
+
+    if group is not None and not isinstance(group, dict):
+        raise ValueError("'sbk-charts' must be a mapping")
+
+    if group is None and has_legacy:
+        _log.warning(
+            "deprecated: sbk-charts options at the YAML top level "
+            "(output/ai_model/ai_params/chat); move them under a 'sbk-charts:' group"
+        )
+        group = {}
+        for src in legacy_keys:
+            if src in raw:
+                group[src] = raw[src]
+
+    group = group or {}
+
+    # reject input-csv specifications -- those are managed by the orchestrator
+    forbidden = ("ifiles", "ifile", "input", "inputs", "-i", "i")
+    for k in forbidden:
+        if k in group:
+            raise ValueError(
+                f"sbk-charts.{k}: do not set; sbk-charts inputs are always "
+                f"the CSV files produced by the configured SBK instances"
+            )
+
+    output = str(
+        _first(group, "output", "ofile", "output_excel", "excel",
+               default="sbk-analytics.xlsx")
+    )
+
+    ai_model = str(
+        _first(group, "ai_model", "ai-model", "ai", default="noai")
+    ).strip().lower()
+    if ai_model not in VALID_AI:
+        raise ValueError(f"sbk-charts.ai_model must be one of {VALID_AI}, got {ai_model!r}")
+
+    ai_params = _first(group, "ai_params", "ai-params", "ai_model_params", default={}) or {}
+    if not isinstance(ai_params, dict):
+        raise ValueError("'sbk-charts.ai_params' must be a mapping")
+
+    chat = bool(_first(group, "chat", "chat_mode", "chat-mode", default=False))
+
+    return output, ai_model, dict(ai_params), chat
+
+
+def _sanitise_name(name: str) -> str:
+    """Make a name safe to use in a filename."""
+    return "".join(c if c.isalnum() or c in ("-", "_", ".") else "_" for c in name)
+
+
+def _build_instances(
+    classes: list,
+    class_params: dict[str, dict[str, Any]],
+    sbk_params: dict[str, Any],
+) -> list[Instance]:
+    """Normalise the two declaration styles into a list of Instance objects.
+
+    Entries in `classes` may be:
+      - a string (class name): merged with class_params[class] if present
+      - a mapping with at least 'class:' (or 'name:') and arbitrary SBK params
+    """
+    counters: dict[str, int] = {}
+
+    def _unique(label: str) -> str:
+        n = counters.get(label, 0)
+        counters[label] = n + 1
+        return label if n == 0 else f"{label}-{n + 1}"
+
+    out: list[Instance] = []
+    for idx, entry in enumerate(classes):
+        if isinstance(entry, str):
+            class_name = entry.strip()
+            if not class_name:
+                raise ValueError(f"classes[{idx}]: empty class name")
+            params = dict(sbk_params)
+            params.update(class_params.get(class_name, {}) or {})
+            name = _unique(_sanitise_name(class_name))
+        elif isinstance(entry, dict):
+            class_name = entry.get("class") or entry.get("class_name")
+            if not class_name:
+                raise ValueError(
+                    f"classes[{idx}]: dict entry must have a 'class:' key"
+                )
+            class_name = str(class_name).strip()
+            # explicit name overrides auto-numbering
+            explicit_name = entry.get("name")
+            params = dict(sbk_params)
+            # also apply class_params[class] as a base layer if provided
+            params.update(class_params.get(class_name, {}) or {})
+            # then the entry's own params (everything except 'class'/'name')
+            for k, v in entry.items():
+                if k in ("class", "class_name", "name"):
+                    continue
+                params[k] = v
+            name = (
+                _sanitise_name(str(explicit_name))
+                if explicit_name
+                else _unique(_sanitise_name(class_name))
+            )
+        else:
+            raise ValueError(
+                f"classes[{idx}]: expected string or mapping, got {type(entry).__name__}"
+            )
+        out.append(Instance(name=name, class_name=class_name, params=params))
+
+    # check name uniqueness (explicit names could collide)
+    seen: set[str] = set()
+    for inst in out:
+        if inst.name in seen:
+            raise ValueError(
+                f"duplicate instance name {inst.name!r}; set unique 'name:' values"
+            )
+        seen.add(inst.name)
+    return out

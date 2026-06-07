@@ -1,2 +1,348 @@
 # sbk-analytics
-Performance Benchmarking by SBK and Analytics by sbk-charts
+
+Performance benchmarking with [SBK](https://github.com/kmgowda/SBK) and analytics
+with [sbk-charts](https://github.com/kmgowda/sbk-charts), combined into a single
+orchestrator.
+
+`sbk-analytics` reads two inputs:
+
+1. A **versions properties file** that pins the release tags of SBK and
+   sbk-charts to use. The corresponding release assets are downloaded once and
+   cached under `~/.cache/sbk-analytics/`.
+2. A **YML configuration file** describing the benchmark run.
+
+From those it:
+
+- Generates one YAML config per storage class for `sbk-yal` (or `sbk-gem-yal`
+  if the `sbk.nodes` parameter is present).
+- Runs an SBK instance per class, in serial or parallel mode, each emitting a
+  CSV via `CSVLogger`.
+- Invokes `sbk-charts` **once** at the end with all successful CSVs to produce
+  a single Excel file with comparison charts (and optional AI-generated
+  analytics).
+- Appends a `system` sheet to that xlsx with CPU, memory, and disk details of
+  the host.
+
+If **all** SBK instances fail, `sbk-charts` is **not** executed.
+
+## Prerequisites
+
+`sbk-analytics` itself is a small Python package, but the tools it
+orchestrates need a working runtime on the host:
+
+| Tool | Required version | Notes |
+| --- | --- | --- |
+| Python    | ≥ 3.9      | Tested with 3.10 / 3.12. |
+| JDK       | ≥ matching SBK build (e.g. SBK 9.0 needs **JDK 25**) | The SBK release archive ships `.class` files compiled with a specific JDK; the orchestrator does not bundle Java. |
+| `git`     | any        | Used by `pip` to install `sbk-charts` from its GitHub tag. |
+| Internet access | yes  | First run downloads the SBK release tar from GitHub and pip-installs `sbk-charts`. Subsequent runs are offline. |
+
+If your network intercepts TLS (corporate proxy with a custom root CA),
+export these before running so `requests`, `pip`, and `git` all trust the
+local CA bundle:
+
+```bash
+export REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
+export SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
+export PIP_CERT=/etc/ssl/certs/ca-certificates.crt
+export GIT_SSL_CAINFO=/etc/ssl/certs/ca-certificates.crt
+```
+
+## Build / install
+
+Clone the repository (or unpack the source tree), then create a virtual
+environment and install in editable mode:
+
+```bash
+git clone <this-repo-url> sbk-analytics
+cd sbk-analytics
+
+python3 -m venv .venv
+. .venv/bin/activate
+
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+python -m pip install -e .
+```
+
+This installs the package and exposes the `sbk-analytics` command on `PATH`.
+The bundled `versions.env` at the repo root is found automatically.
+
+Verify the install:
+
+```bash
+sbk-analytics --help
+```
+
+## Run
+
+The minimum required arguments are `-c <config.yml>`:
+
+```bash
+sbk-analytics -c examples/file-rocksdb-write.yml -w ./run-1 -v
+```
+
+What this does, step by step:
+
+1. **Resolve versions.** Reads `<repo>/versions.env` for the SBK and
+   sbk-charts release tags.
+2. **Download / install (once).**
+   - Downloads the SBK release archive from GitHub and extracts it to
+     `~/.cache/sbk-analytics/sbk/<sbk.version>/extracted/`. Cached on
+     subsequent runs.
+   - Installs `sbk-charts` of the configured tag into a private venv at
+     `~/.cache/sbk-analytics/sbk-charts/<sbk-charts.version>/venv/`. Cached
+     on subsequent runs.
+3. **Generate per-instance YAMLs.** One YAML per `classes:` entry under
+   `<work-dir>/yml/`, each forced to write CSV via `CSVLogger` to a unique
+   `<work-dir>/csv/sbk-<instance>.csv`.
+4. **Run SBK.** Invokes `sbk-yal` (or `sbk-gem-yal` if any instance has
+   `nodes:`) once per instance. In `serial` mode (default) SBK output is
+   shown live; in `parallel` mode each instance writes to its own log file
+   and the orchestrator prints a heartbeat every 5 seconds. If any instance
+   exceeds `seconds + 5`, it is killed forcefully and the partial CSV is
+   still used.
+5. **Run sbk-charts once.** Feeds every produced CSV into a single
+   `sbk-charts` invocation, with the output xlsx, AI backend, and `-chat`
+   flag taken from the YAML's `sbk-charts:` group.
+6. **Append the `system` sheet** to the xlsx (CPU, RAM, disks).
+
+### Full end-to-end example
+
+```bash
+# 1. Activate the venv created during "Build / install"
+. .venv/bin/activate
+
+# 2. Make sure JAVA_HOME points at a JDK new enough for the SBK build:
+#    SBK 9.0 needs JDK 25
+export JAVA_HOME=/opt/jdk-25
+export PATH=$JAVA_HOME/bin:$PATH
+
+# 3. Run a 120 s single-writer benchmark on `file` and `rocksdb`
+sbk-analytics -c examples/file-rocksdb-write.yml -w /tmp/sbk-bench/work -v
+
+# 4. Open the result
+ls /tmp/sbk-bench/sbk-analytics.xlsx
+```
+
+After the run:
+
+```
+/tmp/sbk-bench/sbk-analytics.xlsx       # final report (comparison + system sheet)
+/tmp/sbk-bench/work/yml/sbk-file.yml    # generated SBK YAML for the `file` instance
+/tmp/sbk-bench/work/yml/sbk-rocksdb.yml # generated SBK YAML for the `rocksdb` instance
+/tmp/sbk-bench/work/csv/sbk-file.csv    # raw CSV from the `file` instance
+/tmp/sbk-bench/work/csv/sbk-rocksdb.csv # raw CSV from the `rocksdb` instance
+```
+
+## Inputs
+
+### 1. Versions properties file (`.env` style)
+
+A default `versions.env` ships with the project at the repository root:
+
+```ini
+# versions.env  (bundled at the project root)
+sbk.version=9.0
+sbk-charts.version=3.26.2.1
+```
+
+You don't need to pass `-p` / `--properties` — `sbk-analytics` automatically
+uses the bundled file. Pass `-p <path>` only if you want to override it.
+Both keys are required; tags must exist on the upstream GitHub releases pages.
+
+### 2. Input YML
+
+```yaml
+# examples/config.yml
+mode: serial            # 1. serial | parallel (default: serial)
+
+sbk:                    # 2. SBK-YAL / SBK-GEM-YAL defaults shared by every
+  seconds: 60           #    instance (presence of 'nodes' switches to sbk-gem-yal)
+  time: ms
+
+classes:                # 3. one entry per benchmark instance
+  - class: file
+    writers: 1
+    size: 100
+    file: /tmp/sbk-bench-file
+  - class: file         #    same class can appear multiple times with
+    readers: 1          #    different params (e.g. read vs write, sizes, ...)
+    size: 100
+    file: /tmp/sbk-bench-file
+  - class: hdfs
+    writers: 1
+    uri: hdfs://localhost:9000
+    fname: /tmp/sbk-bench-hdfs
+
+class_params: {}        # 4. (optional) per-class default overrides applied to
+                        #    every instance of that class
+
+sbk-charts:             # 5. options for the sbk-charts invocation. The CSV
+  output: sbk-analytics.xlsx   #    inputs are NOT set here; they are always
+  ai_model: noai               #    the unique CSVs produced by the SBK
+  ai_params: {}                #    instances declared above.
+  chat: false                  #
+                               # ai_model:  huggingface|ollama|lmstudio|noai
+                               # ai_params: --key value pairs for the AI plugin
+                               # chat:      enable sbk-charts -chat mode
+```
+
+#### `classes` — multiple instances per class
+
+Each entry under `classes:` becomes its own SBK invocation, producing its own
+intermediate YAML and CSV. You can list the **same class multiple times** with
+different parameters — e.g. one writer-only instance, one reader-only
+instance, and a third writer instance with a larger record size:
+
+```yaml
+classes:
+  - class: file
+    writers: 1
+    size: 100
+  - class: file
+    readers: 1
+    size: 100
+  - class: file
+    writers: 1
+    size: 1000
+    name: file_big_writes    # optional explicit label for the CSV/YAML name
+```
+
+Without an explicit `name:`, instances are auto-labelled `<class>`,
+`<class>-2`, `<class>-3`, ... so they always get unique YAML/CSV filenames.
+
+Style A (legacy short form) is still supported and may be mixed with Style B:
+
+```yaml
+classes: [file, hdfs]
+class_params:
+  file: {fname: /tmp/sbk-test, writers: 1}
+  hdfs: {uri: hdfs://localhost:9000, writers: 1}
+```
+
+Parameter precedence for the generated per-instance YAML (lowest to highest):
+
+1. shared `sbk:` block (defaults for every instance)
+2. `class_params[<class>]` (per-class defaults, if any)
+3. the entry's own keys (only for Style B mapping entries)
+4. the orchestrator's own overrides: `class`, `out: CSVLogger`, `csvfile`
+
+Each instance can mix freely between **SBK parameters** (`writers`, `readers`,
+`size`, `seconds`, `time`, ...) and **class-specific parameters** (`file`
+for the File driver, `rfile` for RocksDB, `uri` for HDFS, brokers for Kafka,
+etc.). Any SBK parameter the instance does **not** specify is inherited from
+the shared `sbk:` block.
+
+You do **not** set `class`, `out`, or `csvfile` yourself — they are managed
+by `sbk-analytics`.
+
+### Hard timeout
+
+If an SBK instance has not completed within **`seconds` + 5 seconds** (where
+`seconds` is the value resolved for that instance's YAML), `sbk-analytics`
+sends `SIGTERM` followed by `SIGKILL`. Whatever CSV the instance had written
+up to that moment is still fed into the single `sbk-charts` invocation at
+the end. If the instance does not set `seconds:` at all (open-ended
+benchmark), no timeout applies.
+
+## CLI reference
+
+| Flag | Meaning |
+| --- | --- |
+| `-c`, `--config`     | path to the input YML (required) |
+| `-p`, `--properties` | path to the versions `.env` file (optional; defaults to bundled `<project>/versions.env`) |
+| `-w`, `--work-dir`   | working dir for generated YAMLs / CSVs / logs (default: timestamped dir under `./sbk-analytics-out/`) |
+| `-v`, `--verbose`    | repeat for more verbose logging (`-v` info, `-vv` debug) |
+| `-h`, `--help`       | show help and exit |
+
+### Modes
+
+- **serial** (default): SBK instances run one at a time; stdout/stderr are
+  inherited so you see the SBK output live.
+- **parallel**: all SBK instances launch concurrently; per-instance output is
+  redirected to `logs/sbk-<class>.log` under the working dir, and a heartbeat
+  line is printed every 5 seconds with the still-running classes. A warning
+  is emitted on stderr explaining the caveats.
+
+### Outputs
+
+After a successful run the working dir contains:
+
+```
+<work-dir>/
+├── yml/                # generated per-class SBK YAML files
+├── csv/                # CSV outputs from each SBK instance
+└── logs/               # per-class log files (parallel mode only)
+```
+
+And `<output>` (default `sbk-analytics.xlsx`) is produced at the configured
+location with the comparison charts + a `system` sheet.
+
+### Exit codes
+
+| Code | Meaning |
+| --- | --- |
+| 0 | success |
+| 2 | all SBK instances failed; `sbk-charts` was skipped |
+| 3 | `sbk-charts` ran but did not produce the expected xlsx |
+| 4 | failed to append the system sheet |
+| other | `sbk-charts` exit code |
+
+## Caching
+
+Release artifacts are cached under `~/.cache/sbk-analytics/` (override with the
+`SBK_ANALYTICS_CACHE` environment variable). Set `GITHUB_TOKEN` to avoid
+unauthenticated rate limits when first downloading.
+
+Layout per version:
+
+```
+~/.cache/sbk-analytics/
+├── sbk/<sbk.version>/extracted/sbk-<version>/   # SBK install (bin/, lib/)
+└── sbk-charts/<sbk-charts.version>/venv/        # sbk-charts venv
+```
+
+The original SBK tarball is removed after extraction. Re-runs of the same
+versions hit the cache and skip the download + install entirely.
+
+## Troubleshooting
+
+- **`UnsupportedClassVersionError: ... class file version 69.0 ...`** — your
+  JDK is older than what the SBK release expects. SBK 9.0 needs JDK 25; install
+  Temurin 25 and point `JAVA_HOME` at it.
+- **`SSL: CERTIFICATE_VERIFY_FAILED ...`** — TLS interception by a corporate
+  proxy. Export `REQUESTS_CA_BUNDLE`, `SSL_CERT_FILE`, `PIP_CERT`, and
+  `GIT_SSL_CAINFO` to the local CA bundle (see [Prerequisites](#prerequisites)).
+- **An SBK instance hangs after printing the `Total ...` line** — known
+  upstream issue (RocksDB driver and a few others don't release JVM threads
+  on shutdown). `sbk-analytics` kills the process at `seconds + 5` and uses
+  the CSV that has already been flushed.
+- **`sbk-charts` complains about a missing `banner.txt` or `images/sbk-logo.png`** —
+  packaging quirks of sbk-charts 3.26.2.1. `sbk-analytics` already supplies a
+  stub `banner.txt` via a private cwd; the missing logo is harmless.
+- **All SBK instances failed; exit code 2** — none of the configured SBK runs
+  produced a non-empty CSV. `sbk-charts` is intentionally **not** invoked in
+  this case. Check the per-instance YAMLs under `<work-dir>/yml/` and re-run.
+
+## Project layout
+
+```
+sbk-analytics/
+├── versions.env              # bundled SBK / sbk-charts release pins
+├── pyproject.toml            # entry point: sbk-analytics → analytics.cli:main
+├── requirements.txt
+├── README.md
+├── examples/
+│   ├── config.yml                  # generic multi-class example
+│   └── file-rocksdb-write.yml      # 120s file + rocksdb single-writer example
+└── analytics/
+    ├── cli.py                # argument parsing + orchestration
+    ├── properties.py         # versions.env parser
+    ├── config.py             # input YAML parser (sbk, classes, sbk-charts)
+    ├── releases.py           # GitHub release download + cached install
+    ├── yaml_gen.py           # per-instance sbkArgs/sbkGemArgs YAML generator
+    ├── runner.py             # serial / parallel SBK execution + watchdog
+    ├── charts.py             # single sbk-charts invocation
+    └── system_info.py        # appends `system` sheet to the final xlsx
+```

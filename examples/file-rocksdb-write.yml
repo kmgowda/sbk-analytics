@@ -1,0 +1,38 @@
+# sbk-analytics: single-writer benchmark on `file` and `rocksdb`, 120s each.
+#
+# Parameter resolution per instance (lowest to highest precedence):
+#   1. shared `sbk:` block (defaults for ALL instances)
+#   2. `class_params[<class>]` (per-class defaults, if any)
+#   3. the instance's own keys under `classes:` (per-instance overrides)
+#   4. orchestrator-managed:  class, out=CSVLogger, csvfile=<unique-path>
+#
+# An instance therefore needs to specify only the parameters that differ from
+# the shared `sbk:` defaults, plus any class-specific options (file path,
+# rocksdb dir, kafka brokers, ...).
+
+mode: serial
+
+# Shared SBK defaults. Any SBK parameter missing from an instance is taken
+# from this block.
+sbk:
+  seconds: 120
+  size: 100
+  time: ms
+  writers: 1          # default; can be overridden per instance
+
+classes:
+  # File driver: only needs its class-specific param `file`.
+  - class: file
+    file: /tmp/sbk-bench/file.dat
+
+  # RocksDB driver: only needs `rfile`; all SBK params inherited.
+  - class: rocksdb
+    rfile: /tmp/sbk-bench/rocksdb
+
+# sbk-charts options. The input CSV files are NOT listed here -- they are
+# automatically the unique CSVs produced by the SBK instances above.
+sbk-charts:
+  output: /tmp/sbk-bench/sbk-analytics.xlsx
+  ai_model: noai          # huggingface | ollama | lmstudio | noai
+  ai_params: {}           # passed as --key value to the AI sub-command
+  chat: false             # sbk-charts -chat mode
