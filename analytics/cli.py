@@ -12,11 +12,68 @@ from .charts import run_sbk_charts
 from .config import load_config
 from .properties import parse_properties
 from .releases import ensure_jdk, ensure_sbk, ensure_sbk_charts
-from .runner import run_jobs
+from .runner import _read_yml, run_jobs
 from .system_info import append_system_sheet
 from .yaml_gen import generate_instance_yaml
 
 log = logging.getLogger("sbk-analytics")
+
+
+def _parse_nodes(value) -> list[str]:
+    """Accept a list or a comma/whitespace-separated string of nodes."""
+    if value is None:
+        return []
+    if isinstance(value, (list, tuple)):
+        return [str(n).strip() for n in value if str(n).strip()]
+    s = str(value)
+    for sep in (",", "\n", "\t"):
+        s = s.replace(sep, " ")
+    return [n for n in s.split() if n]
+
+
+def _build_system_sources(succeeded) -> list[dict]:
+    """Build the deduplicated list of system data sources from successful
+    SBK job results.
+
+    - All `sbk-yal` instances collapse to a single ``{"kind": "local"}``
+      source whose ``instances`` list aggregates their names.
+    - Each distinct `sbk-gem-yal` node becomes one ``{"kind": "remote", ...}``
+      source whose ``instances`` list aggregates names of gem-yal instances
+      that ran on it. SSH credentials are taken from the YAML's
+      ``gemuser`` / ``gempass`` / ``gemport`` parameters.
+    """
+    local_instances: list[str] = []
+    remote_map: dict[tuple[str, str, int], dict] = {}
+
+    for r in succeeded:
+        params, is_gem = _read_yml(r.yml_path)
+        if not is_gem:
+            local_instances.append(r.class_name)
+            continue
+        nodes = _parse_nodes(params.get("nodes"))
+        user = str(params.get("gemuser", "")).strip()
+        password = str(params.get("gempass", "")).strip()
+        try:
+            port = int(params.get("gemport", 22))
+        except (TypeError, ValueError):
+            port = 22
+        for node in nodes:
+            key = (node, user, port)
+            entry = remote_map.setdefault(key, {
+                "kind": "remote",
+                "node": node,
+                "user": user,
+                "password": password,
+                "port": port,
+                "instances": [],
+            })
+            entry["instances"].append(r.class_name)
+
+    sources: list[dict] = []
+    if local_instances:
+        sources.append({"kind": "local", "instances": local_instances})
+    sources.extend(remote_map.values())
+    return sources
 
 
 def _bundled_versions_file() -> Path:
@@ -214,9 +271,11 @@ def main(argv: list[str] | None = None) -> int:
         log.error("sbk-charts did not produce expected output: %s", output_xlsx)
         return 3
 
-    # 5. Append system sheet
+    # 5. Append system sheet (one row per distinct host: local + remote nodes
+    #    visited by sbk-gem-yal instances).
     try:
-        append_system_sheet(output_xlsx)
+        sources = _build_system_sources(succeeded)
+        append_system_sheet(output_xlsx, sources=sources)
     except Exception as e:
         log.error("failed to append system sheet: %s", e)
         return 4
