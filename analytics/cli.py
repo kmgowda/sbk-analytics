@@ -8,6 +8,7 @@ import sys
 import tempfile
 from pathlib import Path
 
+from . import __version__
 from .charts import run_sbk_charts
 from .config import load_config
 from .properties import parse_properties
@@ -17,6 +18,17 @@ from .system_info import append_system_sheet
 from .yaml_gen import generate_instance_yaml
 
 log = logging.getLogger("sbk-analytics")
+
+
+def _print_banner() -> None:
+    """Print the sbk-analytics ASCII art banner to stderr."""
+    banner_path = Path(__file__).parent / "banner.txt"
+    try:
+        banner = banner_path.read_text(encoding="utf-8")
+        print(banner.format(version=__version__), file=sys.stderr, flush=True)
+    except Exception:
+        # Fallback if banner file is missing
+        print(f"sbk-analytics v{__version__}", file=sys.stderr, flush=True)
 
 
 def _parse_nodes(value) -> list[str]:
@@ -93,6 +105,11 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         ),
     )
     p.add_argument(
+        "--version",
+        action="version",
+        version=f"sbk-analytics {__version__}",
+    )
+    p.add_argument(
         "-p",
         "--properties",
         type=Path,
@@ -139,6 +156,7 @@ def _setup_logging(verbosity: int) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
+    _print_banner()
     _setup_logging(args.verbose)
 
     properties_path = args.properties or _bundled_versions_file()

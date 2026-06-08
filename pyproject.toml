@@ -22,3 +22,6 @@ sbk-analytics = "analytics.cli:main"
 
 [tool.setuptools.packages.find]
 include = ["analytics*"]
+
+[tool.setuptools.package-data]
+analytics = ["banner.txt"]
