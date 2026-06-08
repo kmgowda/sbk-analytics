@@ -12,6 +12,10 @@
 
 mode: serial
 
+# All output -- generated SBK YAMLs, per-instance CSV files, and the final
+# Excel report -- is written under this directory. Default: /tmp/sbk-analytics.
+workdir: /tmp/sbk-analytics
+
 # Shared SBK defaults. Any SBK parameter missing from an instance is taken
 # from this block.
 sbk:
@@ -29,10 +33,16 @@ classes:
   - class: rocksdb
     rfile: /tmp/sbk-bench/rocksdb
 
-# sbk-charts options. The input CSV files are NOT listed here -- they are
-# automatically the unique CSVs produced by the SBK instances above.
+# sbk-charts options. The input CSV files for sbk-charts are:
+#   - one CSV per SBK instance above (auto-generated, do not set), PLUS
+#   - any extra CSVs listed under `use_files:` (already-available benchmark
+#     results from prior runs / other tools that you want to chart alongside).
+# When `output:` is a bare filename it is placed inside `workdir:`.
 sbk-charts:
-  output: /tmp/sbk-bench/sbk-analytics.xlsx
+  output: sbk-analytics.xlsx
   ai_model: noai          # huggingface | ollama | lmstudio | noai
   ai_params: {}           # passed as --key value to the AI sub-command
   chat: false             # sbk-charts -chat mode
+  # use_files:            # optional list of pre-existing CSV files; resolved
+  #   - baseline.csv      # relative to workdir, or use absolute paths.
+  #   - /data/last-run.csv

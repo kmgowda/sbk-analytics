@@ -58,8 +58,11 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         "--work-dir",
         type=Path,
         default=None,
-        help="Working directory for generated YAMLs, CSVs, and per-class logs "
-        "(default: a timestamped directory under ./sbk-analytics-out/).",
+        help=(
+            "Working directory for generated YAMLs, CSV files, per-class logs "
+            "and the final Excel report. Precedence: this flag > the input "
+            "YAML's `workdir:` key > /tmp/sbk-analytics."
+        ),
     )
     p.add_argument(
         "-v", "--verbose", action="count", default=0, help="Increase log verbosity."
@@ -92,8 +95,8 @@ def main(argv: list[str] | None = None) -> int:
     log.info("using properties file: %s", properties_path)
     cfg = load_config(args.config)
 
-    log.info("SBK version: %s", versions.sbk)
-    log.info("sbk-charts version: %s", versions.sbk_charts)
+    log.info("SBK: %s @ %s", versions.sbk_url, versions.sbk)
+    log.info("sbk-charts: %s @ %s", versions.sbk_charts_url, versions.sbk_charts)
     log.info(
         "mode=%s instances=%d uses_gem=%s",
         cfg.mode,
@@ -103,20 +106,17 @@ def main(argv: list[str] | None = None) -> int:
     for inst in cfg.instances:
         log.info("  - %s (class=%s) params=%s", inst.name, inst.class_name, inst.params)
 
-    # Working directory
-    if args.work_dir is None:
-        from datetime import datetime
-
-        stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-        work = Path("sbk-analytics-out") / stamp
-    else:
-        work = args.work_dir
+    # Working directory: precedence is
+    #   1. -w / --work-dir CLI flag
+    #   2. workdir: in the input YAML (just after `mode:`)
+    #   3. /tmp/sbk-analytics  (DEFAULT_WORKDIR)
+    work = args.work_dir if args.work_dir is not None else Path(cfg.workdir)
     work.mkdir(parents=True, exist_ok=True)
     log.info("work dir: %s", work.resolve())
 
     # 1. Fetch SBK and sbk-charts
-    sbk = ensure_sbk(versions.sbk)
-    charts = ensure_sbk_charts(versions.sbk_charts)
+    sbk = ensure_sbk(versions.sbk, repo=versions.sbk_repo)
+    charts = ensure_sbk_charts(versions.sbk_charts, repo_url=versions.sbk_charts_url)
 
     executable = sbk.sbk_gem_yal if cfg.uses_gem else sbk.sbk_yal
     log.info("using SBK executable: %s", executable)
@@ -145,9 +145,33 @@ def main(argv: list[str] | None = None) -> int:
         extra = f" log={r.log_path}" if r.log_path else ""
         print(f"  {status:14s} instance={r.class_name} csv={r.csv_path}{extra}")
 
-    if not succeeded:
+    # Resolve sbk-charts.use_files: take each entry as a CSV path, optionally
+    # relative to the working directory. Drop (with a warning) any that don't
+    # exist; sbk-charts would fail anyway.
+    extra_csvs: list[Path] = []
+    for raw_path in cfg.use_files:
+        p = Path(raw_path)
+        if not p.is_absolute():
+            p = (work / p).resolve()
+        else:
+            p = p.resolve()
+        if p.is_file() and p.stat().st_size > 0:
+            extra_csvs.append(p)
+        else:
+            print(
+                f"WARNING: sbk-charts.use_files entry ignored (missing or "
+                f"empty): {p}",
+                file=sys.stderr, flush=True,
+            )
+    if extra_csvs:
+        print("\n=== sbk-charts use_files (pre-existing) ===", flush=True)
+        for p in extra_csvs:
+            print(f"  USE            csv={p}")
+
+    if not succeeded and not extra_csvs:
         print(
-            "All SBK instances failed; skipping sbk-charts as per spec.",
+            "All SBK instances failed and no use_files supplied; skipping "
+            "sbk-charts as per spec.",
             file=sys.stderr,
             flush=True,
         )
@@ -156,15 +180,23 @@ def main(argv: list[str] | None = None) -> int:
     if failed:
         print(
             f"WARNING: {len(failed)} of {len(results)} SBK runs failed; "
-            f"continuing with the {len(succeeded)} successful CSV(s).",
+            f"continuing with {len(succeeded)} fresh CSV(s) and "
+            f"{len(extra_csvs)} pre-existing use_files.",
             file=sys.stderr,
             flush=True,
         )
 
     # 4. sbk-charts (once)
-    output_xlsx = Path(cfg.output).resolve()
+    # The output xlsx lives in <workdir> unless cfg.output is an absolute path
+    # (or contains an explicit directory component) -- in which case we honour
+    # the user's exact location.
+    output_p = Path(cfg.output)
+    if output_p.is_absolute() or len(output_p.parts) > 1:
+        output_xlsx = output_p.resolve()
+    else:
+        output_xlsx = (work / output_p).resolve()
     output_xlsx.parent.mkdir(parents=True, exist_ok=True)
-    csv_paths = [r.csv_path for r in succeeded]
+    csv_paths = [r.csv_path for r in succeeded] + extra_csvs
 
     rc = run_sbk_charts(charts, cfg, csv_paths, output_xlsx, work_dir=work)
     if rc != 0:

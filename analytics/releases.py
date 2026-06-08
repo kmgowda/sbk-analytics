@@ -24,9 +24,6 @@ import requests
 
 log = logging.getLogger(__name__)
 
-SBK_REPO = "kmgowda/SBK"
-CHARTS_REPO = "kmgowda/sbk-charts"
-
 
 def _cache_root() -> Path:
     root = os.environ.get("SBK_ANALYTICS_CACHE")
@@ -145,7 +142,7 @@ def _extract(archive: Path, dest: Path) -> Path:
 # ---------- SBK ----------
 
 
-def ensure_sbk(version: str) -> SbkInstall:
+def ensure_sbk(version: str, repo: str = "kmgowda/SBK") -> SbkInstall:
     """Ensure SBK <version> is downloaded + extracted, return install info."""
     cache = _cache_root() / "sbk" / version
     marker = cache / ".ok"
@@ -163,7 +160,7 @@ def ensure_sbk(version: str) -> SbkInstall:
         )
         marker.unlink(missing_ok=True)
 
-    rel = _gh_release(SBK_REPO, version)
+    rel = _gh_release(repo, version)
     assets = rel.get("assets") or []
     # Prefer a top-level distribution asset named like 'sbk-<ver>.tar' (not sbk-gem-yal-*)
     candidates = []
@@ -229,7 +226,10 @@ def ensure_sbk(version: str) -> SbkInstall:
 # ---------- sbk-charts ----------
 
 
-def ensure_sbk_charts(version: str) -> ChartsInstall:
+def ensure_sbk_charts(
+    version: str,
+    repo_url: str = "https://github.com/kmgowda/sbk-charts",
+) -> ChartsInstall:
     """Ensure sbk-charts <version> is installed in a dedicated venv."""
     cache = _cache_root() / "sbk-charts" / version
     venv_dir = cache / "venv"
@@ -255,7 +255,11 @@ def ensure_sbk_charts(version: str) -> ChartsInstall:
     builder.create(venv_dir)
 
     # Install from the GitHub tag (release source tarball)
-    spec = f"git+https://github.com/{CHARTS_REPO}.git@{version}"
+    # pip wants 'git+<url>.git@<ref>' for VCS installs
+    pip_url = repo_url.rstrip("/")
+    if not pip_url.endswith(".git"):
+        pip_url = pip_url + ".git"
+    spec = f"git+{pip_url}@{version}"
 
     cmd = [
         str(install.python),

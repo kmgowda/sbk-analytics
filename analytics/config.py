@@ -71,15 +71,23 @@ class Instance:
     params: dict[str, Any]  # already merged with shared sbk-params
 
 
+DEFAULT_WORKDIR = "/tmp/sbk-analytics"
+
+
 @dataclass
 class OrchestratorConfig:
     mode: str = "serial"
+    workdir: str = DEFAULT_WORKDIR
     sbk_params: dict[str, Any] = field(default_factory=dict)
     instances: list[Instance] = field(default_factory=list)
     output: str = "sbk-analytics.xlsx"
     ai_model: str = "noai"
     ai_params: dict[str, Any] = field(default_factory=dict)
     chat: bool = False
+    # Additional CSV files supplied by the user (already-available benchmark
+    # results) to be passed to sbk-charts alongside the freshly-generated
+    # instance CSVs.
+    use_files: list[str] = field(default_factory=list)
 
     @property
     def uses_gem(self) -> bool:
@@ -114,6 +122,10 @@ def load_config(path: str | Path) -> OrchestratorConfig:
     if mode not in VALID_MODES:
         raise ValueError(f"mode must be one of {VALID_MODES}, got {mode!r}")
 
+    workdir = str(
+        _first(raw, "workdir", "work_dir", "work-dir", default=DEFAULT_WORKDIR)
+    ).strip() or DEFAULT_WORKDIR
+
     sbk_params = _first(raw, "sbk", "sbk_params", "sbk-params", default={}) or {}
     if not isinstance(sbk_params, dict):
         raise ValueError("'sbk' must be a mapping of SBK parameters")
@@ -132,20 +144,24 @@ def load_config(path: str | Path) -> OrchestratorConfig:
 
     instances = _build_instances(classes, class_params, sbk_params)
 
-    output, ai_model, ai_params, chat = _parse_sbk_charts_group(raw)
+    output, ai_model, ai_params, chat, use_files = _parse_sbk_charts_group(raw)
 
     return OrchestratorConfig(
         mode=mode,
+        workdir=workdir,
         sbk_params=dict(sbk_params),
         instances=instances,
         output=output,
         ai_model=ai_model,
         ai_params=dict(ai_params),
         chat=chat,
+        use_files=list(use_files),
     )
 
 
-def _parse_sbk_charts_group(raw: dict) -> tuple[str, str, dict[str, Any], bool]:
+def _parse_sbk_charts_group(
+    raw: dict,
+) -> tuple[str, str, dict[str, Any], bool, list[str]]:
     """Extract the sbk-charts options from the YAML.
 
     Canonical location is the ``sbk-charts:`` (or ``sbk_charts:``) group::
@@ -155,11 +171,14 @@ def _parse_sbk_charts_group(raw: dict) -> tuple[str, str, dict[str, Any], bool]:
           ai_model: noai
           ai_params: {}
           chat: false
+          use_files:                     # optional; existing CSV files to
+            - /data/baseline-kafka.csv   # combine with the freshly-generated
+            - /data/baseline-pulsar.csv  # SBK-instance CSVs
 
     For backwards compatibility, the top-level keys ``output``, ``ai_model``,
     ``ai_params`` and ``chat`` are still accepted (with a deprecation warning).
-    The CSV inputs for sbk-charts are never specified here -- they are
-    automatically the unique CSVs produced by the SBK instances.
+    The orchestrator-managed CSV inputs (one per SBK instance) are always
+    fed to sbk-charts; ``use_files`` adds to them.
     """
     import logging
     _log = logging.getLogger(__name__)
@@ -211,7 +230,26 @@ def _parse_sbk_charts_group(raw: dict) -> tuple[str, str, dict[str, Any], bool]:
 
     chat = bool(_first(group, "chat", "chat_mode", "chat-mode", default=False))
 
-    return output, ai_model, dict(ai_params), chat
+    use_files_raw = _first(group, "use_files", "use-files", "usefiles", default=None)
+    if use_files_raw is None:
+        use_files: list[str] = []
+    elif isinstance(use_files_raw, str):
+        use_files = [s.strip() for s in use_files_raw.split(",") if s.strip()]
+    elif isinstance(use_files_raw, (list, tuple)):
+        use_files = []
+        for entry in use_files_raw:
+            if entry is None:
+                continue
+            s = str(entry).strip()
+            if s:
+                use_files.append(s)
+    else:
+        raise ValueError(
+            "'sbk-charts.use_files' must be a list of CSV file paths "
+            f"(or a comma-separated string); got {type(use_files_raw).__name__}"
+        )
+
+    return output, ai_model, dict(ai_params), chat, use_files
 
 
 def _sanitise_name(name: str) -> str:

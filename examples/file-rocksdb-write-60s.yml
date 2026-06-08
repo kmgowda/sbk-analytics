@@ -1,0 +1,19 @@
+# Single-writer benchmark on `file` and `rocksdb`, 60s each.
+mode: serial
+workdir: /tmp/sbk-analytics
+
+sbk:
+  seconds: 60
+  size: 100
+  time: ms
+  writers: 1
+
+classes:
+  - class: file
+    file: /tmp/sbk-bench/file-60s.dat
+  - class: rocksdb
+    rfile: /tmp/sbk-bench/rocksdb-60s
+
+sbk-charts:
+  output: file-rocksdb-60s.xlsx
+  ai_model: noai

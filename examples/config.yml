@@ -13,6 +13,11 @@
 
 mode: serial
 
+# Optional. Defaults to /tmp/sbk-analytics. Holds generated YAMLs (yml/),
+# per-instance CSVs (csv/), parallel-mode logs (logs/), and the final Excel
+# report when `sbk-charts.output` is a bare filename.
+workdir: /tmp/sbk-analytics
+
 sbk:
   seconds: 60
   time: ms
