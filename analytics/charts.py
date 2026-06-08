@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -67,6 +68,30 @@ def run_sbk_charts(
     cmd.extend(_ai_args(cfg.ai_params))
 
     cwd = _prepare_cwd(work_dir)
-    log.info("invoking sbk-charts (cwd=%s): %s", cwd, " ".join(cmd))
+
+    banner = [
+        "",
+        "=" * 78,
+        "  LAUNCHING SBK-CHARTS (single invocation, end of run)",
+        "=" * 78,
+        f"  executable : {cmd[0]}",
+        f"  command    : {' '.join(cmd)}",
+        f"  cwd        : {cwd}",
+        f"  output     : {output_xlsx}",
+        f"  ai_model   : {cfg.ai_model}",
+        f"  chat mode  : {cfg.chat}",
+        f"  -- input CSV files ({len(csv_paths)}) --",
+    ]
+    for p in csv_paths:
+        banner.append(f"    {p}")
+    if cfg.ai_params:
+        banner.append("  -- AI sub-command params --")
+        for k, v in cfg.ai_params.items():
+            banner.append(f"    {k}: {v}")
+    banner.append("=" * 78)
+    # Print banner unconditionally (independent of -v / log level); these are
+    # status messages, not debug logs.
+    print("\n".join(banner), file=sys.stderr, flush=True)
+
     proc = subprocess.run(cmd, cwd=str(cwd))
     return proc.returncode

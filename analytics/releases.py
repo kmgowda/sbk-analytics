@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -43,6 +44,17 @@ class SbkInstall:
     @property
     def sbk_gem_yal(self) -> Path:
         return self.home / "bin" / "sbk-gem-yal"
+
+
+@dataclass
+class JdkInstall:
+    home: Path  # extracted JDK home (contains bin/java)
+
+    @property
+    def java(self) -> Path:
+        if os.name == "nt":
+            return self.home / "bin" / "java.exe"
+        return self.home / "bin" / "java"
 
 
 @dataclass
@@ -293,3 +305,192 @@ def ensure_sbk_charts(
 
     marker.touch()
     return install
+
+
+# ---------- JDK (Adoptium / Temurin) ----------
+
+DEFAULT_JDK_VERSION = "25"
+ADOPTIUM_BINARY_URL = (
+    "https://api.adoptium.net/v3/binary/latest/{version}/ga/"
+    "{os}/{arch}/jdk/hotspot/normal/eclipse"
+)
+
+
+_JDK_VERSION_RE = re.compile(r'(?:openjdk|java)\s+version\s+"([^"]+)"')
+
+
+def _java_major_version(java_path: Path) -> int | None:
+    """Return the major version number reported by ``<java_path> -version``,
+    or ``None`` if it cannot be determined.
+
+    Handles both modern Java (``25.0.3``, ``21.0.5``, ``17.0.10``) and the
+    legacy ``1.8.0_xxx`` form (where the major version is the second part).
+    """
+    try:
+        proc = subprocess.run(
+            [str(java_path), "-version"],
+            capture_output=True, text=True, timeout=10,
+        )
+    except (OSError, subprocess.TimeoutExpired) as e:
+        log.debug("java -version failed for %s: %s", java_path, e)
+        return None
+    output = (proc.stderr or "") + (proc.stdout or "")
+    m = _JDK_VERSION_RE.search(output)
+    if not m:
+        return None
+    parts = m.group(1).split(".")
+    try:
+        major = int(parts[0])
+        if major == 1 and len(parts) >= 2:  # legacy 1.x layout
+            major = int(parts[1])
+        return major
+    except (ValueError, IndexError):
+        return None
+
+
+def _candidate_jdk_homes() -> list[Path]:
+    """Return JDK homes to probe, in priority order, deduplicated."""
+    candidates: list[Path] = []
+    seen: set[Path] = set()
+
+    def _push(p: Path) -> None:
+        try:
+            resolved = p.resolve()
+        except OSError:
+            return
+        if resolved in seen:
+            return
+        seen.add(resolved)
+        candidates.append(resolved)
+
+    # Environment-set JDK homes, in priority order.
+    for var in ("SBK_JAVA_HOME", "JAVA_HOME"):
+        v = os.environ.get(var)
+        if v:
+            _push(Path(v))
+
+    # `java` on PATH -> derive home as the parent of <home>/bin/java.
+    from shutil import which
+    java = which("java")
+    if java:
+        jp = Path(java)
+        if jp.parent.name == "bin":
+            _push(jp.parent.parent)
+
+    return candidates
+
+
+def find_existing_jdk(required_major: int) -> Path | None:
+    """Return the home of an already-installed JDK whose major version
+    matches ``required_major``, or ``None`` if no match is found.
+
+    Probes (in order): ``SBK_JAVA_HOME`` env var, ``JAVA_HOME`` env var,
+    then ``java`` on ``PATH``.
+    """
+    for home in _candidate_jdk_homes():
+        java = home / "bin" / "java"
+        if os.name == "nt":
+            java = home / "bin" / "java.exe"
+        if not java.exists():
+            log.debug("skipping JDK candidate %s: no bin/java", home)
+            continue
+        major = _java_major_version(java)
+        log.debug("candidate JDK %s reports major=%s", home, major)
+        if major == required_major:
+            log.info(
+                "found pre-installed JDK %s at %s; skipping download",
+                major, home,
+            )
+            return home
+    return None
+
+
+def _jdk_url(version: str) -> str:
+    arch = "x64" if os.uname().machine in ("x86_64", "amd64") else os.uname().machine
+    os_name = {
+        "linux": "linux",
+        "darwin": "mac",
+        "win32": "windows",
+    }.get(sys.platform, sys.platform)
+    return ADOPTIUM_BINARY_URL.format(version=version, os=os_name, arch=arch)
+
+
+def ensure_jdk(version: str = DEFAULT_JDK_VERSION) -> JdkInstall:
+    """Ensure a JDK of the given major version is available.
+
+    Resolution order:
+
+    1. **Cache** -- if a previous run downloaded this major version into
+       ``<cache>/jdk/<version>/extracted/``, reuse it.
+    2. **Already installed** -- probe ``SBK_JAVA_HOME``, ``JAVA_HOME``,
+       then ``java`` on ``PATH``. Use the first one whose ``java -version``
+       reports the matching major version. No download.
+    3. **Download** -- fetch Temurin of the requested major version from
+       the Adoptium API, extract it under ``<cache>/jdk/<version>/``, and
+       record it as the cache hit for future runs.
+    """
+    cache = _cache_root() / "jdk" / version
+    marker = cache / ".ok"
+    home_file = cache / ".home"
+
+    # 1. Cache hit
+    if marker.exists() and home_file.exists():
+        home = Path(home_file.read_text().strip())
+        if (home / "bin" / "java").exists():
+            log.info("JDK %s already installed at %s (cache hit)", version, home)
+            return JdkInstall(home=home)
+        log.warning(
+            "JDK %s cache marker exists but bin/java missing at %s; "
+            "re-installing", version, home,
+        )
+        marker.unlink(missing_ok=True)
+
+    # 2. Pre-installed JDK matching the required major version.
+    try:
+        required_major = int(version)
+    except ValueError:
+        required_major = -1
+    if required_major > 0:
+        existing = find_existing_jdk(required_major)
+        if existing is not None:
+            # Don't cache an external path -- the user might move it.
+            return JdkInstall(home=existing)
+        log.info(
+            "no pre-installed JDK %s found in SBK_JAVA_HOME / JAVA_HOME / "
+            "PATH; downloading Temurin %s",
+            version, version,
+        )
+
+    cache.mkdir(parents=True, exist_ok=True)
+
+    url = _jdk_url(version)
+    archive = cache / f"jdk-{version}.tar.gz"
+    if not archive.exists():
+        _download(url, archive)
+
+    extract_dir = cache / "extracted"
+    if extract_dir.exists():
+        shutil.rmtree(extract_dir)
+    top = _extract(archive, extract_dir)
+
+    # locate the actual JDK home (folder containing bin/java)
+    home = top
+    if not (home / "bin" / "java").exists():
+        for sub in home.rglob("bin"):
+            if (sub / "java").exists():
+                home = sub.parent
+                break
+
+    if not (home / "bin" / "java").exists():
+        raise RuntimeError(
+            f"extracted JDK does not contain bin/java under {extract_dir}"
+        )
+
+    home_file.write_text(str(home))
+    marker.touch()
+    try:
+        archive.unlink()
+    except OSError as e:
+        log.debug("could not remove archive %s: %s", archive, e)
+    log.info("JDK %s ready at %s", version, home)
+    return JdkInstall(home=home)

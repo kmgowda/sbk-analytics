@@ -48,6 +48,75 @@ def _build_cmd(executable: Path, yml_path: Path) -> list[str]:
     return [str(executable), "-f", str(yml_path)]
 
 
+def _kill_grace_for(yml_path: Path) -> tuple[int, int]:
+    """Return ``(remote_grace, local_grace)`` for the YAML's mode."""
+    _, is_gem = _read_yml(yml_path)
+    if is_gem:
+        return int(REMOTE_KILL_GRACE_S), int(LOCAL_KILL_GRACE_S)
+    return 0, int(LOCAL_KILL_GRACE_S)
+
+
+def _print_sbk_banner(
+    *,
+    instance_name: str,
+    is_gem: bool,
+    yml_path: Path,
+    csv_path: Path,
+    cmd: list[str],
+    env: dict[str, str] | None,
+    expected_seconds: int | None,
+    serial: bool,
+    instance_index: int,
+    instance_total: int,
+    log_path: Path | None = None,
+) -> None:
+    """Print a human-readable banner with the full SBK invocation details."""
+    binary = "sbk-gem-yal" if is_gem else "sbk-yal"
+    params, _ = _read_yml(yml_path)
+    if expected_seconds is None:
+        timeout_desc = "no timeout (records-bounded / open-ended)"
+    elif is_gem:
+        timeout_desc = (
+            f"remote kill at +{int(REMOTE_KILL_GRACE_S)}s, "
+            f"local kill at +{int(LOCAL_KILL_GRACE_S)}s "
+            f"(deadline {expected_seconds + int(LOCAL_KILL_GRACE_S)}s)"
+        )
+    else:
+        timeout_desc = (
+            f"kill at seconds + {int(LOCAL_KILL_GRACE_S)}s "
+            f"(deadline {expected_seconds + int(LOCAL_KILL_GRACE_S)}s)"
+        )
+
+    mode_tag = "serial" if serial else "parallel"
+    lines = [
+        "",
+        "=" * 78,
+        f"  [{mode_tag}] LAUNCHING {binary.upper()} instance "
+        f"({instance_index} of {instance_total}): {instance_name}",
+        "=" * 78,
+        f"  executable : {cmd[0]}",
+        f"  command    : {' '.join(cmd)}",
+        f"  yaml       : {yml_path}",
+        f"  csv (out)  : {csv_path}",
+    ]
+    if log_path:
+        lines.append(f"  log file   : {log_path}")
+    if env is not None:
+        if "SBK_JAVA_HOME" in env:
+            lines.append(f"  SBK_JAVA_HOME : {env['SBK_JAVA_HOME']}")
+        if "JAVA_HOME" in env:
+            lines.append(f"  JAVA_HOME     : {env['JAVA_HOME']}")
+    lines.append(f"  timeout    : {timeout_desc}")
+    wrapper = "sbkGemArgs" if is_gem else "sbkArgs"
+    lines.append(f"  -- {binary} arguments ({wrapper}:) --")
+    for k, v in params.items():
+        lines.append(f"    {k}: {v}")
+    lines.append("=" * 78)
+    # Print banner unconditionally (independent of -v / log level); these are
+    # status messages, not debug logs.
+    print("\n".join(lines), file=sys.stderr, flush=True)
+
+
 def _read_yml(yml_path: Path) -> tuple[dict, bool]:
     """Return ``(params, is_gem)`` from an SBK YAL/GEM-YAL YAML.
 
@@ -316,21 +385,30 @@ def _hung_jvm_watchdog(
 def _run_serial(
     executable: Path,
     jobs: list[tuple[str, Path, Path]],  # (instance_name, yml, csv)
+    *,
+    env: dict[str, str] | None = None,
 ) -> list[RunResult]:
     results: list[RunResult] = []
-    for class_name, yml_path, csv_path in jobs:
+    total = len(jobs)
+    for idx, (class_name, yml_path, csv_path) in enumerate(jobs, start=1):
         _, is_gem = _read_yml(yml_path)
         seconds = _expected_seconds(yml_path)
-        log.info(
-            "[serial] starting class=%s mode=%s yml=%s expected_seconds=%s",
-            class_name,
-            "sbk-gem-yal" if is_gem else "sbk-yal",
-            yml_path,
-            seconds,
+        cmd = _build_cmd(executable, yml_path)
+        _print_sbk_banner(
+            instance_name=class_name,
+            is_gem=is_gem,
+            yml_path=yml_path,
+            csv_path=csv_path,
+            cmd=cmd,
+            env=env,
+            expected_seconds=seconds,
+            serial=True,
+            instance_index=idx,
+            instance_total=total,
         )
         start = time.monotonic()
         # stdout/stderr inherited so the user sees output live
-        proc = subprocess.Popen(_build_cmd(executable, yml_path))
+        proc = subprocess.Popen(cmd, env=env)
         rc = _hung_jvm_watchdog(
             proc, csv_path, yml_path,
             expected_seconds=seconds, is_gem=is_gem,
@@ -354,6 +432,8 @@ def _run_parallel(
     executable: Path,
     jobs: list[tuple[str, Path, Path]],
     log_dir: Path,
+    *,
+    env: dict[str, str] | None = None,
 ) -> list[RunResult]:
     print(PARALLEL_WARNING, file=sys.stderr, flush=True)
     log_dir.mkdir(parents=True, exist_ok=True)
@@ -369,22 +449,32 @@ def _run_parallel(
     ] = []
     remote_kill_threads: dict[int, threading.Thread] = {}
 
-    for class_name, yml_path, csv_path in jobs:
+    total = len(jobs)
+    for idx, (class_name, yml_path, csv_path) in enumerate(jobs, start=1):
         log_path = log_dir / f"sbk-{class_name}.log"
         f = log_path.open("w")
         _, is_gem = _read_yml(yml_path)
         seconds = _expected_seconds(yml_path)
-        log.info(
-            "[parallel] launching class=%s mode=%s log=%s expected_seconds=%s",
-            class_name,
-            "sbk-gem-yal" if is_gem else "sbk-yal",
-            log_path, seconds,
+        cmd = _build_cmd(executable, yml_path)
+        _print_sbk_banner(
+            instance_name=class_name,
+            is_gem=is_gem,
+            yml_path=yml_path,
+            csv_path=csv_path,
+            cmd=cmd,
+            env=env,
+            expected_seconds=seconds,
+            serial=False,
+            instance_index=idx,
+            instance_total=total,
+            log_path=log_path,
         )
         start = time.monotonic()
         p = subprocess.Popen(
-            _build_cmd(executable, yml_path),
+            cmd,
             stdout=f,
             stderr=subprocess.STDOUT,
+            env=env,
         )
         remote_dl = (
             start + seconds + REMOTE_KILL_GRACE_S
@@ -484,15 +574,34 @@ def _run_parallel(
     return results
 
 
+def _sbk_env(jdk_home: Path | None) -> dict[str, str] | None:
+    """Return the subprocess env for sbk-yal / sbk-gem-yal.
+
+    Sets both ``SBK_JAVA_HOME`` (preferred by SBK 10.0) and ``JAVA_HOME``
+    (used by earlier releases) plus prepends ``<jdk>/bin`` to ``PATH``.
+    Returns None when no JDK is supplied so the SBK scripts fall back to the
+    caller's existing environment.
+    """
+    if jdk_home is None:
+        return None
+    env = os.environ.copy()
+    env["SBK_JAVA_HOME"] = str(jdk_home)
+    env["JAVA_HOME"] = str(jdk_home)
+    env["PATH"] = f"{jdk_home / 'bin'}{os.pathsep}{env.get('PATH', '')}"
+    return env
+
+
 def run_jobs(
     executable: Path,
     jobs: list[tuple[str, Path, Path]],
     *,
     mode: str,
     log_dir: Path,
+    jdk_home: Path | None = None,
 ) -> list[RunResult]:
     if not executable.exists():
         raise FileNotFoundError(f"SBK executable not found: {executable}")
+    env = _sbk_env(jdk_home)
     if mode == "parallel":
-        return _run_parallel(executable, jobs, log_dir)
-    return _run_serial(executable, jobs)
+        return _run_parallel(executable, jobs, log_dir, env=env)
+    return _run_serial(executable, jobs, env=env)

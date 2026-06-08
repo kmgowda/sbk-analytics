@@ -11,7 +11,7 @@ from pathlib import Path
 from .charts import run_sbk_charts
 from .config import load_config
 from .properties import parse_properties
-from .releases import ensure_sbk, ensure_sbk_charts
+from .releases import ensure_jdk, ensure_sbk, ensure_sbk_charts
 from .runner import run_jobs
 from .system_info import append_system_sheet
 from .yaml_gen import generate_instance_yaml
@@ -114,7 +114,13 @@ def main(argv: list[str] | None = None) -> int:
     work.mkdir(parents=True, exist_ok=True)
     log.info("work dir: %s", work.resolve())
 
-    # 1. Fetch SBK and sbk-charts
+    # 1. Resolve the required JDK (used via SBK_JAVA_HOME), SBK, and sbk-charts.
+    #    ensure_jdk() first checks the existing SBK_JAVA_HOME / JAVA_HOME /
+    #    `java` on PATH for a matching major version; only downloads if none
+    #    match. The user pins the required major version in versions.env via
+    #    `sbk.jdk.version=...` (default 25).
+    jdk = ensure_jdk(versions.sbk_jdk)
+    log.info("JDK %s home: %s", versions.sbk_jdk, jdk.home)
     sbk = ensure_sbk(versions.sbk, repo=versions.sbk_repo)
     charts = ensure_sbk_charts(versions.sbk_charts, repo_url=versions.sbk_charts_url)
 
@@ -134,7 +140,9 @@ def main(argv: list[str] | None = None) -> int:
 
     # 3. Run SBK instances
     log_dir = work / "logs"
-    results = run_jobs(executable, jobs, mode=cfg.mode, log_dir=log_dir)
+    results = run_jobs(
+        executable, jobs, mode=cfg.mode, log_dir=log_dir, jdk_home=jdk.home,
+    )
 
     succeeded = [r for r in results if r.ok]
     failed = [r for r in results if not r.ok]

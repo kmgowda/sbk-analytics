@@ -5,7 +5,7 @@ workdir: /tmp/sbk-analytics
 sbk:
   seconds: 60
   size: 100
-  time: ms
+  time: ns
   writers: 1
 
 classes:
@@ -15,5 +15,5 @@ classes:
     rfile: /tmp/sbk-bench/rocksdb-60s
 
 sbk-charts:
-  output: file-rocksdb-60s.xlsx
+  output: file-rocksdb-write-60s.xlsx
   ai_model: noai

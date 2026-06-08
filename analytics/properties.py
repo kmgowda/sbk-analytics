@@ -5,6 +5,12 @@ Recognised keys (case-insensitive; dots / underscores / dashes equivalent):
     sbk.url                -> GitHub repo URL for SBK
                               (e.g. https://github.com/kmgowda/SBK)
     sbk.version            -> SBK release tag on that repo
+    sbk.jdk.version        -> JDK major version required by that SBK release
+                              (default: 25). The orchestrator first looks for
+                              an already-installed JDK whose major version
+                              matches (via SBK_JAVA_HOME / JAVA_HOME / `java`
+                              on PATH), and only downloads Temurin of this
+                              major version if none is found.
     sbk-charts.url         -> GitHub repo URL for sbk-charts
                               (e.g. https://github.com/kmgowda/sbk-charts)
     sbk-charts.version     -> sbk-charts release tag on that repo
@@ -24,6 +30,7 @@ from urllib.parse import urlparse
 
 DEFAULT_SBK_URL = "https://github.com/kmgowda/SBK"
 DEFAULT_SBK_CHARTS_URL = "https://github.com/kmgowda/sbk-charts"
+DEFAULT_SBK_JDK_VERSION = "25"
 
 
 def _norm(key: str) -> str:
@@ -59,10 +66,11 @@ def _owner_repo(url: str) -> str:
 
 @dataclass(frozen=True)
 class Versions:
-    sbk: str               # SBK release tag, e.g. "9.0"
-    sbk_charts: str        # sbk-charts release tag, e.g. "3.26.2.1"
+    sbk: str               # SBK release tag, e.g. "10.0"
+    sbk_charts: str        # sbk-charts release tag, e.g. "4.26.6.1"
     sbk_url: str           # canonical SBK repo URL
     sbk_charts_url: str    # canonical sbk-charts repo URL
+    sbk_jdk: str           # required JDK major version, e.g. "25"
 
     @property
     def sbk_repo(self) -> str:
@@ -106,6 +114,10 @@ def parse_properties(path: str | Path) -> Versions:
         "sbk.charts.url", "sbk_charts_url", "sbkcharts.url",
         default=DEFAULT_SBK_CHARTS_URL,
     )
+    sbk_jdk = _get(
+        "sbk.jdk.version", "sbk_jdk_version", "jdk.version", "jdk_version",
+        default=DEFAULT_SBK_JDK_VERSION,
+    ).strip()
 
     return Versions(
         sbk=_get("sbk.version", "sbk_version"),
@@ -114,4 +126,5 @@ def parse_properties(path: str | Path) -> Versions:
         ),
         sbk_url=_normalise_repo_url(sbk_url_raw),
         sbk_charts_url=_normalise_repo_url(sbk_charts_url_raw),
+        sbk_jdk=sbk_jdk,
     )
