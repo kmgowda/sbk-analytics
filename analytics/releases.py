@@ -33,6 +33,13 @@ def _cache_root() -> Path:
     return Path.home() / ".cache" / "sbk-analytics"
 
 
+def _use_specified_cache(specified_folder: Path) -> Path:
+    """Use the specified folder from versions.env if provided, otherwise use cache."""
+    if specified_folder and specified_folder != Path("./.jdk") and specified_folder != Path("./.sbk"):
+        return specified_folder
+    return _cache_root()
+
+
 @dataclass
 class SbkInstall:
     home: Path  # extracted SBK distribution root (contains bin/)
@@ -77,34 +84,45 @@ class ChartsInstall:
 # ---------- helpers ----------
 
 
-def _gh_release(repo: str, tag: str) -> dict:
+def _gh_release(repo: str, tag: str, ssl_verify: bool = True) -> dict:
     """Fetch release metadata from GitHub for a given tag."""
     url = f"https://api.github.com/repos/{repo}/releases/tags/{tag}"
     headers = {"Accept": "application/vnd.github+json"}
     token = os.environ.get("GITHUB_TOKEN")
     if token:
         headers["Authorization"] = f"Bearer {token}"
-    r = requests.get(url, headers=headers, timeout=30)
+    
+    # Use ssl_verify setting from versions.env
+    if not ssl_verify:
+        import urllib3
+        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+        log.warning("SSL verification DISABLED (ssl.verify=false in versions.env)")
+    else:
+        log.debug("SSL verification enabled (ssl.verify=true in versions.env)")
+    
+    log.info("fetching GitHub release metadata: %s@%s", repo, tag)
+    r = requests.get(url, headers=headers, timeout=30, verify=ssl_verify)
     if r.status_code == 404:
         raise RuntimeError(f"GitHub release not found: {repo}@{tag}")
     r.raise_for_status()
     return r.json()
 
 
-def _download(url: str, dest: Path, *, max_attempts: int = 6) -> None:
+def _download(url: str, dest: Path, *, max_attempts: int = 6, ssl_verify: bool = True) -> None:
     """Download `url` to `dest`, resuming via HTTP Range if .part already exists."""
     dest.parent.mkdir(parents=True, exist_ok=True)
     tmp = dest.with_suffix(dest.suffix + ".part")
     last_err: Exception | None = None
+    
     for attempt in range(1, max_attempts + 1):
         offset = tmp.stat().st_size if tmp.exists() else 0
         headers = {"Range": f"bytes={offset}-"} if offset else {}
         log.info(
-            "downloading %s -> %s (attempt %d, offset=%d)",
-            url, dest, attempt, offset,
+            "downloading %s -> %s (attempt %d/%d, offset=%d, SSL verify=%s)",
+            url, dest, attempt, max_attempts, offset, ssl_verify,
         )
         try:
-            with requests.get(url, stream=True, timeout=120, headers=headers) as r:
+            with requests.get(url, stream=True, timeout=120, headers=headers, verify=ssl_verify) as r:
                 if offset and r.status_code == 200:
                     # server ignored Range; restart from scratch
                     tmp.unlink(missing_ok=True)
@@ -117,8 +135,10 @@ def _download(url: str, dest: Path, *, max_attempts: int = 6) -> None:
                         if chunk:
                             f.write(chunk)
             tmp.replace(dest)
+            log.info("download complete: %s", dest)
             return
-        except (requests.exceptions.ChunkedEncodingError,
+        except (requests.exceptions.SSLError,
+                requests.exceptions.ChunkedEncodingError,
                 requests.exceptions.ConnectionError,
                 requests.exceptions.ReadTimeout) as e:
             last_err = e
@@ -154,9 +174,15 @@ def _extract(archive: Path, dest: Path) -> Path:
 # ---------- SBK ----------
 
 
-def ensure_sbk(version: str, repo: str = "kmgowda/SBK") -> SbkInstall:
+def ensure_sbk(version: str, repo: str = "kmgowda/SBK", sbk_folder: Path | None = None, ssl_verify: bool = True) -> SbkInstall:
     """Ensure SBK <version> is downloaded + extracted, return install info."""
-    cache = _cache_root() / "sbk" / version
+    # Use specified folder if provided, otherwise use cache
+    if sbk_folder is None:
+        cache = _cache_root() / "sbk" / version
+    else:
+        cache = sbk_folder / version
+        cache.mkdir(parents=True, exist_ok=True)
+    
     marker = cache / ".ok"
     home_file = cache / ".home"
 
@@ -172,7 +198,8 @@ def ensure_sbk(version: str, repo: str = "kmgowda/SBK") -> SbkInstall:
         )
         marker.unlink(missing_ok=True)
 
-    rel = _gh_release(repo, version)
+    log.info("fetching SBK release metadata: %s@%s", repo, version)
+    rel = _gh_release(repo, version, ssl_verify=ssl_verify)
     assets = rel.get("assets") or []
     # Prefer a top-level distribution asset named like 'sbk-<ver>.tar' (not sbk-gem-yal-*)
     candidates = []
@@ -196,12 +223,14 @@ def ensure_sbk(version: str, repo: str = "kmgowda/SBK") -> SbkInstall:
     candidates.sort(key=lambda x: x[0])
     asset = candidates[0][1]
     url = asset["browser_download_url"]
+    log.info("selected SBK asset: %s", asset["name"])
 
     cache.mkdir(parents=True, exist_ok=True)
     archive = cache / Path(urlparse(url).path).name
     if not archive.exists():
-        _download(url, archive)
+        _download(url, archive, ssl_verify=ssl_verify)
 
+    log.info("extracting SBK archive: %s", archive)
     extract_dir = cache / "extracted"
     if extract_dir.exists():
         shutil.rmtree(extract_dir)
@@ -224,7 +253,7 @@ def ensure_sbk(version: str, repo: str = "kmgowda/SBK") -> SbkInstall:
             except OSError:
                 pass
 
-    home_file.write_text(str(home))
+    home_file.write_text(str(home.resolve()))
     marker.touch()
     # Free disk: the ~1+ GB archive is no longer needed once extracted.
     try:
@@ -241,6 +270,7 @@ def ensure_sbk(version: str, repo: str = "kmgowda/SBK") -> SbkInstall:
 def ensure_sbk_charts(
     version: str,
     repo_url: str = "https://github.com/kmgowda/sbk-charts",
+    ssl_verify: bool = True,
 ) -> ChartsInstall:
     """Ensure sbk-charts <version> is installed in a dedicated venv."""
     cache = _cache_root() / "sbk-charts" / version
@@ -273,19 +303,39 @@ def ensure_sbk_charts(
         pip_url = pip_url + ".git"
     spec = f"git+{pip_url}@{version}"
 
-    cmd = [
+    # Build pip command with optional SSL verification control
+    pip_env = os.environ.copy()
+    pip_args = [
         str(install.python),
         "-m",
         "pip",
         "install",
-        "--quiet",
-        "--upgrade",
-        "pip",
     ]
-    subprocess.run(cmd, check=True)
-    cmd = [str(install.python), "-m", "pip", "install", spec]
-    log.info("installing %s", spec)
-    subprocess.run(cmd, check=True)
+    
+    if not ssl_verify:
+        pip_args.extend([
+            "--trusted-host", "github.com",
+            "--trusted-host", "pypi.org",
+            "--trusted-host", "files.pythonhosted.org",
+            "--trusted-host", "pypi.python.org",
+            "--trusted-host", "github.com",
+            "--trusted-host", "raw.githubusercontent.com",
+        ])
+        # Also set environment variables for git
+        pip_env["GIT_SSL_NO_VERIFY"] = "1"
+        log.warning("SSL verification DISABLED for pip (ssl.verify=false in versions.env)")
+    else:
+        log.debug("SSL verification enabled for pip (ssl.verify=true in versions.env)")
+    
+    # Upgrade pip first
+    cmd = pip_args + ["--quiet", "--upgrade", "pip"]
+    log.info("upgrading pip in venv")
+    subprocess.run(cmd, check=True, env=pip_env)
+    
+    # Install sbk-charts
+    cmd = pip_args + [spec]
+    log.info("installing sbk-charts: %s", spec)
+    subprocess.run(cmd, check=True, env=pip_env)
 
     if not install.cli.exists():
         # some versions expose differently named entry points
@@ -304,6 +354,7 @@ def ensure_sbk_charts(
             )
 
     marker.touch()
+    log.info("sbk-charts %s installed successfully", version)
     return install
 
 
@@ -349,7 +400,13 @@ def _java_major_version(java_path: Path) -> int | None:
 
 
 def _candidate_jdk_homes() -> list[Path]:
-    """Return JDK homes to probe, in priority order, deduplicated."""
+    """Return JDK homes to probe, in priority order, deduplicated.
+    
+    Resolution order as specified:
+    1. SBK_JAVA_HOME environment variable
+    2. JAVA_HOME environment variable  
+    3. Default installed java version (java on PATH)
+    """
     candidates: list[Path] = []
     seen: set[Path] = set()
 
@@ -363,13 +420,17 @@ def _candidate_jdk_homes() -> list[Path]:
         seen.add(resolved)
         candidates.append(resolved)
 
-    # Environment-set JDK homes, in priority order.
-    for var in ("SBK_JAVA_HOME", "JAVA_HOME"):
-        v = os.environ.get(var)
-        if v:
-            _push(Path(v))
+    # 1. SBK_JAVA_HOME - highest priority
+    v = os.environ.get("SBK_JAVA_HOME")
+    if v:
+        _push(Path(v))
 
-    # `java` on PATH -> derive home as the parent of <home>/bin/java.
+    # 2. JAVA_HOME - second priority
+    v = os.environ.get("JAVA_HOME")
+    if v:
+        _push(Path(v))
+
+    # 3. java on PATH -> derive home as the parent of <home>/bin/java.
     from shutil import which
     java = which("java")
     if java:
@@ -402,6 +463,10 @@ def find_existing_jdk(required_major: int) -> Path | None:
                 major, home,
             )
             return home
+    log.info(
+        "no pre-installed JDK %s found in SBK_JAVA_HOME / JAVA_HOME / PATH",
+        required_major,
+    )
     return None
 
 
@@ -415,37 +480,69 @@ def _jdk_url(version: str) -> str:
     return ADOPTIUM_BINARY_URL.format(version=version, os=os_name, arch=arch)
 
 
-def ensure_jdk(version: str = DEFAULT_JDK_VERSION) -> JdkInstall:
+def ensure_jdk(version: str = DEFAULT_JDK_VERSION, jdk_folder: Path | None = None, ssl_verify: bool = True) -> JdkInstall:
     """Ensure a JDK of the given major version is available.
 
     Resolution order:
 
-    1. **Cache** -- if a previous run downloaded this major version into
-       ``<cache>/jdk/<version>/extracted/``, reuse it.
-    2. **Already installed** -- probe ``SBK_JAVA_HOME``, ``JAVA_HOME``,
-       then ``java`` on ``PATH``. Use the first one whose ``java -version``
-       reports the matching major version. No download.
-    3. **Download** -- fetch Temurin of the requested major version from
-       the Adoptium API, extract it under ``<cache>/jdk/<version>/``, and
-       record it as the cache hit for future runs.
+    1. **SBK_JAVA_HOME** -- if set and points to the required version, use it.
+    2. **JAVA_HOME** -- if set and points to the required version, use it.
+    3. **java on PATH** -- if it reports the required version, use it.
+    4. **Specified folder** -- if jdk_folder is provided and contains the required version, use it.
+    5. **Download** -- fetch Temurin of the requested major version from
+       the Adoptium API, extract it under the specified folder (or cache if not specified),
+       and set SBK_JAVA_HOME to point to it.
     """
-    cache = _cache_root() / "jdk" / version
+    # Use specified folder if provided, otherwise use cache
+    if jdk_folder is None:
+        cache = _cache_root() / "jdk" / version
+    else:
+        cache = jdk_folder / version
+        cache.mkdir(parents=True, exist_ok=True)
+    
     marker = cache / ".ok"
     home_file = cache / ".home"
 
-    # 1. Cache hit
-    if marker.exists() and home_file.exists():
+    # 1. Check SBK_JAVA_HOME first (highest priority)
+    sbk_java_home = os.environ.get("SBK_JAVA_HOME")
+    if sbk_java_home:
+        java_path = Path(sbk_java_home) / "bin" / "java"
+        if os.name == "nt":
+            java_path = Path(sbk_java_home) / "bin" / "java.exe"
+        if java_path.exists():
+            major = _java_major_version(java_path)
+            try:
+                required_major = int(version)
+                if major == required_major:
+                    log.info(
+                        "SBK_JAVA_HOME points to JDK %s at %s; using it",
+                        major, sbk_java_home,
+                    )
+                    return JdkInstall(home=Path(sbk_java_home))
+            except ValueError:
+                pass
+
+    # 2. Check specified folder if provided
+    if jdk_folder and marker.exists() and home_file.exists():
         home = Path(home_file.read_text().strip())
         if (home / "bin" / "java").exists():
-            log.info("JDK %s already installed at %s (cache hit)", version, home)
-            return JdkInstall(home=home)
+            major = _java_major_version(home / "bin" / "java")
+            try:
+                required_major = int(version)
+                if major == required_major:
+                    log.info("JDK %s found in specified folder %s (cache hit)", version, home)
+                    # Set SBK_JAVA_HOME to point to this JDK
+                    os.environ["SBK_JAVA_HOME"] = str(home.resolve())
+                    return JdkInstall(home=home)
+            except ValueError:
+                pass
         log.warning(
-            "JDK %s cache marker exists but bin/java missing at %s; "
-            "re-installing", version, home,
+            "JDK %s cache marker exists in specified folder but bin/java missing or wrong version; re-installing",
+            version,
         )
         marker.unlink(missing_ok=True)
 
-    # 2. Pre-installed JDK matching the required major version.
+    # 3. Check pre-installed JDKs (JAVA_HOME, then PATH)
     try:
         required_major = int(version)
     except ValueError:
@@ -453,24 +550,23 @@ def ensure_jdk(version: str = DEFAULT_JDK_VERSION) -> JdkInstall:
     if required_major > 0:
         existing = find_existing_jdk(required_major)
         if existing is not None:
-            # Don't cache an external path -- the user might move it.
+            # Set SBK_JAVA_HOME to point to this JDK
+            os.environ["SBK_JAVA_HOME"] = str(existing)
             return JdkInstall(home=existing)
-        log.info(
-            "no pre-installed JDK %s found in SBK_JAVA_HOME / JAVA_HOME / "
-            "PATH; downloading Temurin %s",
-            version, version,
-        )
 
+    # 4. Download JDK to specified folder or cache
+    log.info("downloading Temurin JDK %s to %s", version, cache)
     cache.mkdir(parents=True, exist_ok=True)
 
     url = _jdk_url(version)
     archive = cache / f"jdk-{version}.tar.gz"
     if not archive.exists():
-        _download(url, archive)
+        _download(url, archive, ssl_verify=ssl_verify)
 
     extract_dir = cache / "extracted"
     if extract_dir.exists():
         shutil.rmtree(extract_dir)
+    extract_dir.mkdir(parents=True, exist_ok=True)
     top = _extract(archive, extract_dir)
 
     # locate the actual JDK home (folder containing bin/java)
@@ -486,11 +582,14 @@ def ensure_jdk(version: str = DEFAULT_JDK_VERSION) -> JdkInstall:
             f"extracted JDK does not contain bin/java under {extract_dir}"
         )
 
-    home_file.write_text(str(home))
+    home_file.write_text(str(home.resolve()))
     marker.touch()
     try:
         archive.unlink()
     except OSError as e:
         log.debug("could not remove archive %s: %s", archive, e)
-    log.info("JDK %s ready at %s", version, home)
+    
+    # Set SBK_JAVA_HOME to point to this JDK
+    os.environ["SBK_JAVA_HOME"] = str(home.resolve())
+    log.info("JDK %s ready at %s (SBK_JAVA_HOME set)", version, home)
     return JdkInstall(home=home)

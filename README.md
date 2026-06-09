@@ -38,15 +38,21 @@ orchestrates need a working runtime on the host:
 | Internet access | yes  | First run downloads the SBK release tar from GitHub and pip-installs `sbk-charts`. Subsequent runs are offline. |
 
 If your network intercepts TLS (corporate proxy with a custom root CA),
-export these before running so `requests`, `pip`, and `git` all trust the
-local CA bundle:
+set `ssl.verify=false` in your `versions.env` file:
 
-```bash
-export REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
-export SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
-export PIP_CERT=/etc/ssl/certs/ca-certificates.crt
-export GIT_SSL_CAINFO=/etc/ssl/certs/ca-certificates.crt
+```ini
+# versions.env
+ssl.verify=false
 ```
+
+This disables SSL verification for:
+- GitHub API calls (release metadata)
+- SBK/JDK downloads via requests
+- pip git-based installations of sbk-charts
+
+**Warning:** This is less secure and should only be used in trusted networks or
+development environments. For production environments, ensure your system
+has the correct CA certificates installed.
 
 ## Build / install
 
@@ -145,10 +151,14 @@ carries both the **GitHub URL** and the **release tag** for each project:
 ```ini
 # versions.env  (bundled at the project root)
 sbk.url=https://github.com/kmgowda/SBK
-sbk.version=9.0
+sbk.version=10.0
+sbk.folder=./.sbk
+sbk.jdk.version=25
+sbk.jdk.folder=./.jdk
+ssl.verify=true
 
 sbk-charts.url=https://github.com/kmgowda/sbk-charts
-sbk-charts.version=3.26.2.1
+sbk-charts.version=4.26.6.1
 ```
 
 Recognised keys (case-insensitive; dots / underscores / dashes interchangeable):
@@ -157,6 +167,10 @@ Recognised keys (case-insensitive; dots / underscores / dashes interchangeable):
 | --- | --- | --- |
 | `sbk.url`        | no (defaults to `https://github.com/kmgowda/SBK`)        | Full URL `https://github.com/<owner>/<repo>` or `<owner>/<repo>` shorthand. |
 | `sbk.version`    | yes | Tag that exists on that repository's Releases page. |
+| `sbk.folder`     | no (defaults to `./.sbk`) | Local folder for SBK installation. |
+| `sbk.jdk.version`| no (defaults to `25`) | Required JDK major version. |
+| `sbk.jdk.folder`| no (defaults to `./.jdk`) | Local folder for JDK installation. |
+| `ssl.verify`     | no (defaults to `true`) | Enable SSL verification for downloads. |
 | `sbk-charts.url` | no (defaults to `https://github.com/kmgowda/sbk-charts`) | Same format as `sbk.url`. |
 | `sbk-charts.version` | yes | Tag on the sbk-charts repository. |
 

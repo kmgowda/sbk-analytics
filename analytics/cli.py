@@ -194,10 +194,18 @@ def main(argv: list[str] | None = None) -> int:
     #    `java` on PATH for a matching major version; only downloads if none
     #    match. The user pins the required major version in versions.env via
     #    `sbk.jdk.version=...` (default 25).
-    jdk = ensure_jdk(versions.sbk_jdk)
+    print("\n=== Resolving dependencies ===", flush=True)
+    print("This may take a while on first run (downloads and caches JDK, SBK, sbk-charts)...", flush=True)
+    
+    jdk = ensure_jdk(versions.sbk_jdk, jdk_folder=versions.jdk_folder, ssl_verify=versions.ssl_verify)
     log.info("JDK %s home: %s", versions.sbk_jdk, jdk.home)
-    sbk = ensure_sbk(versions.sbk, repo=versions.sbk_repo)
-    charts = ensure_sbk_charts(versions.sbk_charts, repo_url=versions.sbk_charts_url)
+    print(f"✓ JDK {versions.sbk_jdk} ready", flush=True)
+    
+    sbk = ensure_sbk(versions.sbk, repo=versions.sbk_repo, sbk_folder=versions.sbk_folder, ssl_verify=versions.ssl_verify)
+    print(f"✓ SBK {versions.sbk} ready", flush=True)
+    
+    charts = ensure_sbk_charts(versions.sbk_charts, repo_url=versions.sbk_charts_url, ssl_verify=versions.ssl_verify)
+    print(f"✓ sbk-charts {versions.sbk_charts} ready", flush=True)
 
     executable = sbk.sbk_gem_yal if cfg.uses_gem else sbk.sbk_yal
     log.info("using SBK executable: %s", executable)
