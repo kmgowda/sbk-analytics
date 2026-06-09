@@ -6,9 +6,10 @@ orchestrator.
 
 `sbk-analytics` reads two inputs:
 
-1. A **versions properties file** that pins the release tags of SBK and
-   sbk-charts to use. The corresponding release assets are downloaded once and
-   cached under `~/.cache/sbk-analytics/`.
+1. A **SBK configuration file** that pins the release tags of SBK and
+   sbk-charts to use, along with folder paths and SSL settings. The corresponding
+   release assets are downloaded once and cached under the specified folders
+   (default: ./.sbk for SBK/sbk-charts, ./.jdk for JDK).
 2. A **YML configuration file** describing the benchmark run.
 
 From those it:
@@ -25,6 +26,70 @@ From those it:
 
 If **all** SBK instances fail, `sbk-charts` is **not** executed.
 
+## Quick Start
+
+### For macOS/Linux (Recommended with Conda)
+```bash
+conda env create -f environment.yml
+conda activate sbk-analytics
+pip install -e .
+sbk-analytics -c examples/file-rocksdb-write-60s.yml
+```
+
+### For Windows/Standard Python
+```bash
+python3 -m venv .venv
+. .venv/bin/activate  # Windows: .venv\Scripts\activate
+pip install -r requirements.txt
+pip install -e .
+sbk-analytics -c examples/file-rocksdb-write-60s.yml
+```
+
+## File Path Configuration
+
+### Work Directory
+
+The `workdir` parameter in your YAML configuration specifies where all output files are stored:
+- Generated SBK YAML files (`yml/`)
+- Per-instance CSV files (`csv/`)
+- Parallel-mode logs (`logs/`)
+- Final Excel report (when `sbk-charts.output` is a bare filename)
+
+The workdir is automatically created by sbk-analytics. Default: `/tmp/sbk-analytics`
+
+### Storage Driver File Paths
+
+When configuring storage drivers that require file paths (like `file`, `rocksdb`, etc.), ensure the parent directories exist. Two approaches:
+
+#### Option 1: Use the Work Directory (Recommended)
+```yaml
+workdir: /tmp/sbk-analytics
+
+classes:
+  - class: file
+    file: /tmp/sbk-analytics/file-60s.dat  # Uses workdir
+  - class: rocksdb
+    rfile: /tmp/sbk-analytics/rocksdb-60s   # Uses workdir
+```
+
+#### Option 2: Create Custom Directories
+```yaml
+workdir: /tmp/sbk-analytics
+
+classes:
+  - class: file
+    file: /custom/path/file-60s.dat  # Ensure /custom/path exists
+  - class: rocksdb
+    rfile: /custom/path/rocksdb-60s   # Ensure /custom/path exists
+```
+
+### Important Notes
+
+- **Workdir is auto-created**: sbk-analytics automatically creates the workdir
+- **Custom paths must exist**: If you use paths outside the workdir, create them manually
+- **Relative paths**: File paths can be relative to the current directory
+- **Absolute paths**: Recommended for reproducibility
+
 ## Prerequisites
 
 `sbk-analytics` itself is a small Python package, but the tools it
@@ -38,10 +103,10 @@ orchestrates need a working runtime on the host:
 | Internet access | yes  | First run downloads the SBK release tar from GitHub and pip-installs `sbk-charts`. Subsequent runs are offline. |
 
 If your network intercepts TLS (corporate proxy with a custom root CA),
-set `ssl.verify=false` in your `versions.env` file:
+set `ssl.verify=false` in your `sbk-config.env` file:
 
 ```ini
-# versions.env
+# sbk-config.env
 ssl.verify=false
 ```
 
@@ -54,6 +119,213 @@ This disables SSL verification for:
 development environments. For production environments, ensure your system
 has the correct CA certificates installed.
 
+## Build / install
+
+### Option 1: Conda Installation (Recommended for macOS/Linux)
+
+Conda is recommended for macOS and Linux as it handles platform-specific dependencies (like PyTorch) better than pip.
+
+#### Step-by-step Conda Installation
+
+```bash
+# 1. Clone the repository
+git clone <this-repo-url> sbk-analytics
+cd sbk-analytics
+
+# 2. Create conda environment from environment.yml
+conda env create -f environment.yml
+
+# 3. Activate the environment
+conda activate sbk-analytics
+
+# 4. Install sbk-analytics in development mode
+pip install -e .
+
+# 5. Verify installation
+sbk-analytics --version
+```
+
+#### What the Conda Installation Does
+
+The `environment.yml` file includes:
+- **Python 3.10** - Runtime environment
+- **PyTorch** - Platform-appropriate version (handles Apple Silicon vs Intel automatically)
+- **Core dependencies** - pyyaml, requests, etc.
+- **Note**: sbk-charts is installed by sbk-analytics based on `sbk-config.env`, not by conda directly. This ensures version consistency with the configuration file.
+
+#### Conda Environment Behavior
+
+When using conda, sbk-analytics automatically detects the conda environment and:
+- Installs sbk-charts directly in the conda environment (not a separate venv)
+- Uses conda's PyTorch package for better platform compatibility
+- Respects SSL verification settings from `sbk-config.env`
+- Checks for existing installations before attempting to install
+
+#### Updating Conda Environment
+
+```bash
+# Update the environment if you modify environment.yml
+conda env update -f environment.yml --prune
+
+# Reinstall sbk-analytics if you make code changes
+pip install -e .
+```
+
+### Option 2: Virtual Environment Installation
+
+For users who prefer standard Python virtual environments.
+
+#### Step-by-step Venv Installation
+
+```bash
+# 1. Clone the repository
+git clone <this-repo-url> sbk-analytics
+cd sbk-analytics
+
+# 2. Create virtual environment
+python3 -m venv .venv
+
+# 3. Activate the environment
+# On Linux/macOS:
+. .venv/bin/activate
+# On Windows:
+.venv\Scripts\activate
+
+# 4. Upgrade pip
+python -m pip install --upgrade pip
+
+# 5. Install dependencies
+python -m pip install -r requirements.txt
+
+# 6. Install sbk-analytics in development mode
+python -m pip install -e .
+
+# 7. Verify installation
+sbk-analytics --version
+```
+
+#### Venv Environment Behavior
+
+When using venv, sbk-analytics:
+- Creates a separate venv for sbk-charts under `{sbk.folder}/sbk-charts/{version}/venv`
+- Downloads and installs all dependencies including PyTorch via pip
+- Respects SSL verification settings from `sbk-config.env`
+- Caches installations for faster subsequent runs
+
+### macOS Installation Notes
+
+#### Platform-Specific Dependencies
+
+macOS users may encounter issues with platform-specific dependencies like PyTorch,
+especially on Apple Silicon (M1/M2/M3) vs Intel architectures. Common issues include:
+
+- `torch~=2.9.1` not available for your specific macOS/Python combination
+- Missing pre-built wheels for your architecture
+- Binary compatibility issues
+
+#### Recommended Solution: Use Conda
+
+**For macOS users, the conda installation method (Option 1) is strongly recommended**
+as it handles these platform-specific dependencies automatically through the pytorch channel.
+
+#### Alternative Solutions for macOS
+
+If you prefer not to use conda on macOS:
+
+1. **Use an older sbk-charts version** with more compatible dependencies:
+   ```ini
+   # sbk-config.env
+   sbk-charts.version=4.26.0.1
+   ```
+
+2. **Install PyTorch separately with conda, then use pip for sbk-charts**:
+   ```bash
+   conda install pytorch
+   pip install git+https://github.com/kmgowda/sbk-charts.git@<version-from-sbk-config.env>
+   ```
+
+3. **Build PyTorch from source** (time-consuming but guaranteed to work):
+   ```bash
+   pip install torch==2.9.1 --no-binary :all:
+   ```
+
+### Verification
+
+After installation, verify that everything works:
+
+```bash
+# Check version
+sbk-analytics --version
+
+# Run a simple benchmark (this will download dependencies on first run)
+sbk-analytics -c examples/file-rocksdb-write-60s.yml
+```
+
+### Troubleshooting
+
+#### Venv Installation Issues
+
+If you encounter PyTorch installation issues with venv:
+- Switch to conda installation (Option 1)
+- Use an older sbk-charts version
+- Install PyTorch separately before sbk-charts
+
+#### Conda Installation Issues
+
+If conda installation fails:
+- Ensure you have conda or miniconda installed
+- Update conda: `conda update conda`
+- Try mamba instead of conda for faster dependency resolution
+- Check that you have write permissions for the conda environment directory
+
+#### SSL Certificate Issues
+
+If you encounter SSL certificate errors:
+- Set `ssl.verify=false` in your `sbk-config.env` file
+- This is useful for corporate proxies with self-signed certificates
+- See the SSL verification section below for details
+
+### Environment Detection
+
+sbk-analytics automatically detects whether you're using conda or venv and adjusts its behavior accordingly:
+
+#### Conda Environment Detection
+- **Detection**: Checks for `CONDA_PREFIX` environment variable
+- **Behavior**: Installs sbk-charts directly in the conda environment
+- **Benefits**: Uses conda's PyTorch package for better platform compatibility
+- **Cache**: No separate venv for sbk-charts; uses conda environment
+- **Folder Structure**:
+  ```
+  .sbk/
+  ├── 10.0/              # SBK installation
+  └── sbk-charts/        # sbk-charts cache (metadata only, not venv)
+      └── <version>/     # Version from sbk-config.env
+          └── .ok       # Installation marker
+  ```
+
+#### Venv Environment Detection
+- **Detection**: Assumes venv when `CONDA_PREFIX` is not set
+- **Behavior**: Creates isolated venv for sbk-charts under `{sbk.folder}/sbk-charts/{version}/venv`
+- **Benefits**: Complete isolation from system Python
+- **Cache**: Caches sbk-charts venv for faster subsequent runs
+- **Folder Structure**:
+  ```
+  .sbk/
+  ├── 10.0/              # SBK installation
+  └── sbk-charts/        # sbk-charts cache with full venv
+      └── <version>/     # Version from sbk-config.env
+          ├── .ok       # Installation marker
+          └── venv/     # Isolated Python environment
+              ├── bin/
+              └── lib/
+  ```
+
+#### Manual Override
+
+If you need to force a specific behavior, you can:
+- **Force venv mode in conda**: Unset `CONDA_PREFIX` temporarily
+- **Force conda mode in venv**: Set `CONDA_PREFIX` to your environment path
+
 ## Download Progress
 
 During first-run downloads (JDK, SBK, sbk-charts), sbk-analytics displays
@@ -65,6 +337,29 @@ real-time download progress showing:
 Progress updates every 2 seconds so you can monitor download activity.
 
 ## Build / install
+
+### Option 1: Conda Installation (Recommended for macOS/Linux)
+
+Conda is recommended for macOS and Linux as it handles platform-specific dependencies (like PyTorch) better than pip:
+
+```bash
+# Create conda environment from environment.yml
+conda env create -f environment.yml
+
+# Activate the environment
+conda activate sbk-analytics
+
+# Install sbk-analytics in development mode
+pip install -e .
+```
+
+The `environment.yml` file includes:
+- Python 3.10
+- PyTorch (with platform-appropriate version)
+- sbk-charts (installed from GitHub)
+- All other required dependencies
+
+### Option 2: Virtual Environment Installation
 
 Clone the repository (or unpack the source tree), then create a virtual
 environment and install in editable mode:
@@ -82,7 +377,7 @@ python -m pip install -e .
 ```
 
 This installs the package and exposes the `sbk-analytics` command on `PATH`.
-The bundled `versions.env` at the repo root is found automatically.
+The bundled `sbk-config.env` at the repo root is found automatically.
 
 Verify the install:
 
@@ -100,7 +395,7 @@ sbk-analytics -c examples/file-rocksdb-write.yml -w ./run-1 -v
 
 What this does, step by step:
 
-1. **Resolve versions.** Reads `<repo>/versions.env` for the SBK and
+1. **Resolve versions.** Reads `<repo>/sbk-config.env` for the SBK and
    sbk-charts release tags.
 2. **Download / install (once).**
    - Downloads the SBK release archive from GitHub and extracts it to
@@ -155,11 +450,11 @@ After the run:
 
 ### 1. Versions properties file (`.env` style)
 
-A default `versions.env` ships with the project at the repository root and
+A default `sbk-config.env` ships with the project at the repository root and
 carries both the **GitHub URL** and the **release tag** for each project:
 
 ```ini
-# versions.env  (bundled at the project root)
+# sbk-config.env  (bundled at the project root)
 sbk.url=https://github.com/kmgowda/SBK
 sbk.version=10.0
 sbk.folder=./.sbk
@@ -168,7 +463,7 @@ sbk.jdk.folder=./.jdk
 ssl.verify=true
 
 sbk-charts.url=https://github.com/kmgowda/sbk-charts
-sbk-charts.version=4.26.6.1
+sbk-charts.version=4.26.6.2
 ```
 
 Recognised keys (case-insensitive; dots / underscores / dashes interchangeable):
@@ -188,8 +483,12 @@ You don't need to pass `-p` / `--properties` — `sbk-analytics` automatically
 uses the bundled file. Pass `-p <path>` only if you want to override it
 (e.g. to benchmark a fork of SBK):
 
+```bash
+sbk-analytics -c my-run.yml -p /path/to/custom-sbk-config.env
+```
+
 ```ini
-# my-fork.env
+# my-fork-sbk-config.env
 sbk.url=https://github.com/your-org/SBK
 sbk.version=9.0-myfork
 sbk-charts.url=kmgowda/sbk-charts
@@ -343,7 +642,7 @@ written/read, not on a wall-clock deadline.
 | Flag | Meaning |
 | --- | --- |
 | `-c`, `--config`     | path to the input YML (required) |
-| `-p`, `--properties` | path to the versions `.env` file (optional; defaults to bundled `<project>/versions.env`) |
+| `-p`, `--properties` | path to the SBK config `.env` file (optional; defaults to bundled `<project>/sbk-config.env`) |
 | `-w`, `--work-dir`   | working dir for generated YAMLs / CSVs / logs / Excel report. Precedence: this flag > the YAML's `workdir:` > `/tmp/sbk-analytics`. |
 | `-v`, `--verbose`    | repeat for more verbose logging (`-v` info, `-vv` debug) |
 | `-h`, `--help`       | show help and exit |
@@ -420,7 +719,7 @@ versions hit the cache and skip the download + install entirely.
   on shutdown). `sbk-analytics` kills the process at `seconds + 5` and uses
   the CSV that has already been flushed.
 - **`sbk-charts` complains about a missing `banner.txt` or `images/sbk-logo.png`** —
-  packaging quirks of sbk-charts 3.26.2.1. `sbk-analytics` already supplies a
+  packaging quirks of some sbk-charts versions. `sbk-analytics` already supplies a
   stub `banner.txt` via a private cwd; the missing logo is harmless.
 - **All SBK instances failed; exit code 2** — none of the configured SBK runs
   produced a non-empty CSV. `sbk-charts` is intentionally **not** invoked in
@@ -430,7 +729,7 @@ versions hit the cache and skip the download + install entirely.
 
 ```
 sbk-analytics/
-├── versions.env              # bundled SBK / sbk-charts release pins
+├── sbk-config.env            # bundled SBK / sbk-charts release pins
 ├── pyproject.toml            # entry point: sbk-analytics → analytics.cli:main
 ├── requirements.txt
 ├── README.md
@@ -439,7 +738,7 @@ sbk-analytics/
 │   └── file-rocksdb-write.yml      # 120s file + rocksdb single-writer example
 └── analytics/
     ├── cli.py                # argument parsing + orchestration
-    ├── properties.py         # versions.env parser
+    ├── properties.py         # sbk-config.env parser
     ├── config.py             # input YAML parser (sbk, classes, sbk-charts)
     ├── releases.py           # GitHub release download + cached install
     ├── yaml_gen.py           # per-instance sbkArgs/sbkGemArgs YAML generator

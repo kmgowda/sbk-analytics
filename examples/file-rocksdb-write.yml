@@ -27,11 +27,11 @@ sbk:
 classes:
   # File driver: only needs its class-specific param `file`.
   - class: file
-    file: /tmp/sbk-bench/file.dat
+    file: /tmp/sbk-analytics/file.dat
 
   # RocksDB driver: only needs `rfile`; all SBK params inherited.
   - class: rocksdb
-    rfile: /tmp/sbk-bench/rocksdb
+    rfile: /tmp/sbk-analytics/rocksdb
 
 # sbk-charts options. The input CSV files for sbk-charts are:
 #   - one CSV per SBK instance above (auto-generated, do not set), PLUS

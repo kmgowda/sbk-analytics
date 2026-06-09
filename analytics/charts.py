@@ -29,7 +29,7 @@ def _ai_args(ai_params: dict[str, Any]) -> list[str]:
 
 
 def _prepare_cwd(work_dir: Path) -> Path:
-    """sbk-charts 3.26.2.1 reads ``./src/main/banner.txt`` at startup using a
+    """sbk-charts reads ``./src/main/banner.txt`` at startup using a
     relative path, but the file is not included in the installed wheel. We
     work around this by running sbk-charts in a dedicated cwd containing a
     stub banner file.

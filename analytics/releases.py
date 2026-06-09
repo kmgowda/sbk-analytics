@@ -34,7 +34,7 @@ def _cache_root() -> Path:
 
 
 def _use_specified_cache(specified_folder: Path) -> Path:
-    """Use the specified folder from versions.env if provided, otherwise use cache."""
+    """Use the specified folder from sbk-config.env if provided, otherwise use cache."""
     if specified_folder and specified_folder != Path("./.jdk") and specified_folder != Path("./.sbk"):
         return specified_folder
     return _cache_root()
@@ -92,13 +92,13 @@ def _gh_release(repo: str, tag: str, ssl_verify: bool = True) -> dict:
     if token:
         headers["Authorization"] = f"Bearer {token}"
     
-    # Use ssl_verify setting from versions.env
+    # Use ssl_verify setting from sbk-config.env
     if not ssl_verify:
         import urllib3
         urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-        log.warning("SSL verification DISABLED (ssl.verify=false in versions.env)")
+        log.warning("SSL verification DISABLED (ssl.verify=false in sbk-config.env)")
     else:
-        log.debug("SSL verification enabled (ssl.verify=true in versions.env)")
+        log.debug("SSL verification enabled (ssl.verify=true in sbk-config.env)")
     
     log.info("fetching GitHub release metadata: %s@%s", repo, tag)
     r = requests.get(url, headers=headers, timeout=30, verify=ssl_verify)
@@ -319,6 +319,71 @@ def ensure_sbk_charts(
     ssl_verify: bool = True,
 ) -> ChartsInstall:
     """Ensure sbk-charts <version> is installed in a dedicated venv."""
+    # Check if we're in a conda environment - if so, install directly
+    if "CONDA_PREFIX" in os.environ:
+        log.info("Detected conda environment, installing sbk-charts directly")
+        
+        # Check if sbk-charts is already installed
+        already_installed = False
+        try:
+            import importlib.metadata
+            try:
+                importlib.metadata.version("sbk-charts")
+                already_installed = True
+                log.info("sbk-charts already installed in conda environment")
+            except importlib.metadata.PackageNotFoundError:
+                pass
+        except ImportError:
+            # Python < 3.8, use pkg_resources
+            try:
+                import pkg_resources
+                pkg_resources.get_distribution("sbk-charts")
+                already_installed = True
+                log.info("sbk-charts already installed in conda environment")
+            except pkg_resources.DistributionNotFound:
+                pass
+        
+        if already_installed:
+            return ChartsInstall(venv_dir=Path(sys.prefix))
+        
+        # Install sbk-charts in the current conda environment
+        pip_url = repo_url.rstrip("/")
+        if not pip_url.endswith(".git"):
+            pip_url = pip_url + ".git"
+        spec = f"git+{pip_url}@{version}"
+        
+        # Build pip command with optional SSL verification control
+        pip_env = os.environ.copy()
+        pip_args = [
+            sys.executable,
+            "-m",
+            "pip",
+            "install",
+        ]
+        
+        if not ssl_verify:
+            pip_args.extend([
+                "--trusted-host", "github.com",
+                "--trusted-host", "pypi.org",
+                "--trusted-host", "files.pythonhosted.org",
+                "--trusted-host", "pypi.python.org",
+                "--trusted-host", "github.com",
+                "--trusted-host", "raw.githubusercontent.com",
+            ])
+            # Also set environment variables for git
+            pip_env["GIT_SSL_NO_VERIFY"] = "1"
+            log.warning("SSL verification DISABLED for pip (ssl.verify=false in sbk-config.env)")
+        else:
+            log.debug("SSL verification enabled for pip (ssl.verify=true in sbk-config.env)")
+        
+        # Install sbk-charts
+        cmd = pip_args + [spec]
+        log.info("installing sbk-charts in conda environment: %s", spec)
+        subprocess.run(cmd, check=True, env=pip_env)
+        
+        # Return a ChartsInstall pointing to the conda environment
+        return ChartsInstall(venv_dir=Path(sys.prefix))
+    
     # Use sbk_folder for caching if provided, otherwise use cache
     if sbk_folder is None:
         cache = _cache_root() / "sbk-charts" / version
@@ -373,9 +438,9 @@ def ensure_sbk_charts(
         ])
         # Also set environment variables for git
         pip_env["GIT_SSL_NO_VERIFY"] = "1"
-        log.warning("SSL verification DISABLED for pip (ssl.verify=false in versions.env)")
+        log.warning("SSL verification DISABLED for pip (ssl.verify=false in sbk-config.env)")
     else:
-        log.debug("SSL verification enabled for pip (ssl.verify=true in versions.env)")
+        log.debug("SSL verification enabled for pip (ssl.verify=true in sbk-config.env)")
     
     # Upgrade pip first
     cmd = pip_args + ["--quiet", "--upgrade", "pip"]

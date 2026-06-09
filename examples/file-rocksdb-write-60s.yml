@@ -10,9 +10,9 @@ sbk:
 
 classes:
   - class: file
-    file: /tmp/sbk-bench/file-60s.dat
+    file: /tmp/sbk-analytics/file-60s.dat
   - class: rocksdb
-    rfile: /tmp/sbk-bench/rocksdb-60s
+    rfile: /tmp/sbk-analytics/rocksdb-60s
 
 sbk-charts:
   output: file-rocksdb-write-60s.xlsx

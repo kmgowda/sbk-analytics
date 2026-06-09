@@ -89,11 +89,11 @@ def _build_system_sources(succeeded) -> list[dict]:
 
 
 def _bundled_versions_file() -> Path:
-    """Return the project-bundled `versions.env` shipped next to this package.
+    """Return the project-bundled `sbk-config.env` shipped next to this package.
 
-    The file lives at the repository root (`<project>/versions.env`).
+    The file lives at the repository root (`<project>/sbk-config.env`).
     """
-    return Path(__file__).resolve().parent.parent / "versions.env"
+    return Path(__file__).resolve().parent.parent / "sbk-config.env"
 
 
 def _parse_args(argv: list[str] | None) -> argparse.Namespace:
@@ -115,9 +115,9 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         type=Path,
         default=None,
         help=(
-            "Versions properties file (key=value): sbk.version, "
-            "sbk-charts.version. Defaults to the bundled "
-            "<project>/versions.env shipped with sbk-analytics."
+            "SBK configuration file (key=value): sbk.version, "
+            "sbk-charts.version, sbk.folder, etc. Defaults to the bundled "
+            "<project>/sbk-config.env shipped with sbk-analytics."
         ),
     )
     p.add_argument(
@@ -192,7 +192,7 @@ def main(argv: list[str] | None = None) -> int:
     # 1. Resolve the required JDK (used via SBK_JAVA_HOME), SBK, and sbk-charts.
     #    ensure_jdk() first checks the existing SBK_JAVA_HOME / JAVA_HOME /
     #    `java` on PATH for a matching major version; only downloads if none
-    #    match. The user pins the required major version in versions.env via
+    #    match. The user pins the required major version in sbk-config.env via
     #    `sbk.jdk.version=...` (default 25).
     print("\n=== Resolving dependencies ===", flush=True)
     print("This may take a while on first run (downloads and caches JDK, SBK, sbk-charts)...", flush=True)

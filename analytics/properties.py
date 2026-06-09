@@ -88,7 +88,7 @@ def _resolve_folder(folder: str, properties_file: Path) -> Path:
 @dataclass(frozen=True)
 class Versions:
     sbk: str               # SBK release tag, e.g. "10.0"
-    sbk_charts: str        # sbk-charts release tag, e.g. "4.26.6.1"
+    sbk_charts: str        # sbk-charts release tag, e.g. "4.26.6.2"
     sbk_url: str           # canonical SBK repo URL
     sbk_charts_url: str    # canonical sbk-charts repo URL
     sbk_jdk: str           # required JDK major version, e.g. "25"
