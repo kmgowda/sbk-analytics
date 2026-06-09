@@ -196,6 +196,7 @@ def main(argv: list[str] | None = None) -> int:
     #    `sbk.jdk.version=...` (default 25).
     print("\n=== Resolving dependencies ===", flush=True)
     print("This may take a while on first run (downloads and caches JDK, SBK, sbk-charts)...", flush=True)
+    print("Download progress will be shown in the logs below...", flush=True)
     
     jdk = ensure_jdk(versions.sbk_jdk, jdk_folder=versions.jdk_folder, ssl_verify=versions.ssl_verify)
     log.info("JDK %s home: %s", versions.sbk_jdk, jdk.home)
@@ -204,7 +205,7 @@ def main(argv: list[str] | None = None) -> int:
     sbk = ensure_sbk(versions.sbk, repo=versions.sbk_repo, sbk_folder=versions.sbk_folder, ssl_verify=versions.ssl_verify)
     print(f"✓ SBK {versions.sbk} ready", flush=True)
     
-    charts = ensure_sbk_charts(versions.sbk_charts, repo_url=versions.sbk_charts_url, ssl_verify=versions.ssl_verify)
+    charts = ensure_sbk_charts(versions.sbk_charts, repo_url=versions.sbk_charts_url, sbk_folder=versions.sbk_folder, ssl_verify=versions.ssl_verify)
     print(f"✓ sbk-charts {versions.sbk_charts} ready", flush=True)
 
     executable = sbk.sbk_gem_yal if cfg.uses_gem else sbk.sbk_yal

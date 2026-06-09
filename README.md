@@ -54,6 +54,16 @@ This disables SSL verification for:
 development environments. For production environments, ensure your system
 has the correct CA certificates installed.
 
+## Download Progress
+
+During first-run downloads (JDK, SBK, sbk-charts), sbk-analytics displays
+real-time download progress showing:
+- Percentage complete
+- Downloaded vs total size (in MB)
+- Current download speed (in MB/s)
+
+Progress updates every 2 seconds so you can monitor download activity.
+
 ## Build / install
 
 Clone the repository (or unpack the source tree), then create a virtual
@@ -167,7 +177,7 @@ Recognised keys (case-insensitive; dots / underscores / dashes interchangeable):
 | --- | --- | --- |
 | `sbk.url`        | no (defaults to `https://github.com/kmgowda/SBK`)        | Full URL `https://github.com/<owner>/<repo>` or `<owner>/<repo>` shorthand. |
 | `sbk.version`    | yes | Tag that exists on that repository's Releases page. |
-| `sbk.folder`     | no (defaults to `./.sbk`) | Local folder for SBK installation. |
+| `sbk.folder`     | no (defaults to `./.sbk`) | Local folder for SBK and sbk-charts installation. |
 | `sbk.jdk.version`| no (defaults to `25`) | Required JDK major version. |
 | `sbk.jdk.folder`| no (defaults to `./.jdk`) | Local folder for JDK installation. |
 | `ssl.verify`     | no (defaults to `true`) | Enable SSL verification for downloads. |

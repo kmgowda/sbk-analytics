@@ -129,13 +129,58 @@ def _download(url: str, dest: Path, *, max_attempts: int = 6, ssl_verify: bool =
                     offset = 0
                 elif r.status_code not in (200, 206):
                     r.raise_for_status()
+                
+                # Get total file size for progress reporting
+                total_size = int(r.headers.get('content-length', 0))
+                if offset:
+                    total_size += offset
+                
                 mode = "ab" if offset else "wb"
                 with tmp.open(mode) as f:
+                    downloaded = offset
+                    last_progress_time = time.time()
+                    last_progress_size = downloaded
+                    
                     for chunk in r.iter_content(chunk_size=1024 * 1024):
                         if chunk:
                             f.write(chunk)
+                            downloaded += len(chunk)
+                            
+                            # Show progress every 2 seconds
+                            current_time = time.time()
+                            if current_time - last_progress_time >= 2.0:
+                                if total_size > 0:
+                                    percent = (downloaded / total_size) * 100
+                                    mb_downloaded = downloaded / (1024 * 1024)
+                                    mb_total = total_size / (1024 * 1024)
+                                    speed = (downloaded - last_progress_size) / (current_time - last_progress_time) / (1024 * 1024)
+                                    progress_msg = f"  Download progress: {percent:.1f}% ({mb_downloaded:.1f} MB / {mb_total:.1f} MB, {speed:.1f} MB/s)"
+                                    log.info(progress_msg)
+                                    print(progress_msg, flush=True)
+                                else:
+                                    mb_downloaded = downloaded / (1024 * 1024)
+                                    progress_msg = f"  Downloaded: {mb_downloaded:.1f} MB"
+                                    log.info(progress_msg)
+                                    print(progress_msg, flush=True)
+                                
+                                last_progress_time = current_time
+                                last_progress_size = downloaded
+                
+                # Final progress report
+                if total_size > 0:
+                    percent = (downloaded / total_size) * 100
+                    mb_downloaded = downloaded / (1024 * 1024)
+                    mb_total = total_size / (1024 * 1024)
+                    progress_msg = f"  Download complete: {percent:.1f}% ({mb_downloaded:.1f} MB / {mb_total:.1f} MB)"
+                    log.info(progress_msg)
+                    print(progress_msg, flush=True)
+                else:
+                    mb_downloaded = downloaded / (1024 * 1024)
+                    progress_msg = f"  Download complete: {mb_downloaded:.1f} MB"
+                    log.info(progress_msg)
+                    print(progress_msg, flush=True)
+                    
             tmp.replace(dest)
-            log.info("download complete: %s", dest)
             return
         except (requests.exceptions.SSLError,
                 requests.exceptions.ChunkedEncodingError,
@@ -270,10 +315,17 @@ def ensure_sbk(version: str, repo: str = "kmgowda/SBK", sbk_folder: Path | None 
 def ensure_sbk_charts(
     version: str,
     repo_url: str = "https://github.com/kmgowda/sbk-charts",
+    sbk_folder: Path | None = None,
     ssl_verify: bool = True,
 ) -> ChartsInstall:
     """Ensure sbk-charts <version> is installed in a dedicated venv."""
-    cache = _cache_root() / "sbk-charts" / version
+    # Use sbk_folder for caching if provided, otherwise use cache
+    if sbk_folder is None:
+        cache = _cache_root() / "sbk-charts" / version
+    else:
+        cache = sbk_folder / "sbk-charts" / version
+        cache.mkdir(parents=True, exist_ok=True)
+    
     venv_dir = cache / "venv"
     marker = cache / ".ok"
 
@@ -289,8 +341,6 @@ def ensure_sbk_charts(
             version,
         )
         marker.unlink(missing_ok=True)
-
-    cache.mkdir(parents=True, exist_ok=True)
 
     log.info("creating venv for sbk-charts %s at %s", version, venv_dir)
     builder = venv.EnvBuilder(with_pip=True, clear=True)

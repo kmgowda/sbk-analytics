@@ -5,7 +5,7 @@ Recognised keys (case-insensitive; dots / underscores / dashes equivalent):
     sbk.url                -> GitHub repo URL for SBK
                               (e.g. https://github.com/kmgowda/SBK)
     sbk.version            -> SBK release tag on that repo
-    sbk.folder             -> Local folder for SBK installation (default: ./.sbk)
+    sbk.folder             -> Local folder for SBK and sbk-charts installation (default: ./.sbk)
     sbk.jdk.version        -> JDK major version required by that SBK release
                               (default: 25). The orchestrator first looks for
                               an already-installed JDK whose major version
