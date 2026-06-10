@@ -598,7 +598,7 @@ def _jdk_url(version: str) -> str:
 def ensure_jdk(version: str = DEFAULT_JDK_VERSION, jdk_folder: Path | None = None, ssl_verify: bool = True) -> JdkInstall:
     """Ensure a JDK of the given major version is available.
 
-    Resolution order:
+    Resolution order (exactly as specified):
 
     1. **SBK_JAVA_HOME** -- if set and points to the required version, use it.
     2. **JAVA_HOME** -- if set and points to the required version, use it.
@@ -606,8 +606,14 @@ def ensure_jdk(version: str = DEFAULT_JDK_VERSION, jdk_folder: Path | None = Non
     4. **Specified folder** -- if jdk_folder is provided and contains the required version, use it.
     5. **Download** -- fetch Temurin of the requested major version from
        the Adoptium API, extract it under the specified folder (or cache if not specified),
-       and set SBK_JAVA_HOME to point to it.
+       and set SBK_JAVA_HOME to point to it for current and future builds.
     """
+    try:
+        required_major = int(version)
+    except ValueError:
+        log.error("Invalid JDK version '%s', must be a number", version)
+        raise ValueError(f"Invalid JDK version: {version}")
+
     # Use specified folder if provided, otherwise use cache
     if jdk_folder is None:
         cache = _cache_root() / "jdk" / version
@@ -618,59 +624,82 @@ def ensure_jdk(version: str = DEFAULT_JDK_VERSION, jdk_folder: Path | None = Non
     marker = cache / ".ok"
     home_file = cache / ".home"
 
+    # Helper function to check if a Java installation matches the required version
+    def _check_java_home(java_home: Path) -> bool:
+        """Check if java_home contains a JDK matching the required version."""
+        if not java_home:
+            return False
+        java_path = java_home / "bin" / "java"
+        if os.name == "nt":
+            java_path = java_home / "bin" / "java.exe"
+        if not java_path.exists():
+            log.debug("Java home %s does not contain bin/java", java_home)
+            return False
+        major = _java_major_version(java_path)
+        log.debug("Java home %s reports major=%s (required=%s)", java_home, major, required_major)
+        return major == required_major
+
     # 1. Check SBK_JAVA_HOME first (highest priority)
     sbk_java_home = os.environ.get("SBK_JAVA_HOME")
     if sbk_java_home:
-        java_path = Path(sbk_java_home) / "bin" / "java"
-        if os.name == "nt":
-            java_path = Path(sbk_java_home) / "bin" / "java.exe"
-        if java_path.exists():
-            major = _java_major_version(java_path)
-            try:
-                required_major = int(version)
-                if major == required_major:
-                    log.info(
-                        "SBK_JAVA_HOME points to JDK %s at %s; using it",
-                        major, sbk_java_home,
-                    )
-                    return JdkInstall(home=Path(sbk_java_home))
-            except ValueError:
-                pass
+        log.info("Checking SBK_JAVA_HOME=%s", sbk_java_home)
+        if _check_java_home(Path(sbk_java_home)):
+            log.info("SBK_JAVA_HOME points to JDK %s at %s; using it", required_major, sbk_java_home)
+            return JdkInstall(home=Path(sbk_java_home))
+        else:
+            log.warning("SBK_JAVA_HOME is set but does not contain JDK %s", required_major)
 
-    # 2. Check specified folder if provided
-    if jdk_folder and marker.exists() and home_file.exists():
-        home = Path(home_file.read_text().strip())
-        if (home / "bin" / "java").exists():
-            major = _java_major_version(home / "bin" / "java")
-            try:
-                required_major = int(version)
-                if major == required_major:
-                    log.info("JDK %s found in specified folder %s (cache hit)", version, home)
-                    # Set SBK_JAVA_HOME to point to this JDK
-                    os.environ["SBK_JAVA_HOME"] = str(home.resolve())
-                    return JdkInstall(home=home)
-            except ValueError:
-                pass
-        log.warning(
-            "JDK %s cache marker exists in specified folder but bin/java missing or wrong version; re-installing",
-            version,
-        )
-        marker.unlink(missing_ok=True)
-
-    # 3. Check pre-installed JDKs (JAVA_HOME, then PATH)
-    try:
-        required_major = int(version)
-    except ValueError:
-        required_major = -1
-    if required_major > 0:
-        existing = find_existing_jdk(required_major)
-        if existing is not None:
+    # 2. Check JAVA_HOME (second priority)
+    java_home = os.environ.get("JAVA_HOME")
+    if java_home:
+        log.info("Checking JAVA_HOME=%s", java_home)
+        if _check_java_home(Path(java_home)):
+            log.info("JAVA_HOME points to JDK %s at %s; using it", required_major, java_home)
             # Set SBK_JAVA_HOME to point to this JDK
-            os.environ["SBK_JAVA_HOME"] = str(existing)
-            return JdkInstall(home=existing)
+            os.environ["SBK_JAVA_HOME"] = str(Path(java_home).resolve())
+            return JdkInstall(home=Path(java_home))
+        else:
+            log.warning("JAVA_HOME is set but does not contain JDK %s", required_major)
 
-    # 4. Download JDK to specified folder or cache
-    log.info("downloading Temurin JDK %s to %s", version, cache)
+    # 3. Check java on PATH (third priority)
+    from shutil import which
+    java_exe = which("java")
+    if java_exe:
+        log.info("Checking java on PATH: %s", java_exe)
+        java_path = Path(java_exe)
+        # Derive JDK home from java executable location
+        if java_path.parent.name == "bin":
+            jdk_home = java_path.parent.parent
+            if _check_java_home(jdk_home):
+                log.info("java on PATH points to JDK %s at %s; using it", required_major, jdk_home)
+                # Set SBK_JAVA_HOME to point to this JDK
+                os.environ["SBK_JAVA_HOME"] = str(jdk_home.resolve())
+                return JdkInstall(home=jdk_home)
+        else:
+            log.debug("java on PATH is not in a JDK bin directory")
+        # Also check the version directly
+        major = _java_major_version(java_path)
+        if major == required_major:
+            log.info("java on PATH reports JDK %s; using it (though JDK home location is unclear)", required_major)
+            # We can't set SBK_JAVA_HOME properly in this case, but we can return the java path
+            # However, this might not work for SBK which needs the full JDK home
+            log.warning("java on PATH matches version %s but JDK home location unclear; may not work for SBK", required_major)
+
+    # 4. Check specified folder for cached version (fourth priority)
+    if jdk_folder and marker.exists() and home_file.exists():
+        cached_home = Path(home_file.read_text().strip())
+        log.info("Checking cached JDK in specified folder: %s", cached_home)
+        if _check_java_home(cached_home):
+            log.info("JDK %s found in specified folder %s (cache hit)", required_major, cached_home)
+            # Set SBK_JAVA_HOME to point to this JDK
+            os.environ["SBK_JAVA_HOME"] = str(cached_home.resolve())
+            return JdkInstall(home=cached_home)
+        else:
+            log.warning("Cached JDK in specified folder does not match version %s; re-downloading", required_major)
+            marker.unlink(missing_ok=True)
+
+    # 5. Download JDK to specified folder or cache (fifth priority)
+    log.info("No JDK %s found in SBK_JAVA_HOME, JAVA_HOME, PATH, or cache; downloading Temurin JDK %s to %s", required_major, version, cache)
     cache.mkdir(parents=True, exist_ok=True)
 
     url = _jdk_url(version)
@@ -704,7 +733,7 @@ def ensure_jdk(version: str = DEFAULT_JDK_VERSION, jdk_folder: Path | None = Non
     except OSError as e:
         log.debug("could not remove archive %s: %s", archive, e)
     
-    # Set SBK_JAVA_HOME to point to this JDK
+    # Set SBK_JAVA_HOME to point to this JDK (not JAVA_HOME)
     os.environ["SBK_JAVA_HOME"] = str(home.resolve())
-    log.info("JDK %s ready at %s (SBK_JAVA_HOME set)", version, home)
+    log.info("JDK %s downloaded and ready at %s (SBK_JAVA_HOME set for current and future builds)", version, home)
     return JdkInstall(home=home)

@@ -141,17 +141,37 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     p.add_argument(
         "-v", "--verbose", action="count", default=0, help="Increase log verbosity."
     )
+    p.add_argument(
+        "--forward-logs",
+        action="store_true",
+        help="Force real-time log forwarding (useful on some macOS terminals).",
+    )
     return p.parse_args(argv)
 
 
 def _setup_logging(verbosity: int) -> None:
     level = logging.WARNING - 10 * verbosity
     level = max(logging.DEBUG, level)
+    
+    # Force reconfiguration to ensure it works on all platforms
     logging.basicConfig(
         level=level,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
         datefmt="%H:%M:%S",
+        force=True,
+        handlers=[logging.StreamHandler(sys.stderr)],
     )
+    
+    # Ensure all handlers flush immediately (especially important for macOS)
+    for handler in logging.root.handlers:
+        if hasattr(handler, 'stream'):
+            handler.stream.flush()
+    
+    # Log configuration for debugging
+    log.debug("Logging configured at level %s", logging.getLevelName(level))
+    log.debug("Python version: %s", sys.version)
+    log.debug("Platform: %s", sys.platform)
+
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -226,6 +246,7 @@ def main(argv: list[str] | None = None) -> int:
     log_dir = work / "logs"
     results = run_jobs(
         executable, jobs, mode=cfg.mode, log_dir=log_dir, jdk_home=jdk.home,
+        forward_logs=args.forward_logs,
     )
 
     succeeded = [r for r in results if r.ok]

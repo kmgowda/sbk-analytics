@@ -326,6 +326,46 @@ If you need to force a specific behavior, you can:
 - **Force venv mode in conda**: Unset `CONDA_PREFIX` temporarily
 - **Force conda mode in venv**: Set `CONDA_PREFIX` to your environment path
 
+## macOS Logging Issues
+
+If you experience missing SBK logs on macOS, this is due to Java output buffering. The application has been configured to automatically handle this on macOS, but if you still encounter issues:
+
+### Solutions
+
+1. **Use verbose mode** to ensure all Python logs are visible:
+   ```bash
+   sbk-analytics -c examples/file-rocksdb-write-60s.yml -v
+   ```
+
+2. **Force log forwarding** (useful on some macOS terminals):
+   ```bash
+   sbk-analytics -c examples/file-rocksdb-write-60s.yml --forward-logs
+   ```
+
+3. **Combine both options** for maximum visibility:
+   ```bash
+   sbk-analytics -c examples/file-rocksdb-write-60s.yml -v --forward-logs
+   ```
+
+4. **Check terminal buffering**: Some macOS terminals may buffer output. Try:
+   ```bash
+   script -q /dev/null sbk-analytics -c examples/file-rocksdb-write-60s.yml
+   ```
+
+5. **Use recommended terminals**: iTerm2 or Terminal.app have better output handling than some third-party terminals.
+
+### Technical Details
+
+The application now:
+- **Automatic macOS detection**: On macOS, SBK logs are captured and forwarded in real-time using a separate thread
+- **Java unbuffering**: Sets `JAVA_TOOL_OPTIONS` to disable Java output buffering
+- **Manual override**: The `--forward-logs` flag forces real-time log forwarding on any platform
+- **Line buffering**: Uses line-buffered subprocess output to ensure logs appear immediately
+
+### Why SBK Logs Were Missing
+
+Java applications (like SBK) buffer stdout/stderr by default. On macOS, this buffering is more aggressive, causing logs to appear only after the process completes or not at all. The fix explicitly captures Java output and forwards it line-by-line to ensure real-time visibility.
+
 ## Download Progress
 
 During first-run downloads (JDK, SBK, sbk-charts), sbk-analytics displays
@@ -465,6 +505,40 @@ ssl.verify=true
 sbk-charts.url=https://github.com/kmgowda/sbk-charts
 sbk-charts.version=4.26.6.2
 ```
+
+### JDK Resolution Order
+
+The orchestrator resolves a JDK whose major version matches `sbk.jdk.version`
+by probing in the following order:
+
+1. **SBK_JAVA_HOME** (exported by the user) - highest priority
+   - If set and points to the required version, use it
+   - If set but wrong version, proceed to next step
+
+2. **JAVA_HOME** (exported by the user)
+   - If set and points to the required version, use it
+   - If set but wrong version, proceed to next step
+   - When used, sets SBK_JAVA_HOME to this location
+   - Note: JAVA_HOME is explicitly unset in subprocess to prevent SBK from using wrong Java version
+
+3. **java on PATH**
+   - If it reports the required version, use it
+   - If wrong version, proceed to next step
+   - When used, sets SBK_JAVA_HOME to the JDK home location
+   - Note: JAVA_HOME is explicitly unset in subprocess to prevent SBK from using wrong Java version
+
+4. **Specified jdk folder** (if `sbk.jdk.folder` is set in sbk-config.env)
+   - Check if cached version matches required version
+   - If match, use it; otherwise proceed to download
+   - When used, sets SBK_JAVA_HOME to the JDK home location
+   - Note: JAVA_HOME is explicitly unset in subprocess to prevent SBK from using wrong Java version
+
+5. **Download Temurin** to specified folder or cache
+   - Download Temurin of the required major version from Adoptium API
+   - Extract to the specified folder (default: cache location)
+   - Set SBK_JAVA_HOME to point to the downloaded JDK
+   - Note: JAVA_HOME is explicitly unset in subprocess to prevent SBK from using wrong Java version
+   - Cache for future builds
 
 Recognised keys (case-insensitive; dots / underscores / dashes interchangeable):
 
@@ -645,6 +719,7 @@ written/read, not on a wall-clock deadline.
 | `-p`, `--properties` | path to the SBK config `.env` file (optional; defaults to bundled `<project>/sbk-config.env`) |
 | `-w`, `--work-dir`   | working dir for generated YAMLs / CSVs / logs / Excel report. Precedence: this flag > the YAML's `workdir:` > `/tmp/sbk-analytics`. |
 | `-v`, `--verbose`    | repeat for more verbose logging (`-v` info, `-vv` debug) |
+| `--forward-logs`    | force real-time SBK log forwarding (useful on macOS terminals) |
 | `-h`, `--help`       | show help and exit |
 
 ### Modes

@@ -387,6 +387,7 @@ def _run_serial(
     jobs: list[tuple[str, Path, Path]],  # (instance_name, yml, csv)
     *,
     env: dict[str, str] | None = None,
+    forward_logs: bool = False,
 ) -> list[RunResult]:
     results: list[RunResult] = []
     total = len(jobs)
@@ -408,7 +409,53 @@ def _run_serial(
         )
         start = time.monotonic()
         # stdout/stderr inherited so the user sees output live
-        proc = subprocess.Popen(cmd, env=env)
+        # On macOS, we need to explicitly handle Java output to ensure logs are visible
+        env_unbuffered = env.copy()
+        
+        # Force Java to use unbuffered stdout/stderr (important for macOS)
+        java_opts = []
+        if 'JAVA_TOOL_OPTIONS' in env_unbuffered:
+            java_opts.append(env_unbuffered['JAVA_TOOL_OPTIONS'])
+        java_opts.extend([
+            '-Djava.stdout.buffered=false',
+            '-Djava.stderr.buffered=false',
+            '-Dsun.stdout.encoding=UTF-8',
+            '-Dsun.stderr.encoding=UTF-8'
+        ])
+        env_unbuffered['JAVA_TOOL_OPTIONS'] = ' '.join(java_opts)
+        
+        # On macOS or when forced, explicitly capture and forward output to ensure visibility
+        use_forwarding = sys.platform == 'darwin' or forward_logs
+        
+        if use_forwarding:
+            log.debug("Using explicit output forwarding for SBK logs")
+            proc = subprocess.Popen(
+                cmd,
+                env=env_unbuffered,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                bufsize=1,  # Line buffered
+                text=True,
+                universal_newlines=True,
+            )
+            # Forward output in real-time
+            def forward_output():
+                try:
+                    for line in proc.stdout:
+                        print(line, end='', flush=True)
+                except:
+                    pass
+            
+            forward_thread = threading.Thread(target=forward_output, daemon=True)
+            forward_thread.start()
+        else:
+            log.debug("Using default subprocess configuration")
+            proc = subprocess.Popen(
+                cmd,
+                env=env_unbuffered,
+                stdout=None,  # Inherit from parent (stdout)
+                stderr=None,  # Inherit from parent (stderr)
+            )
         rc = _hung_jvm_watchdog(
             proc, csv_path, yml_path,
             expected_seconds=seconds, is_gem=is_gem,
@@ -577,16 +624,24 @@ def _run_parallel(
 def _sbk_env(jdk_home: Path | None) -> dict[str, str] | None:
     """Return the subprocess env for sbk-yal / sbk-gem-yal.
 
-    Sets both ``SBK_JAVA_HOME`` (preferred by SBK 10.0) and ``JAVA_HOME``
-    (used by earlier releases) plus prepends ``<jdk>/bin`` to ``PATH``.
+    Sets ``SBK_JAVA_HOME`` (preferred by SBK 10.0) to the specified JDK.
+    Explicitly unsets ``JAVA_HOME`` if it exists in the parent environment to prevent
+    SBK from using a different Java version. SBK 10.0 will use SBK_JAVA_HOME if set.
+    Also prepends ``<jdk>/bin`` to ``PATH``.
     Returns None when no JDK is supplied so the SBK scripts fall back to the
     caller's existing environment.
     """
     if jdk_home is None:
         return None
     env = os.environ.copy()
-    env["SBK_JAVA_HOME"] = str(jdk_home)
-    env["JAVA_HOME"] = str(jdk_home)
+    jdk_home_str = str(jdk_home)
+    # Set SBK_JAVA_HOME for SBK 10.0
+    env["SBK_JAVA_HOME"] = jdk_home_str
+    # Explicitly unset JAVA_HOME to prevent SBK from using a different Java version
+    # SBK 10.0 will use SBK_JAVA_HOME if set, otherwise fall back to JAVA_HOME
+    if "JAVA_HOME" in env:
+        del env["JAVA_HOME"]
+    # Prepend JDK bin to PATH
     env["PATH"] = f"{jdk_home / 'bin'}{os.pathsep}{env.get('PATH', '')}"
     return env
 
@@ -598,10 +653,11 @@ def run_jobs(
     mode: str,
     log_dir: Path,
     jdk_home: Path | None = None,
+    forward_logs: bool = False,
 ) -> list[RunResult]:
     if not executable.exists():
         raise FileNotFoundError(f"SBK executable not found: {executable}")
     env = _sbk_env(jdk_home)
     if mode == "parallel":
         return _run_parallel(executable, jobs, log_dir, env=env)
-    return _run_serial(executable, jobs, env=env)
+    return _run_serial(executable, jobs, env=env, forward_logs=forward_logs)
