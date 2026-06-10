@@ -1,0 +1,12 @@
+name: sbk-analytics
+channels:
+  - conda-forge
+  - pytorch
+dependencies:
+  - python=3.10
+  - pip
+  - pyyaml
+  - requests
+  - pytorch
+  # Note: sbk-charts is installed by sbk-analytics based on sbk-config.env
+  # not here, to ensure version consistency with the configuration file
