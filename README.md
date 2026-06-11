@@ -45,6 +45,34 @@ pip install -e .
 sbk-analytics -c examples/file-rocksdb-write-60s.yml
 ```
 
+## AI Agent Documentation
+
+**For AI coding assistants**: See [analytics/AGENTS.md](analytics/AGENTS.md) for comprehensive documentation including:
+
+- **Project Structure**: Detailed file-by-file breakdown
+- **Architecture Overview**: Component interactions and data flow
+- **Development Workflow**: How to make changes and test them
+- **Key Design Decisions**: Important architectural choices
+- **Troubleshooting Guide**: Common issues and solutions
+- **Release Process**: How to build and distribute packages
+
+### Quick Reference for AI Agents
+- **Main package**: `analytics/` (Python package)
+- **Entry point**: `analytics/cli.py:main()`
+- **Configuration**: `sbk-config.env` (SBK versions, URLs, folders)
+- **Examples**: `examples/` directory
+- **Dependencies**: `requirements.txt` and `pyproject.toml`
+- **Key modules**: `cli.py`, `releases.py`, `runner.py`, `charts.py`, `yaml_gen.py`
+
+## Additional Documentation
+
+- **[analytics/ARCHITECTURE.md](analytics/ARCHITECTURE.md)** - High-level architecture and design
+- **[analytics/CONTRIBUTING.md](analytics/CONTRIBUTING.md)** - Guidelines for contributors
+- **[analytics/DEVELOPMENT.md](analytics/DEVELOPMENT.md)** - Quick development reference
+- **[analytics/SUPPORT.md](analytics/SUPPORT.md)** - Help and troubleshooting guide
+- **[analytics/CHANGELOG.md](analytics/CHANGELOG.md)** - Version history and changes
+- **[analytics/AGENTS.md](analytics/AGENTS.md)** - Comprehensive AI agent documentation
+
 ## File Path Configuration
 
 ### Work Directory

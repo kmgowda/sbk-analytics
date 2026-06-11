@@ -10,6 +10,20 @@ readme = "README.md"
 requires-python = ">=3.9"
 license = {text = "Apache-2.0"}
 authors = [{name = "sbk-analytics contributors"}]
+keywords = ["benchmark", "storage", "performance", "analytics", "sbk"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Topic :: System :: Benchmark",
+    "Topic :: System :: Monitoring",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Operating System :: OS Independent",
+]
 dependencies = [
     "PyYAML>=6.0",
     "requests>=2.28",
@@ -19,11 +33,23 @@ dependencies = [
     "openpyxl-image-loader>=1.0",
 ]
 
+[project.urls]
+Homepage = "https://github.com/kmgowda/sbk-analytics"
+Documentation = "https://github.com/kmgowda/sbk-analytics#readme"
+Repository = "https://github.com/kmgowda/sbk-analytics"
+Issues = "https://github.com/kmgowda/sbk-analytics/issues"
+
 [project.scripts]
 sbk-analytics = "analytics.cli:main"
+
+[tool.setuptools]
+include-package-data = true
 
 [tool.setuptools.packages.find]
 include = ["analytics*"]
 
 [tool.setuptools.package-data]
-analytics = ["banner.txt"]
+analytics = ["banner.txt", "README.md", "AGENTS.md", "ARCHITECTURE.md", "CONTRIBUTING.md", "DEVELOPMENT.md", "SUPPORT.md", "CHANGELOG.md", "CODEOWNERS"]
+
+[tool.setuptools.dynamic]
+readme = {file = "README.md"}

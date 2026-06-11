@@ -1,0 +1,12 @@
+include README.md
+include LICENSE
+include requirements.txt
+include pyproject.toml
+include environment.yml
+include sbk-config.env
+recursive-include analytics *.py
+recursive-include analytics *.txt
+recursive-include analytics *.md
+recursive-include examples *.yml
+recursive-include examples *.env
+recursive-include .github *.md

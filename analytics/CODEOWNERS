@@ -1,0 +1,23 @@
+# Code Owners for sbk-analytics
+
+# This file helps define who owns which parts of the codebase.
+# Useful for code reviews and understanding responsibility areas.
+
+# Core maintainers
+* @kmgowda
+
+# Specific areas
+analytics/ @kmgowda
+examples/ @kmgowda
+sbk-config.env @kmgowda
+environment.yml @kmgowda
+
+# Documentation
+*.md @kmgowda
+README.md @kmgowda
+AGENTS.md @kmgowda
+CONTRIBUTING.md @kmgowda
+
+# Configuration
+pyproject.toml @kmgowda
+requirements.txt @kmgowda
