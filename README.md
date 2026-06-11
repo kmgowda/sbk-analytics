@@ -53,6 +53,12 @@ sbk-analytics -c examples/file-rocksdb-write-60s.yml
 - **Architecture Overview**: Component interactions and data flow
 - **Development Workflow**: How to make changes and test them
 - **Key Design Decisions**: Important architectural choices
+- **YAML Configuration Generation**: Complete guide for generating workload YAML files, including:
+  - YAML schema and parameter reference
+  - All storage driver classes and their parameters
+  - Common workload patterns with examples
+  - Best practices for YAML generation
+  - Validation rules and troubleshooting
 - **Troubleshooting Guide**: Common issues and solutions
 - **Release Process**: How to build and distribute packages
 

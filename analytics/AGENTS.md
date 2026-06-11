@@ -403,6 +403,499 @@ Excel Output
 - **Issues**: Report bugs via GitHub Issues
 - **License**: Apache-2.0
 
+## YAML Configuration Generation for AI Agents
+
+This section provides comprehensive guidance for AI agents on how to generate valid YAML configuration files for sbk-analytics workloads.
+
+### YAML Schema Overview
+
+sbk-analytics uses YAML configuration files to define benchmark workloads. The schema consists of several key sections:
+
+```yaml
+mode: serial | parallel              # Execution mode
+workdir: /path/to/workdir           # Working directory for outputs
+
+sbk:                                # Shared SBK parameters (defaults for all instances)
+  seconds: 60
+  size: 100
+  time: ms
+  writers: 1
+
+classes:                            # List of benchmark instances
+  - class: file
+    file: /tmp/benchmark.dat
+  - class: rocksdb
+    rfile: /tmp/benchmark
+
+class_params:                       # Optional per-class defaults
+  file: {writers: 1}
+  rocksdb: {writers: 1}
+
+sbk-charts:                         # sbk-charts options
+  output: results.xlsx
+  ai_model: noai
+  ai_params: {}
+  chat: false
+  use_files: []                     # Optional pre-existing CSV files
+```
+
+### Parameter Resolution Order
+
+Parameters are resolved in the following order (lowest to highest precedence):
+
+1. **Shared `sbk:` block** - Defaults for ALL instances
+2. **`class_params[<class>]`** - Per-class defaults (if specified)
+3. **Instance's own keys** - Per-instance overrides in `classes:` list
+4. **Orchestrator-managed** - `class`, `out=CSVLogger`, `csvfile=<unique-path>`
+
+This means an instance only needs to specify parameters that differ from the shared defaults.
+
+### Benchmark Classes and Parameters
+
+#### Common SBK Parameters
+
+These parameters can be specified in the `sbk:` block or per-instance:
+
+- `seconds: <int>` - Benchmark duration in seconds
+- `size: <int>` - Record size in bytes
+- `time: ns|ms|us|s` - Time unit for operations
+- `writers: <int>` - Number of writer threads
+- `readers: <int>` - Number of reader threads
+- `nodes: <list|string>` - Cluster nodes (triggers sbk-gem-yal mode)
+- `recordcount: <int>` - Total number of records
+- `operations: <int>` - Total number of operations
+- `warmup: <int>` - Warmup duration in seconds
+
+#### Storage Driver Classes
+
+**File Driver (`file`)**
+```yaml
+- class: file
+  file: /path/to/file.dat        # Required: file path
+  # Optional: inherits from sbk: block
+  writers: 1
+  readers: 1
+```
+
+**RocksDB Driver (`rocksdb`)**
+```yaml
+- class: rocksdb
+  rfile: /path/to/db             # Required: RocksDB directory
+  # Optional: inherits from sbk: block
+  writers: 1
+  readers: 1
+```
+
+**HDFS Driver (`hdfs`)**
+```yaml
+- class: hdfs
+  uri: hdfs://namenode:9000      # Required: HDFS URI
+  fname: /path/in/hdfs           # Required: HDFS file path
+  # Optional: inherits from sbk: block
+  writers: 1
+```
+
+**Kafka Driver (`kafka`)**
+```yaml
+- class: kafka
+  brokers: localhost:9092       # Required: Kafka brokers
+  topic: benchmark-topic        # Required: Kafka topic
+  # Optional: inherits from sbk: block
+  writers: 1
+  readers: 1
+```
+
+**Pulsar Driver (`pulsar`)**
+```yaml
+- class: pulsar
+  service_url: pulsar://localhost:6650  # Required: Pulsar service URL
+  topic: persistent://public/default/benchmark  # Required: Pulsar topic
+  # Optional: inherits from sbk: block
+  writers: 1
+  readers: 1
+```
+
+**Cassandra Driver (`cassandra`)**
+```yaml
+- class: cassandra
+  host: localhost               # Required: Cassandra host
+  port: 9042                    # Required: Cassandra port
+  keyspace: benchmark_ks        # Required: Keyspace name
+  table: benchmark_table        # Required: Table name
+  # Optional: inherits from sbk: block
+  writers: 1
+  readers: 1
+```
+
+### YAML Declaration Styles
+
+#### Style A: Simple Class List (Legacy)
+```yaml
+classes: [file, rocksdb, hdfs]
+class_params:
+  file: {file: /tmp/file.dat, writers: 1}
+  rocksdb: {rfile: /tmp/rocksdb, writers: 1}
+  hdfs: {uri: hdfs://localhost:9000, fname: /tmp/hdfs, writers: 1}
+```
+
+#### Style B: Detailed Instance List (Recommended)
+```yaml
+classes:
+  - class: file
+    file: /tmp/file.dat
+    writers: 1
+  - class: rocksdb
+    rfile: /tmp/rocksdb
+    writers: 1
+  - class: hdfs
+    uri: hdfs://localhost:9000
+    fname: /tmp/hdfs
+    writers: 1
+```
+
+#### Style C: Mixed with Custom Names
+```yaml
+classes:
+  - class: file
+    name: file-write-heavy
+    file: /tmp/file.dat
+    writers: 4
+  - class: file
+    name: file-read-light
+    file: /tmp/file.dat
+    readers: 2
+  - class: rocksdb
+    name: rocksdb-standard
+    rfile: /tmp/rocksdb
+```
+
+### Common Workload Patterns
+
+#### Pattern 1: Single-Writer Comparison
+Compare different storage systems with identical write patterns:
+```yaml
+mode: serial
+sbk:
+  seconds: 60
+  size: 1000
+  writers: 1
+classes:
+  - class: file
+    file: /tmp/benchmark/file.dat
+  - class: rocksdb
+    rfile: /tmp/benchmark/rocksdb
+  - class: hdfs
+    uri: hdfs://localhost:9000
+    fname: /tmp/benchmark/hdfs
+```
+
+#### Pattern 2: Read-Write Mix
+Test both read and write operations:
+```yaml
+mode: serial
+sbk:
+  seconds: 60
+  size: 100
+classes:
+  - class: file
+    name: file-write
+    file: /tmp/benchmark/file.dat
+    writers: 1
+  - class: file
+    name: file-read
+    file: /tmp/benchmark/file.dat
+    readers: 1
+  - class: rocksdb
+    name: rocksdb-write
+    rfile: /tmp/benchmark/rocksdb
+    writers: 1
+  - class: rocksdb
+    name: rocksdb-read
+    rfile: /tmp/benchmark/rocksdb
+    readers: 1
+```
+
+#### Pattern 3: Scalability Test
+Vary the number of writers to test scalability:
+```yaml
+mode: parallel
+sbk:
+  seconds: 60
+  size: 100
+classes:
+  - class: file
+    name: file-1-writer
+    file: /tmp/benchmark/file-1.dat
+    writers: 1
+  - class: file
+    name: file-2-writers
+    file: /tmp/benchmark/file-2.dat
+    writers: 2
+  - class: file
+    name: file-4-writers
+    file: /tmp/benchmark/file-4.dat
+    writers: 4
+  - class: file
+    name: file-8-writers
+    file: /tmp/benchmark/file-8.dat
+    writers: 8
+```
+
+#### Pattern 4: Record Size Variation
+Test performance with different record sizes:
+```yaml
+mode: serial
+sbk:
+  seconds: 60
+  writers: 1
+classes:
+  - class: file
+    name: file-100b
+    file: /tmp/benchmark/file-100b.dat
+    size: 100
+  - class: file
+    name: file-1kb
+    file: /tmp/benchmark/file-1kb.dat
+    size: 1024
+  - class: file
+    name: file-10kb
+    file: /tmp/benchmark/file-10kb.dat
+    size: 10240
+  - class: file
+    name: file-100kb
+    file: /tmp/benchmark/file-100kb.dat
+    size: 102400
+```
+
+#### Pattern 5: Cluster/Distributed Benchmark
+Use sbk-gem-yal for distributed testing:
+```yaml
+mode: serial
+sbk:
+  seconds: 60
+  size: 100
+  writers: 1
+  nodes: ["node1:8080", "node2:8080", "node3:8080"]  # Triggers sbk-gem-yal
+classes:
+  - class: file
+    file: /tmp/benchmark/file.dat
+  - class: rocksdb
+    rfile: /tmp/benchmark/rocksdb
+```
+
+### YAML Generation Best Practices
+
+#### 1. Use Shared Defaults
+Minimize repetition by using the `sbk:` block for common parameters:
+```yaml
+# Good
+sbk:
+  seconds: 60
+  size: 100
+  writers: 1
+classes:
+  - class: file
+    file: /tmp/file.dat
+  - class: rocksdb
+    rfile: /tmp/rocksdb
+
+# Avoid repetition
+classes:
+  - class: file
+    seconds: 60
+    size: 100
+    writers: 1
+    file: /tmp/file.dat
+  - class: rocksdb
+    seconds: 60
+    size: 100
+    writers: 1
+    rfile: /tmp/rocksdb
+```
+
+#### 2. Use Descriptive Instance Names
+When using Style B, provide meaningful names:
+```yaml
+classes:
+  - class: file
+    name: file-write-4k-records
+    file: /tmp/file.dat
+    size: 4096
+  - class: rocksdb
+    name: rocksdb-read-1k-records
+    rfile: /tmp/rocksdb
+    size: 1024
+```
+
+#### 3. Ensure File Path Existence
+Make sure parent directories exist for file paths:
+```yaml
+# Use workdir for consistent file locations
+workdir: /tmp/sbk-analytics
+classes:
+  - class: file
+    file: /tmp/sbk-analytics/file.dat    # Parent will be created
+  - class: rocksdb
+    rfile: /tmp/sbk-analytics/rocksdb   # Parent will be created
+```
+
+#### 4. Choose Appropriate Execution Mode
+- **Serial**: Use for debugging or when resources are limited
+- **Parallel**: Use for independent benchmarks to speed up execution
+
+#### 5. Validate YAML Structure
+Ensure required parameters are present for each class:
+- `file`: Requires `file` parameter
+- `rocksdb`: Requires `rfile` parameter
+- `hdfs`: Requires `uri` and `fname` parameters
+- `kafka`: Requires `brokers` and `topic` parameters
+- `pulsar`: Requires `service_url` and `topic` parameters
+- `cassandra`: Requires `host`, `port`, `keyspace`, and `table` parameters
+
+### Validation Rules
+
+AI agents should validate YAML configurations against these rules:
+
+1. **Required Top-Level Keys**: `classes` must be present and non-empty
+2. **Valid Mode**: `mode` must be `serial` or `parallel`
+3. **Valid AI Model**: `ai_model` must be one of `huggingface`, `ollama`, `lmstudio`, `noai`
+4. **Unique Instance Names**: All instance names must be unique
+5. **Class-Specific Parameters**: Each storage class must have its required parameters
+6. **File Path Safety**: File paths should be absolute or relative to workdir
+7. **Numeric Parameters**: Numeric parameters should be positive integers
+8. **Time Units**: `time` parameter should be one of `ns`, `ms`, `us`, `s`
+
+### AI Agent YAML Generation Workflow
+
+When generating YAML configurations, AI agents should follow this workflow:
+
+1. **Understand the Benchmark Goal**
+   - What storage systems are being compared?
+   - What operations (read/write/mixed) are being tested?
+   - What variables (size, threads, duration) are being tested?
+
+2. **Choose Execution Mode**
+   - Use `serial` for debugging or resource-constrained environments
+   - Use `parallel` for independent benchmarks
+
+3. **Set Shared Defaults**
+   - Define common parameters in the `sbk:` block
+   - Include duration, record size, and default thread counts
+
+4. **Define Benchmark Instances**
+   - Use Style B (detailed instance list) for clarity
+   - Provide descriptive names for each instance
+   - Specify only parameters that differ from defaults
+
+5. **Configure sbk-charts**
+   - Set appropriate output filename
+   - Choose AI model if analysis is needed
+   - Add any pre-existing CSV files via `use_files`
+
+6. **Validate the Configuration**
+   - Check all required parameters are present
+   - Ensure file paths are appropriate
+   - Verify instance names are unique
+   - Confirm mode and AI model are valid
+
+### Example: AI Agent YAML Generation
+
+**User Request**: "Create a benchmark comparing file and rocksdb write performance with 1, 2, and 4 writers, running for 60 seconds with 1KB records."
+
+**AI Agent Response**:
+```yaml
+mode: parallel
+workdir: /tmp/sbk-analytics
+
+sbk:
+  seconds: 60
+  size: 1024                    # 1KB records
+  time: ms
+  writers: 1                    # Default, will be overridden
+
+classes:
+  # File driver with varying writers
+  - class: file
+    name: file-1-writer
+    file: /tmp/sbk-analytics/file-1w.dat
+    writers: 1
+  - class: file
+    name: file-2-writers
+    file: /tmp/sbk-analytics/file-2w.dat
+    writers: 2
+  - class: file
+    name: file-4-writers
+    file: /tmp/sbk-analytics/file-4w.dat
+    writers: 4
+  
+  # RocksDB driver with varying writers
+  - class: rocksdb
+    name: rocksdb-1-writer
+    rfile: /tmp/sbk-analytics/rocksdb-1w
+    writers: 1
+  - class: rocksdb
+    name: rocksdb-2-writers
+    rfile: /tmp/sbk-analytics/rocksdb-2w
+    writers: 2
+  - class: rocksdb
+    name: rocksdb-4-writers
+    rfile: /tmp/sbk-analytics/rocksdb-4w
+    writers: 4
+
+sbk-charts:
+  output: file-rocksdb-scalability.xlsx
+  ai_model: noai
+```
+
+### Advanced YAML Features
+
+#### Using class_params for Per-Class Defaults
+```yaml
+sbk:
+  seconds: 60
+  size: 100
+
+class_params:
+  file: {writers: 1, readers: 0}
+  rocksdb: {writers: 1, readers: 0}
+
+classes:
+  - class: file
+    file: /tmp/file.dat           # Inherits writers: 1, readers: 0
+  - class: rocksdb
+    rfile: /tmp/rocksdb          # Inherits writers: 1, readers: 0
+```
+
+#### Combining with Existing CSV Files
+```yaml
+sbk-charts:
+  output: comparison.xlsx
+  use_files:
+    - /data/baseline/file-baseline.csv
+    - /data/baseline/rocksdb-baseline.csv
+```
+
+#### AI Analytics Integration
+```yaml
+sbk-charts:
+  output: analysis.xlsx
+  ai_model: huggingface
+  ai_params:
+    model: "mistralai/Mistral-7B-Instruct-v0.2"
+    temperature: 0.7
+  chat: true
+```
+
+### Troubleshooting YAML Generation
+
+**Common Issues and Solutions**:
+
+1. **Missing Required Parameters**: Ensure each storage class has its required parameters
+2. **Duplicate Instance Names**: Use unique `name:` values for each instance
+3. **Invalid File Paths**: Use absolute paths or paths relative to workdir
+4. **Wrong Execution Mode**: Use `parallel` for independent benchmarks, `serial` for dependent ones
+5. **Parameter Override Issues**: Remember parameter resolution order when debugging
+
 ## Version History
 
 - **0.1.0**: Initial release
