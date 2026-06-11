@@ -126,9 +126,9 @@ orchestrates need a working runtime on the host:
 | Tool | Required version | Notes |
 | --- | --- | --- |
 | Python    | ≥ 3.9      | Tested with 3.10 / 3.12. |
-| JDK       | ≥ matching SBK build (e.g. SBK 9.0 needs **JDK 25**) | The SBK release archive ships `.class` files compiled with a specific JDK; the orchestrator does not bundle Java. |
+| JDK       | ≥ matching SBK build (e.g. SBK 10.0 needs **JDK 25**) | Automatically resolved and cached by default. The SBK release archive ships `.class` files compiled with a specific JDK. |
 | `git`     | any        | Used by `pip` to install `sbk-charts` from its GitHub tag. |
-| Internet access | yes  | First run downloads the SBK release tar from GitHub and pip-installs `sbk-charts`. Subsequent runs are offline. |
+| Internet access | yes  | First run downloads the JDK, SBK release tar from GitHub, and pip-installs `sbk-charts`. Subsequent runs are offline. |
 
 If your network intercepts TLS (corporate proxy with a custom root CA),
 set `ssl.verify=false` in your `sbk-config.env` file:
@@ -321,31 +321,47 @@ sbk-analytics automatically detects whether you're using conda or venv and adjus
 - **Detection**: Checks for `CONDA_PREFIX` environment variable
 - **Behavior**: Installs sbk-charts directly in the conda environment
 - **Benefits**: Uses conda's PyTorch package for better platform compatibility
-- **Cache**: No separate venv for sbk-charts; uses conda environment
-- **Folder Structure**:
+- **Cache**: No separate venv for sbk-charts; uses conda environment (no caching)
+- **Folder Structure** (default project-local):
   ```
-  .sbk/
-  ├── 10.0/              # SBK installation
-  └── sbk-charts/        # sbk-charts cache (metadata only, not venv)
-      └── <version>/     # Version from sbk-config.env
-          └── .ok       # Installation marker
+  ./.sbk/
+  ├── <sbk.version>/         # SBK installation
+  │   ├── .ok              # Installation marker
+  │   ├── .home            # Path to extracted SBK home
+  │   └── extracted/       # Extracted SBK distribution
+  └── sbk-charts/          # sbk-charts metadata (no venv in conda mode)
+  
+  ./.jdk/
+  └── <jdk.version>/        # JDK installation
+      ├── .ok              # Installation marker
+      ├── .home            # Path to JDK home
+      └── extracted/       # Extracted JDK distribution
   ```
 
 #### Venv Environment Detection
 - **Detection**: Assumes venv when `CONDA_PREFIX` is not set
-- **Behavior**: Creates isolated venv for sbk-charts under `{sbk.folder}/sbk-charts/{version}/venv`
+- **Behavior**: Creates isolated venv for sbk-charts under project folder
 - **Benefits**: Complete isolation from system Python
 - **Cache**: Caches sbk-charts venv for faster subsequent runs
-- **Folder Structure**:
+- **Folder Structure** (default project-local):
   ```
-  .sbk/
-  ├── 10.0/              # SBK installation
-  └── sbk-charts/        # sbk-charts cache with full venv
-      └── <version>/     # Version from sbk-config.env
-          ├── .ok       # Installation marker
-          └── venv/     # Isolated Python environment
+  ./.sbk/
+  ├── <sbk.version>/         # SBK installation
+  │   ├── .ok              # Installation marker
+  │   ├── .home            # Path to extracted SBK home
+  │   └── extracted/       # Extracted SBK distribution
+  └── sbk-charts/
+      └── <sbk-charts.version>/ # sbk-charts cache with full venv
+          ├── .ok              # Installation marker
+          └── venv/            # Isolated Python environment
               ├── bin/
               └── lib/
+  
+  ./.jdk/
+  └── <jdk.version>/        # JDK installation
+      ├── .ok              # Installation marker
+      ├── .home            # Path to JDK home
+      └── extracted/       # Extracted JDK distribution
   ```
 
 #### Manual Override
@@ -463,15 +479,16 @@ sbk-analytics -c examples/file-rocksdb-write.yml -w ./run-1 -v
 
 What this does, step by step:
 
-1. **Resolve versions.** Reads `<repo>/sbk-config.env` for the SBK and
+1. **Resolve versions.** Reads `<repo>/sbk-config.env` for the SBK, JDK, and
    sbk-charts release tags.
 2. **Download / install (once).**
+   - Downloads the JDK (if needed) from Temurin and extracts it to
+     `./.jdk/<jdk.version>/extracted/` (or cache if configured differently). Cached on subsequent runs.
    - Downloads the SBK release archive from GitHub and extracts it to
-     `~/.cache/sbk-analytics/sbk/<sbk.version>/extracted/`. Cached on
-     subsequent runs.
-   - Installs `sbk-charts` of the configured tag into a private venv at
-     `~/.cache/sbk-analytics/sbk-charts/<sbk-charts.version>/venv/`. Cached
-     on subsequent runs.
+     `./.sbk/<sbk.version>/extracted/` (or cache if configured differently). Cached on subsequent runs.
+   - Installs `sbk-charts` of the configured tag (in conda environment or
+     isolated venv at `./.sbk/sbk-charts/<sbk-charts.version>/venv/`).
+     Cached on subsequent runs (venv mode only).
 3. **Generate per-instance YAMLs.** One YAML per `classes:` entry under
    `<work-dir>/yml/`, each forced to write CSV via `CSVLogger` to a unique
    `<work-dir>/csv/sbk-<instance>.csv`.
@@ -492,15 +509,11 @@ What this does, step by step:
 # 1. Activate the venv created during "Build / install"
 . .venv/bin/activate
 
-# 2. Make sure JAVA_HOME points at a JDK new enough for the SBK build:
-#    SBK 9.0 needs JDK 25
-export JAVA_HOME=/opt/jdk-25
-export PATH=$JAVA_HOME/bin:$PATH
-
-# 3. Run a 120 s single-writer benchmark on `file` and `rocksdb`
+# 2. Run a 120 s single-writer benchmark on `file` and `rocksdb`
+#    JDK is automatically resolved and cached
 sbk-analytics -c examples/file-rocksdb-write.yml -w /tmp/sbk-bench/work -v
 
-# 4. Open the result
+# 3. Open the result
 ls /tmp/sbk-bench/sbk-analytics.xlsx
 ```
 
@@ -563,7 +576,7 @@ by probing in the following order:
 
 5. **Download Temurin** to specified folder or cache
    - Download Temurin of the required major version from Adoptium API
-   - Extract to the specified folder (default: cache location)
+   - Extract to the specified folder (default: `./.jdk/<version>/extracted/`) or cache location
    - Set SBK_JAVA_HOME to point to the downloaded JDK
    - Note: JAVA_HOME is explicitly unset in subprocess to prevent SBK from using wrong Java version
    - Cache for future builds
@@ -574,9 +587,9 @@ Recognised keys (case-insensitive; dots / underscores / dashes interchangeable):
 | --- | --- | --- |
 | `sbk.url`        | no (defaults to `https://github.com/kmgowda/SBK`)        | Full URL `https://github.com/<owner>/<repo>` or `<owner>/<repo>` shorthand. |
 | `sbk.version`    | yes | Tag that exists on that repository's Releases page. |
-| `sbk.folder`     | no (defaults to `./.sbk`) | Local folder for SBK and sbk-charts installation. |
+| `sbk.folder`     | no (defaults to `./.sbk`) | Local folder for SBK installation. Use `./.sbk` for project-local cache. |
 | `sbk.jdk.version`| no (defaults to `25`) | Required JDK major version. |
-| `sbk.jdk.folder`| no (defaults to `./.jdk`) | Local folder for JDK installation. |
+| `sbk.jdk.folder`| no (defaults to `./.jdk`) | Local folder for JDK installation. Use `./.jdk` for project-local cache. |
 | `ssl.verify`     | no (defaults to `true`) | Enable SSL verification for downloads. |
 | `sbk-charts.url` | no (defaults to `https://github.com/kmgowda/sbk-charts`) | Same format as `sbk.url`. |
 | `sbk-charts.version` | yes | Tag on the sbk-charts repository. |
@@ -795,25 +808,64 @@ or absolute) and that location is honoured verbatim.
 ## Caching
 
 Release artifacts are cached under `~/.cache/sbk-analytics/` (override with the
-`SBK_ANALYTICS_CACHE` environment variable). Set `GITHUB_TOKEN` to avoid
-unauthenticated rate limits when first downloading.
+`SBK_ANALYTICS_CACHE` environment variable) **OR** in project-local folders
+(`./.sbk/` for SBK/sbk-charts, `./.jdk/` for JDK) as configured in `sbk-config.env`.
+Set `GITHUB_TOKEN` to avoid unauthenticated rate limits when first downloading.
 
-Layout per version:
+### Default Cache Structure (project-local)
+
+By default, sbk-analytics uses project-local folders:
 
 ```
-~/.cache/sbk-analytics/
-├── sbk/<sbk.version>/extracted/sbk-<version>/   # SBK install (bin/, lib/)
-└── sbk-charts/<sbk-charts.version>/venv/        # sbk-charts venv
+./.sbk/
+├── <sbk.version>/             # SBK installation
+│   ├── .ok                    # Installation marker
+│   ├── .home                  # Path to extracted SBK home
+│   └── extracted/             # Extracted SBK distribution
+└── sbk-charts/
+    └── <sbk-charts.version>/ # sbk-charts cache (venv mode only)
+        ├── .ok                # Installation marker
+        └── venv/              # Isolated Python environment
+
+./.jdk/
+└── <jdk.version>/             # JDK installation
+    ├── .ok                    # Installation marker
+    ├── .home                  # Path to JDK home
+    └── extracted/             # Extracted JDK distribution
 ```
 
-The original SBK tarball is removed after extraction. Re-runs of the same
+### System Cache Structure (when SBK_ANALYTICS_CACHE is set)
+
+When `SBK_ANALYTICS_CACHE` is set or folders are explicitly set to non-default values:
+
+```
+~/.cache/sbk-analytics/ (or custom cache path)
+├── jdk/<jdk.version>/              # JDK installation
+│   ├── .ok                        # Installation marker
+│   ├── .home                      # Path to JDK home
+│   └── extracted/                 # Extracted JDK distribution
+├── sbk/<sbk.version>/             # SBK installation
+│   ├── .ok                        # Installation marker
+│   ├── .home                      # Path to extracted SBK home
+│   └── extracted/                 # Extracted SBK distribution
+└── sbk-charts/<sbk-charts.version>/  # sbk-charts cache (venv mode only)
+    ├── .ok                        # Installation marker
+    └── venv/                      # Isolated Python environment
+        ├── bin/
+        └── lib/
+```
+
+**Note**: In conda environments, sbk-charts is installed directly in the conda environment and is not cached separately.
+
+The original SBK tarball and JDK archive are removed after extraction. Re-runs of the same
 versions hit the cache and skip the download + install entirely.
 
 ## Troubleshooting
 
 - **`UnsupportedClassVersionError: ... class file version 69.0 ...`** — your
-  JDK is older than what the SBK release expects. SBK 9.0 needs JDK 25; install
-  Temurin 25 and point `JAVA_HOME` at it.
+  JDK is older than what the SBK release expects. SBK 10.0 needs JDK 25. The
+  orchestrator automatically resolves and downloads the correct JDK version by
+  default. If you need to use a specific JDK, set `SBK_JAVA_HOME` to point to it.
 - **`SSL: CERTIFICATE_VERIFY_FAILED ...`** — TLS interception by a corporate
   proxy. Export `REQUESTS_CA_BUNDLE`, `SSL_CERT_FILE`, `PIP_CERT`, and
   `GIT_SSL_CAINFO` to the local CA bundle (see [Prerequisites](#prerequisites)).
