@@ -37,7 +37,7 @@ def _print_banner() -> None:
         print(banner.format(version=__version__), file=sys.stderr, flush=True)
     except Exception:
         # Fallback if banner file is missing
-        print(f"sbk-analytics v{__version__}", file=sys.stderr, flush=True)
+        print(f"sbk-analytics version: {__version__}", file=sys.stderr, flush=True)
 
 
 def _parse_nodes(value) -> list[str]:

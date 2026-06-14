@@ -7,7 +7,7 @@
  |_____/|____/|_|\_\          /_/    \_\_| \_/_/    \_\______|_|     |_|  |_____\_____|_____/ 
                                                                                               
                                                                                               
-  sbk-analytics v{version}
+  sbk-analytics version: {version}
   Orchestrator for SBK benchmarks and sbk-charts analytics
   
   GitHub: https://github.com/kmgowda/sbk-analytics
