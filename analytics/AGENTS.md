@@ -898,12 +898,14 @@ sbk-charts:
 
 ## Version History
 
-- **0.1.0**: Initial release
+- **1.26.6.1**: Current release
   - JDK resolution with priority order
   - Conda and venv support
   - macOS logging fixes
   - Excel output with system information
   - AI analytics integration
+  - Apache 2.0 license headers added
+  - Comprehensive documentation for AI agents
 
 ## Related Documentation
 

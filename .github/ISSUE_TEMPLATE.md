@@ -25,7 +25,7 @@ What actually happened.
 ## Environment
 - OS: [e.g., Ubuntu 22.04, macOS 14, Windows 11]
 - Python version: [e.g., 3.10, 3.11]
-- sbk-analytics version: [e.g., 0.1.0]
+- sbk-analytics version: [e.g., 1.26.6.1]
 - JDK version: [e.g., 17, 21, 25]
 - SBK version: [e.g., 10.0]
 - sbk-charts version: [e.g., 4.26.6.2]
