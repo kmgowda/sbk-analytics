@@ -397,13 +397,15 @@ def _run_serial(
     *,
     env: dict[str, str] | None = None,
     forward_logs: bool = False,
+    executables: dict[str, Path] | None = None,
 ) -> list[RunResult]:
     results: list[RunResult] = []
     total = len(jobs)
     for idx, (class_name, yml_path, csv_path) in enumerate(jobs, start=1):
+        job_executable = (executables or {}).get(class_name, executable)
         _, is_gem = _read_yml(yml_path)
         seconds = _expected_seconds(yml_path)
-        cmd = _build_cmd(executable, yml_path)
+        cmd = _build_cmd(job_executable, yml_path)
         _print_sbk_banner(
             instance_name=class_name,
             is_gem=is_gem,
@@ -419,7 +421,7 @@ def _run_serial(
         start = time.monotonic()
         # stdout/stderr inherited so the user sees output live
         # On macOS, we need to explicitly handle Java output to ensure logs are visible
-        env_unbuffered = env.copy()
+        env_unbuffered = env.copy() if env is not None else os.environ.copy()
         
         # Force Java to use unbuffered stdout/stderr (important for macOS)
         java_opts = []
@@ -490,6 +492,7 @@ def _run_parallel(
     log_dir: Path,
     *,
     env: dict[str, str] | None = None,
+    executables: dict[str, Path] | None = None,
 ) -> list[RunResult]:
     print(PARALLEL_WARNING, file=sys.stderr, flush=True)
     log_dir.mkdir(parents=True, exist_ok=True)
@@ -507,11 +510,12 @@ def _run_parallel(
 
     total = len(jobs)
     for idx, (class_name, yml_path, csv_path) in enumerate(jobs, start=1):
+        job_executable = (executables or {}).get(class_name, executable)
         log_path = log_dir / f"sbk-{class_name}.log"
         f = log_path.open("w")
         _, is_gem = _read_yml(yml_path)
         seconds = _expected_seconds(yml_path)
-        cmd = _build_cmd(executable, yml_path)
+        cmd = _build_cmd(job_executable, yml_path)
         _print_sbk_banner(
             instance_name=class_name,
             is_gem=is_gem,
@@ -526,12 +530,17 @@ def _run_parallel(
             log_path=log_path,
         )
         start = time.monotonic()
-        p = subprocess.Popen(
-            cmd,
-            stdout=f,
-            stderr=subprocess.STDOUT,
-            env=env,
-        )
+        try:
+            p = subprocess.Popen(
+                cmd,
+                stdout=f,
+                stderr=subprocess.STDOUT,
+                env=env,
+            )
+        finally:
+            # Popen duplicates the descriptor for the child; the parent should
+            # not keep one log file open for every parallel benchmark.
+            f.close()
         remote_dl = (
             start + seconds + REMOTE_KILL_GRACE_S
             if (seconds is not None and is_gem)
@@ -663,10 +672,31 @@ def run_jobs(
     log_dir: Path,
     jdk_home: Path | None = None,
     forward_logs: bool = False,
+    executables: dict[str, Path] | None = None,
 ) -> list[RunResult]:
-    if not executable.exists():
-        raise FileNotFoundError(f"SBK executable not found: {executable}")
+    """Run benchmark jobs with an optional executable override per instance.
+
+    ``executable`` remains the default for backwards compatibility. Mixed
+    local/GEM plans pass ``executables`` keyed by the unique instance name.
+    """
+    required_executables = {
+        (executables or {}).get(class_name, executable)
+        for class_name, _, _ in jobs
+    }
+    for required_executable in required_executables:
+        if not required_executable.exists():
+            raise FileNotFoundError(
+                f"SBK executable not found: {required_executable}"
+            )
     env = _sbk_env(jdk_home)
     if mode == "parallel":
-        return _run_parallel(executable, jobs, log_dir, env=env)
-    return _run_serial(executable, jobs, env=env, forward_logs=forward_logs)
+        return _run_parallel(
+            executable, jobs, log_dir, env=env, executables=executables
+        )
+    return _run_serial(
+        executable,
+        jobs,
+        env=env,
+        forward_logs=forward_logs,
+        executables=executables,
+    )

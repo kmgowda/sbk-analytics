@@ -238,7 +238,13 @@ def main(argv: list[str] | None = None) -> int:
     print(f"✓ sbk-charts {versions.sbk_charts} ready", flush=True)
 
     executable = sbk.sbk_gem_yal if cfg.uses_gem else sbk.sbk_yal
-    log.info("using SBK executable: %s", executable)
+    executables = {
+        inst.name: sbk.sbk_gem_yal if inst.uses_gem else sbk.sbk_yal
+        for inst in cfg.instances
+    }
+    log.info("default SBK executable: %s", executable)
+    for inst in cfg.instances:
+        log.info("SBK executable for %s: %s", inst.name, executables[inst.name])
 
     # 2. Generate per-class YAMLs
     yml_dir = work / "yml"
@@ -255,7 +261,7 @@ def main(argv: list[str] | None = None) -> int:
     log_dir = work / "logs"
     results = run_jobs(
         executable, jobs, mode=cfg.mode, log_dir=log_dir, jdk_home=jdk.home,
-        forward_logs=args.forward_logs,
+        forward_logs=args.forward_logs, executables=executables,
     )
 
     succeeded = [r for r in results if r.ok]

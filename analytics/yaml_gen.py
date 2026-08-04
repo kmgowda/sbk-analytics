@@ -48,7 +48,7 @@ def generate_instance_yaml(
     params["csvfile"] = str(csv_path)
 
     wrapper_key = "sbkArgs"
-    if "nodes" in params:
+    if inst.uses_gem:
         params["nodes"] = _normalise_nodes(params["nodes"])
         wrapper_key = "sbkGemArgs"
 

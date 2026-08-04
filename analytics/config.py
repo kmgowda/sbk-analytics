@@ -79,6 +79,11 @@ class Instance:
     class_name: str      # SBK storage class (e.g. 'file', 'rocksdb')
     params: dict[str, Any]  # already merged with shared sbk-params
 
+    @property
+    def uses_gem(self) -> bool:
+        """Whether this instance requires the distributed GEM runner."""
+        return _has_value(self.params.get("nodes"))
+
 
 DEFAULT_WORKDIR = "/tmp/sbk-analytics"
 
@@ -102,16 +107,34 @@ class OrchestratorConfig:
     def uses_gem(self) -> bool:
         """True if SBK-GEM-YAL should be used (i.e. 'nodes' is set in shared
         sbk params or in *any* instance's params)."""
-        def _has(v: Any) -> bool:
-            if v is None:
-                return False
-            if isinstance(v, (list, tuple)):
-                return len(v) > 0
-            return bool(str(v).strip())
+        return any(instance.uses_gem for instance in self.instances)
 
-        if _has(self.sbk_params.get("nodes")):
+
+def _has_value(value: Any) -> bool:
+    """Return whether a configuration value is meaningfully populated."""
+    if value is None:
+        return False
+    if isinstance(value, (list, tuple)):
+        return len(value) > 0
+    return bool(str(value).strip())
+
+
+def _parse_bool(value: Any, field_name: str) -> bool:
+    """Parse a YAML boolean without treating every non-empty string as true."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int) and value in (0, 1):
+        return bool(value)
+    if isinstance(value, str):
+        normalised = value.strip().lower()
+        if normalised in ("true", "yes", "on", "1"):
             return True
-        return any(_has(i.params.get("nodes")) for i in self.instances)
+        if normalised in ("false", "no", "off", "0"):
+            return False
+    raise ValueError(
+        f"'{field_name}' must be a boolean "
+        f"(true/false, yes/no, on/off, or 1/0), got {value!r}"
+    )
 
 
 def _first(d: dict, *names: str, default=None):
@@ -237,7 +260,10 @@ def _parse_sbk_charts_group(
     if not isinstance(ai_params, dict):
         raise ValueError("'sbk-charts.ai_params' must be a mapping")
 
-    chat = bool(_first(group, "chat", "chat_mode", "chat-mode", default=False))
+    chat = _parse_bool(
+        _first(group, "chat", "chat_mode", "chat-mode", default=False),
+        "sbk-charts.chat",
+    )
 
     use_files_raw = _first(group, "use_files", "use-files", "usefiles", default=None)
     if use_files_raw is None:
