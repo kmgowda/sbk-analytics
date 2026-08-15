@@ -398,6 +398,7 @@ def _run_serial(
     env: dict[str, str] | None = None,
     forward_logs: bool = False,
     executables: dict[str, Path] | None = None,
+    output_to_stderr: bool = False,
 ) -> list[RunResult]:
     results: list[RunResult] = []
     total = len(jobs)
@@ -453,7 +454,10 @@ def _run_serial(
             def forward_output():
                 try:
                     for line in proc.stdout:
-                        print(line, end='', flush=True)
+                        print(
+                            line, end='', flush=True,
+                            file=sys.stderr if output_to_stderr else sys.stdout,
+                        )
                 except:
                     pass
             
@@ -464,8 +468,8 @@ def _run_serial(
             proc = subprocess.Popen(
                 cmd,
                 env=env_unbuffered,
-                stdout=None,  # Inherit from parent (stdout)
-                stderr=None,  # Inherit from parent (stderr)
+                stdout=sys.stderr if output_to_stderr else None,
+                stderr=sys.stderr if output_to_stderr else None,
             )
         rc = _hung_jvm_watchdog(
             proc, csv_path, yml_path,
@@ -673,6 +677,7 @@ def run_jobs(
     jdk_home: Path | None = None,
     forward_logs: bool = False,
     executables: dict[str, Path] | None = None,
+    output_to_stderr: bool = False,
 ) -> list[RunResult]:
     """Run benchmark jobs with an optional executable override per instance.
 
@@ -699,4 +704,5 @@ def run_jobs(
         env=env,
         forward_logs=forward_logs,
         executables=executables,
+        output_to_stderr=output_to_stderr,
     )

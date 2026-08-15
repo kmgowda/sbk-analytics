@@ -97,6 +97,7 @@ class LocalSbkResolutionTests(unittest.TestCase):
             def fake_download(_url, archive, **_kwargs):
                 archive.parent.mkdir(parents=True, exist_ok=True)
                 archive.touch()
+                return "a" * 64
 
             def fake_extract(_archive, destination):
                 return _sbk_home(destination / "sbk")
@@ -106,6 +107,7 @@ class LocalSbkResolutionTests(unittest.TestCase):
                     {
                         "name": "sbk-10.4.tar",
                         "browser_download_url": "https://example/sbk-10.4.tar",
+                        "digest": f"sha256:{'a' * 64}",
                     }
                 ]
             }
@@ -118,6 +120,29 @@ class LocalSbkResolutionTests(unittest.TestCase):
             self.assertTrue((downloads / "10.4" / ".ok").is_file())
             self.assertTrue((downloads / "10.4" / "metadata.json").is_file())
             self.assertFalse(list(downloads.glob(".10.4.install-*")))
+
+    def test_release_digest_mismatch_is_rejected_before_extraction(self):
+        with tempfile.TemporaryDirectory() as directory:
+            downloads = Path(directory)
+            release = {"assets": [{
+                "name": "sbk-10.4.tar",
+                "browser_download_url": "https://example/sbk-10.4.tar",
+                "digest": f"sha256:{'a' * 64}",
+            }]}
+
+            def fake_download(_url, archive, **_kwargs):
+                archive.parent.mkdir(parents=True, exist_ok=True)
+                archive.touch()
+                return "b" * 64
+
+            with mock.patch(
+                "analytics.releases._gh_release", return_value=release
+            ), mock.patch(
+                "analytics.releases._download", side_effect=fake_download
+            ), mock.patch("analytics.releases._extract") as extract:
+                with self.assertRaisesRegex(RuntimeError, "checksum mismatch"):
+                    ensure_sbk("10.4", downloads_folder=downloads)
+            extract.assert_not_called()
 
 
 class LocalChartsResolutionTests(unittest.TestCase):

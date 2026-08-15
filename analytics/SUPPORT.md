@@ -55,6 +55,12 @@ If you're new to sbk-analytics, start with:
 - Use verbose logging: `sbk-analytics -c config.yml -v`
 - Check SBK logs in workdir/logs/ (parallel mode)
 
+**Problem**: `cleanup: on-success` did not remove benchmark data
+- Cleanup intentionally supports only `class: file` and its `file`/`fname`
+  parameter
+- The resolved data path must be strictly inside `workdir`
+- RocksDB, other drivers, external paths, CSVs, logs, and reports are preserved
+
 ### Output Issues
 
 **Problem**: Excel report not generated

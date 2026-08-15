@@ -181,7 +181,7 @@ def _charts_version(cli: Path, *, require_ready: bool = False) -> str | None:
         stderr = result.stderr if isinstance(result.stderr, str) else ""
         output = stdout + stderr
         match = re.search(
-            r"(?:Sbk Charts Version\s*:\s*)?(\d+(?:\.\d+)+)",
+            r"Sbk Charts Version\s*:\s*(\d+(?:\.\d+)+)",
             output,
             re.I,
         )
@@ -299,7 +299,10 @@ def resolve_local_sbk_charts(
 def _gh_release(repo: str, tag: str, ssl_verify: bool | str = False) -> dict:
     """Fetch release metadata from GitHub for a given tag."""
     url = f"https://api.github.com/repos/{repo}/releases/tags/{tag}"
-    headers = {"Accept": "application/vnd.github+json"}
+    headers = {
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
     token = os.environ.get("GITHUB_TOKEN")
     if token:
         headers["Authorization"] = f"Bearer {token}"
@@ -586,6 +589,8 @@ def _ensure_sbk_locked(
         checksum = _download(url, archive, ssl_verify=ssl_verify)
     else:
         checksum = None
+    # GitHub.com exposes `digest` for release assets. Older GitHub Enterprise
+    # versions may omit it, in which case metadata still records our checksum.
     expected_digest = asset.get("digest")
     if expected_digest and expected_digest.startswith("sha256:"):
         expected_sha256 = expected_digest.split(":", 1)[1].lower()
@@ -735,7 +740,6 @@ def ensure_sbk_charts(
                 "--trusted-host", "pypi.org",
                 "--trusted-host", "files.pythonhosted.org",
                 "--trusted-host", "pypi.python.org",
-                "--trusted-host", "github.com",
                 "--trusted-host", "raw.githubusercontent.com",
             ])
             # Also set environment variables for git
@@ -827,7 +831,6 @@ def _ensure_sbk_charts_locked(
             "--trusted-host", "pypi.org",
             "--trusted-host", "files.pythonhosted.org",
             "--trusted-host", "pypi.python.org",
-            "--trusted-host", "github.com",
             "--trusted-host", "raw.githubusercontent.com",
         ])
         # Also set environment variables for git

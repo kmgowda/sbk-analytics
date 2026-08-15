@@ -831,6 +831,11 @@ written/read, not on a wall-clock deadline.
 | `--json` | emit a machine-readable dependency/run summary |
 | `-h`, `--help`       | show help and exit |
 
+With `--json`, stdout contains exactly one JSON document on both handled
+success and failure paths. Banners, progress messages, warnings, and child
+process output are sent to stderr, so stdout can be safely piped to `jq` or
+another JSON consumer.
+
 ### Modes
 
 - **serial** (default): SBK instances run one at a time; stdout/stderr are
@@ -887,10 +892,11 @@ Local path precedence is CLI, environment (`SBK_LOCAL_FOLDER`,
 `SBK_CHARTS_LOCAL_FOLDER`, `SBK_CHARTS_LOCAL_EXECUTABLE`), properties file,
 then managed resolution.
 
-Set top-level YAML `cleanup: on-success` to remove file-driver benchmark data
-after a successful report. For safety, only paths inside `workdir` are removed;
-external paths and non-file drivers are always preserved. The default is
-`cleanup: never`.
+Set top-level YAML `cleanup: on-success` to remove benchmark data after a
+successful report. Cleanup currently supports only `class: file`, using its
+`file` or legacy `fname` parameter. For safety, only paths inside `workdir` are
+removed; RocksDB (`rfile`), other drivers, external paths, CSVs, logs, and the
+Excel report are always preserved. The default is `cleanup: never`.
 Set `GITHUB_TOKEN` to avoid unauthenticated rate limits when first downloading.
 
 ### Default Cache Structure (project-local)

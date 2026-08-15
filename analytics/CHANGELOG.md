@@ -58,8 +58,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Local SBK is validated before JDK/network work, and sbk-charts resolution is
   delayed until usable CSV input exists
 - Managed installations are staged, validated, recorded in metadata, and
-  atomically published; the `.ok` marker is written last
+  atomically published on POSIX (lock-coordinated on Windows); the `.ok`
+  marker is written last
 - TLS verification remains disabled by default as configured by the project
+- `--json` now reserves stdout for exactly one JSON document and sends human
+  progress plus child-process output to stderr
+- Cache documentation distinguishes POSIX atomic publication from
+  lock-coordinated Windows publication
 
 ## [0.1.0] - 2025-12-XX
 

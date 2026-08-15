@@ -15,6 +15,8 @@ The YML contains the following groups (see README):
     sbk:              shared SBK / SBK-GEM-YAL defaults
     classes:          list of benchmark instance entries
     class_params:     (optional) per-class defaults
+    cleanup:          never | on-success; only File-driver file/fname paths
+                      contained by workdir are eligible for removal
     sbk-charts:       options for the sbk-charts invocation
       output:         output xlsx file
       ai_model:       huggingface | ollama | lmstudio | noai
@@ -103,6 +105,8 @@ class OrchestratorConfig:
     # results) to be passed to sbk-charts alongside the freshly-generated
     # instance CSVs.
     use_files: list[str] = field(default_factory=list)
+    # Deliberately narrow: on-success cleanup handles only class=file data
+    # selected by file/fname, and cli.py enforces workdir containment.
     cleanup: str = "never"
 
     @property

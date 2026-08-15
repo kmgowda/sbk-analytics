@@ -20,8 +20,10 @@ sbk-analytics/
 │   ├── __init__.py
 │   ├── __main__.py              # Entry point for CLI
 │   ├── banner.txt               # ASCII art banner
+│   ├── default-sbk-config.env   # Installed-package configuration fallback
 │   ├── cli.py                   # Command-line interface
 │   ├── config.py                # YAML configuration parsing
+│   ├── errors.py                # User-facing dependency/config error types
 │   ├── charts.py                # sbk-charts invocation
 │   ├── properties.py            # .env file parsing
 │   ├── releases.py              # Dependency resolution (JDK, SBK, sbk-charts)
@@ -31,8 +33,10 @@ sbk-analytics/
 ├── examples/                     # Example configuration files
 │   ├── file-rocksdb-write-60s.yml
 │   ├── file-rocksdb-write.yml
-│   └── config.yml
+│   ├── config.yml
+│   └── local-smoke-test.yml      # Fast local end-to-end validation
 ├── sbk-config.env              # SBK configuration (versions, URLs, folders)
+├── sbk-config.local.env.example # Local-package configuration template
 ├── environment.yml              # Conda environment specification
 ├── requirements.txt             # Python dependencies
 ├── pyproject.toml               # Python package configuration
@@ -49,6 +53,18 @@ sbk-analytics/
 - `_parse_args()`: Argument parsing using argparse
 - `_setup_logging()`: Logging configuration
 - `_print_banner()`: Displays ASCII art banner
+- `_dependency_status()`: Read-only local/cache configuration report
+- `_cleanup_benchmark_data()`: Safe, workdir-confined File-driver cleanup
+
+**Commands and diagnostics**:
+- `sbk-analytics deps status [--json]`: read-only; never installs/downloads
+- `sbk-analytics deps doctor`: resolve and start-check all dependencies
+- `sbk-analytics config init --output <path>`: create an editable local config
+- `--resolve-only`: resolve dependencies without running a benchmark
+- `--json`: emit exactly one JSON document on stdout; human and child-process
+  output goes to stderr
+- `--sbk-local`, `--sbk-charts-local`, and
+  `--sbk-charts-executable`: one-run local overrides
 
 **Usage**: Entry point for `sbk-analytics` command
 
@@ -64,6 +80,8 @@ sbk-analytics/
   - `ai_model`: AI model for analysis
   - `ai_params`: AI parameters
   - `chat`: Chat mode flag
+  - `cleanup`: `never` (default) or `on-success`; cleanup supports only the
+    File driver and only its `file`/`fname` path when contained by `workdir`
 
 ### 3. Properties Module (`properties.py`)
 **Purpose**: Parse .env-style configuration files
@@ -74,6 +92,11 @@ sbk-analytics/
 - Supports dots, underscores, and dashes interchangeably
 
 **Important**: This is used for `sbk-config.env` file parsing
+
+**Dependency settings** include local folders/executables, `downloads.folder`,
+`ssl.verify`, `ssl.ca.bundle`, and `sbk.version.policy` /
+`sbk-charts.version.policy` (`warn`, `exact`, or `ignore`). Versions are
+conditionally required only when managed resolution is used.
 
 ### 4. Releases Module (`releases.py`)
 **Purpose**: Dependency resolution and caching
@@ -89,6 +112,13 @@ sbk-analytics/
 - `resolve_local_sbk_charts()`: Validate a local sbk-charts checkout/environment
 - `ensure_sbk()`: Prefer local SBK, otherwise use/download the release cache
 - `ensure_sbk_charts()`: Prefer local sbk-charts, otherwise use conda/cache/install
+- `cache_root()`: environment cache selection and platform default
+
+Managed downloads use per-version locks, isolated staging directories,
+validated executables, `metadata.json`, and a final `.ok` marker. Publishing is
+atomic on POSIX and lock-coordinated on Windows. Archive extraction rejects
+traversal, links, devices, and FIFOs. GitHub SHA-256 asset digests are verified
+when the API supplies one.
 
 **Key Classes**:
 - `JdkInstall`: JDK installation metadata
@@ -153,16 +183,20 @@ sbk-analytics/
 **Key Settings**:
 ```
 sbk.url=https://github.com/kmgowda/SBK
-sbk.version=10.0
+sbk.version=10.4
 # sbk.local.folder=/root/projects/SBK
 downloads.folder=./.sbk
 sbk.jdk.version=25
 sbk.jdk.folder=./.jdk
-ssl.verify=true
+ssl.verify=false
+# ssl.ca.bundle=/path/to/company-ca.pem
 
 sbk-charts.url=https://github.com/kmgowda/sbk-charts
-sbk-charts.version=4.26.6.2
+sbk-charts.version=4.26.7.1
 # sbk-charts.local.folder=/root/projects/sbk-charts
+# sbk-charts.local.executable=/root/projects/sbk-charts/.venv/bin/sbk-charts
+# sbk.version.policy=warn
+# sbk-charts.version.policy=warn
 ```
 
 **JDK Resolution Priority**:
@@ -251,6 +285,12 @@ All external dependencies are cached in:
 - SBK: `.sbk/<version>/`
 - sbk-charts: `.sbk/sbk-charts/<version>/`
 
+Download-cache precedence is CLI `--downloads-folder`, explicit
+`downloads.folder`, `SBK_ANALYTICS_DOWNLOADS_FOLDER` (or legacy
+`SBK_ANALYTICS_CACHE`), then the platform cache. Local-package precedence is
+CLI, environment, properties, then managed resolution. Explicit invalid local
+selections never fall back to the network.
+
 ## Development Workflow
 
 ### Making Changes
@@ -269,6 +309,8 @@ All external dependencies are cached in:
 5. **Error Handling**: Graceful degradation for missing dependencies
 6. **Local packages**: Explicit local folders are authoritative, validated,
    never modified, and never silently replaced by downloads
+7. **Lazy charts**: Normal runs resolve sbk-charts only after usable CSV input
+8. **Machine output**: `--json` reserves stdout for one JSON document
 
 ### Common Tasks
 
@@ -346,17 +388,17 @@ Config Parser (config.py)
        ↓
 Properties Parser (properties.py)
        ↓
+Local/managed SBK Resolution (releases.py)
+       ↓
 JDK Resolution (releases.py)
-       ↓
-SBK Resolution (releases.py)
-       ↓
-sbk-charts Installation (releases.py)
        ↓
 YAML Generation (yaml_gen.py)
        ↓
 SBK Execution (runner.py)
        ↓
 CSV Collection
+       ↓
+Lazy sbk-charts Resolution (releases.py)
        ↓
 sbk-charts Invocation (charts.py)
        ↓
@@ -396,12 +438,20 @@ Excel Output
 - `SBK_JAVA_HOME`: Points to JDK for SBK (set by sbk-analytics)
 - `JAVA_HOME`: User's JAVA_HOME (not modified by sbk-analytics)
 - `PYTHONUNBUFFERED`: For unbuffered Python output
+- `SBK_LOCAL_FOLDER`: Override the local SBK folder
+- `SBK_CHARTS_LOCAL_FOLDER`: Override the local sbk-charts folder
+- `SBK_CHARTS_LOCAL_EXECUTABLE`: Override the exact charts executable
+- `SBK_ANALYTICS_DOWNLOADS_FOLDER`: Override the managed download cache when
+  neither CLI nor properties selects one
+- `SBK_ANALYTICS_CACHE`: Legacy alias for the download cache
 
 ### Exit Codes
 - `0`: Success
-- `1`: Configuration error
-- `2`: Dependency resolution failure
-- Other: SBK execution errors
+- `2`: All SBK instances failed and no existing CSV input was supplied
+- `3`: sbk-charts did not produce the expected workbook
+- `4`: System-sheet creation failed
+- `5`: Configuration or dependency resolution failed
+- Other: sbk-charts process exit code
 
 ## Contact and Support
 
@@ -904,7 +954,7 @@ sbk-charts:
 
 ## Version History
 
-- **1.26.6.1**: Current release
+- **1.26.8.1**: Current release
   - JDK resolution with priority order
   - Conda and venv support
   - macOS logging fixes

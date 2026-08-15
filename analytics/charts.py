@@ -58,6 +58,7 @@ def run_sbk_charts(
     output_xlsx: Path,
     *,
     work_dir: Path,
+    output_to_stderr: bool = False,
 ) -> int:
     """Run sbk-charts once. Returns the process exit code."""
     if not csv_paths:
@@ -102,5 +103,9 @@ def run_sbk_charts(
     # status messages, not debug logs.
     print("\n".join(banner), file=sys.stderr, flush=True)
 
-    proc = subprocess.run(cmd, cwd=str(cwd))
+    proc = subprocess.run(
+        cmd, cwd=str(cwd),
+        stdout=sys.stderr if output_to_stderr else None,
+        stderr=sys.stderr if output_to_stderr else None,
+    )
     return proc.returncode

@@ -107,16 +107,18 @@ sbk-config.env → properties.py → releases.py
 
 ### 2. Dependency Resolution Flow
 ```
-releases.py → ensure_sbk() → local SBK or locked/atomic cache download
-releases.py → ensure_jdk() → installed JDK or locked/atomic cache download
-usable CSVs → ensure_sbk_charts() → local, conda, or locked/atomic cache
+releases.py → ensure_sbk() → local SBK or locked/staged cache download
+releases.py → ensure_jdk() → installed JDK or locked/staged cache download
+usable CSVs → ensure_sbk_charts() → local, conda, or locked/staged cache
 ```
 
 Explicit local SBK validation happens before JDK resolution. sbk-charts is
 lazy during normal runs, so a failed SBK workload does not trigger a charts
 install. `deps doctor` intentionally resolves and starts all three tools.
 Archive members are checked before extraction, and managed installs are
-published only after executable validation and metadata creation.
+published only after executable validation and metadata creation. Directory
+publication is atomic on POSIX. On Windows it is coordinated by the same
+per-version lock, but is not documented as an atomic directory replacement.
 
 ### 3. Execution Flow
 ```

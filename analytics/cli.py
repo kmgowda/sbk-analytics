@@ -19,6 +19,7 @@ import subprocess
 import sys
 import tempfile
 import traceback
+from contextlib import redirect_stdout
 from dataclasses import replace
 from pathlib import Path
 
@@ -300,7 +301,16 @@ def _dependency_summary(sbk, charts, versions) -> dict:
     }
 
 
-def _print_dependency_status(versions, *, json_output: bool) -> int:
+def _dependency_summary_sbk(sbk) -> dict:
+    return {
+        "source": sbk.source.value,
+        "home": str(sbk.home),
+        "executable": str(sbk.sbk_yal),
+        "detected_version": sbk.detected_version,
+    }
+
+
+def _dependency_status(versions) -> dict:
     """Report configured selections and cache markers without mutation/network."""
     root = versions.downloads_folder or cache_root()
     sbk_cache = (
@@ -329,14 +339,12 @@ def _print_dependency_status(versions, *, json_output: bool) -> int:
         },
         "ssl_verify": versions.ssl_verify,
     }
-    if json_output:
-        print(json.dumps(status, indent=2, sort_keys=True))
-    else:
-        print("Dependency status (read-only; use 'deps doctor' to validate):")
-        for name in ("sbk", "sbk_charts", "jdk"):
-            print(f"  {name}: {status[name]}")
-        print(f"  ssl_verify: {versions.ssl_verify}")
-    return 0
+    return status
+
+
+def _emit_json(stream, payload: dict) -> None:
+    if stream is not None:
+        print(json.dumps(payload, indent=2, sort_keys=True), file=stream)
 
 
 def _init_local_config(output: Path) -> int:
@@ -398,15 +406,19 @@ def _setup_logging(verbosity: int) -> None:
 
 
 
-def _main(argv: list[str] | None = None) -> int:
-    args = _parse_args(argv)
+def _execute(args: argparse.Namespace, json_stream=None) -> int:
     _print_banner()
     _setup_logging(args.verbose)
 
     if args.command == "config":
         if args.subcommand != "init":
             raise ConfigurationError("config requires the 'init' subcommand")
-        return _init_local_config(args.output)
+        rc = _init_local_config(args.output)
+        _emit_json(json_stream, {
+            "status": "ok", "command": "config init",
+            "output": str(args.output), "exit_code": rc,
+        })
+        return rc
     if args.command == "deps" and args.subcommand not in ("doctor", "status"):
         raise ConfigurationError("deps requires the 'doctor' or 'status' subcommand")
     if args.command == "run" and args.config is None and not args.resolve_only:
@@ -432,7 +444,15 @@ def _main(argv: list[str] | None = None) -> int:
     verify = _tls_verify(versions)
     log.info("using properties file: %s", properties_path)
     if args.command == "deps" and args.subcommand == "status":
-        return _print_dependency_status(versions, json_output=args.json)
+        status = _dependency_status(versions)
+        if json_stream is not None:
+            _emit_json(json_stream, status)
+        else:
+            print("Dependency status (read-only; use 'deps doctor' to validate):")
+            for name in ("sbk", "sbk_charts", "jdk"):
+                print(f"  {name}: {status[name]}")
+            print(f"  ssl_verify: {versions.ssl_verify}")
+        return 0
     cfg = load_config(args.config) if args.config is not None else None
 
     if versions.sbk_local_folder is not None:
@@ -514,8 +534,9 @@ def _main(argv: list[str] | None = None) -> int:
         )
         _print_charts_resolution(charts, versions.sbk_charts)
         summary = _dependency_summary(sbk, charts, versions)
-        if args.json:
-            print(json.dumps(summary, indent=2, sort_keys=True))
+        summary["status"] = "ok"
+        summary["exit_code"] = 0
+        _emit_json(json_stream, summary)
         print("\nDependency check passed.", flush=True)
         return 0
 
@@ -546,6 +567,7 @@ def _main(argv: list[str] | None = None) -> int:
     results = run_jobs(
         executable, jobs, mode=cfg.mode, log_dir=log_dir, jdk_home=jdk.home,
         forward_logs=args.forward_logs, executables=executables,
+        output_to_stderr=json_stream is not None,
     )
 
     succeeded = [r for r in results if r.ok]
@@ -587,6 +609,13 @@ def _main(argv: list[str] | None = None) -> int:
             file=sys.stderr,
             flush=True,
         )
+        _emit_json(json_stream, {
+            "status": "failed", "exit_code": 2,
+            "reason": "no usable CSV input",
+            "sbk": _dependency_summary_sbk(sbk),
+            "successful_instances": [],
+            "failed_instances": [r.class_name for r in failed],
+        })
         return 2
 
     if failed:
@@ -620,12 +649,25 @@ def _main(argv: list[str] | None = None) -> int:
     output_xlsx.parent.mkdir(parents=True, exist_ok=True)
     csv_paths = [r.csv_path for r in succeeded] + extra_csvs
 
-    rc = run_sbk_charts(charts, cfg, csv_paths, output_xlsx, work_dir=work)
+    rc = run_sbk_charts(
+        charts, cfg, csv_paths, output_xlsx, work_dir=work,
+        output_to_stderr=json_stream is not None,
+    )
     if rc != 0:
         log.error("sbk-charts exited with rc=%s", rc)
+        _emit_json(json_stream, {
+            **_dependency_summary(sbk, charts, versions),
+            "status": "failed", "exit_code": rc,
+            "reason": "sbk-charts failed",
+        })
         return rc
     if not output_xlsx.exists():
         log.error("sbk-charts did not produce expected output: %s", output_xlsx)
+        _emit_json(json_stream, {
+            **_dependency_summary(sbk, charts, versions),
+            "status": "failed", "exit_code": 3,
+            "reason": "expected output was not produced",
+        })
         return 3
 
     # 6. Append system sheet (one row per distinct host: local + remote nodes
@@ -635,19 +677,33 @@ def _main(argv: list[str] | None = None) -> int:
         append_system_sheet(output_xlsx, sources=sources)
     except Exception as e:
         log.error("failed to append system sheet: %s", e)
+        _emit_json(json_stream, {
+            **_dependency_summary(sbk, charts, versions),
+            "status": "failed", "exit_code": 4,
+            "reason": "failed to append system sheet",
+        })
         return 4
 
-    if args.json:
-        print(json.dumps({
+    summary = {
             **_dependency_summary(sbk, charts, versions),
+            "status": "ok",
+            "exit_code": 0,
             "output": str(output_xlsx),
             "successful_instances": [r.class_name for r in succeeded],
             "failed_instances": [r.class_name for r in failed],
-        }, indent=2, sort_keys=True))
+    }
+    removed: list[Path] = []
     if cfg.cleanup == "on-success":
         removed = _cleanup_benchmark_data(cfg, work)
         print(f"Cleanup on success: removed {len(removed)} benchmark data path(s).")
     usage = shutil.disk_usage(work)
+    summary["cleanup"] = {
+        "policy": cfg.cleanup,
+        "removed_paths": [str(path) for path in removed]
+        if cfg.cleanup == "on-success" else [],
+    }
+    summary["filesystem_free_bytes_after"] = usage.free
+    _emit_json(json_stream, summary)
     print(f"Filesystem free space after run: {usage.free / (1024 ** 3):.2f} GiB")
     print(f"\nDone. Output: {output_xlsx}", flush=True)
     return 0
@@ -655,18 +711,26 @@ def _main(argv: list[str] | None = None) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     """Run the CLI with concise expected errors and opt-in tracebacks."""
+    args = _parse_args(argv)
+    machine_stdout = sys.stdout if args.json else None
     try:
-        return _main(argv)
+        if machine_stdout is not None:
+            with redirect_stdout(sys.stderr):
+                return _execute(args, json_stream=machine_stdout)
+        return _execute(args)
     except (SbkAnalyticsError, OSError, KeyError, ValueError, RuntimeError,
             subprocess.CalledProcessError) as exc:
         verbosity = 0
-        if argv is not None:
-            verbosity = sum(1 for value in argv if value in ("-v", "--verbose"))
+        verbosity = args.verbose
         if verbosity >= 2:
             traceback.print_exc()
         else:
             print(f"ERROR: {exc}", file=sys.stderr)
             print("Run with -vv for a traceback.", file=sys.stderr)
+        _emit_json(machine_stdout, {
+            "status": "error", "exit_code": 5,
+            "error": str(exc), "error_type": exc.__class__.__name__,
+        })
         return 5
 
 
