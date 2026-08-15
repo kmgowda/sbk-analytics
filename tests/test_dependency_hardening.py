@@ -129,7 +129,7 @@ class CleanupSafetyTests(unittest.TestCase):
                 Instance("outside", "file", {"file": str(outside)}),
             ], cleanup="on-success")
             removed = _cleanup_benchmark_data(cfg, work)
-            self.assertEqual(removed, [inside])
+            self.assertEqual(removed, [inside.resolve()])
             self.assertFalse(inside.exists())
             self.assertTrue(outside.exists())
 
@@ -296,7 +296,10 @@ class CliFlowTests(unittest.TestCase):
             self.assertEqual(rc, 0)
             payload = json.loads(stdout.getvalue())
             self.assertEqual(payload["status"], "ok")
-            self.assertEqual(payload["output"], str(root / "work" / "result.xlsx"))
+            self.assertEqual(
+                Path(payload["output"]),
+                (root / "work" / "result.xlsx").resolve(),
+            )
 
 
 if __name__ == "__main__":

@@ -46,7 +46,7 @@ log = logging.getLogger("sbk-analytics")
 
 def _print_sbk_resolution(install: SbkInstall, version: str) -> None:
     """Print the selected SBK source even when verbose logging is disabled."""
-    print(f"✓ SBK source       : {install.source.value}", flush=True)
+    print(f"[ok] SBK source       : {install.source.value}", flush=True)
     print(f"  folder           : {install.home}", flush=True)
     print(f"  sbk-yal          : {install.sbk_yal}", flush=True)
     gem_executable = install.sbk_gem_yal or "not available (not required)"
@@ -60,7 +60,7 @@ def _print_sbk_resolution(install: SbkInstall, version: str) -> None:
 
 def _print_charts_resolution(install: ChartsInstall, version: str) -> None:
     """Print the selected sbk-charts source and exact executable."""
-    print(f"✓ sbk-charts source: {install.source.value}", flush=True)
+    print(f"[ok] sbk-charts source: {install.source.value}", flush=True)
     print(f"  folder           : {install.venv_dir}", flush=True)
     print(f"  executable       : {install.cli}", flush=True)
     if install.source is DependencySource.LOCAL:
@@ -521,7 +521,7 @@ def _execute(args: argparse.Namespace, json_stream=None) -> int:
         versions.sbk_jdk, jdk_folder=versions.jdk_folder, ssl_verify=verify
     )
     log.info("JDK %s home: %s", versions.sbk_jdk, jdk.home)
-    print(f"✓ JDK {versions.sbk_jdk} ready at {jdk.home}", flush=True)
+    print(f"[ok] JDK {versions.sbk_jdk} ready at {jdk.home}", flush=True)
 
     if args.command == "deps" or args.resolve_only:
         charts = ensure_sbk_charts(

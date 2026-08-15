@@ -70,7 +70,7 @@ If you're new to sbk-analytics, start with:
 - Check sbk-charts logs
 
 **Problem**: SBK logo missing in Excel
-- Ensure Pillow>=12.0 is installed
+- Ensure Pillow>=11.3 on Python 3.9, or Pillow>=12.0 on Python 3.10+
 - Ensure openpyxl-image-loader>=1.0 is installed
 - Reinstall dependencies: `pip install -r requirements.txt`
 

@@ -45,7 +45,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Opt-in, workdir-confined file benchmark cleanup and disk-space reporting
 
 ### Fixed
-- SBK logo missing in Excel reports by adding Pillow>=12.0 and openpyxl-image-loader>=1.0 dependencies
+- CI portability across Python 3.9, macOS, and Windows by using a
+  Python-compatible Pillow constraint, canonical path assertions, and
+  console-safe dependency status markers
+- SBK logo missing in Excel reports by adding a Python-compatible Pillow
+  dependency and openpyxl-image-loader>=1.0
 - JDK resolution logic to prioritize SBK_JAVA_HOME over JAVA_HOME to avoid version conflicts
 - macOS logging issues with --forward-logs flag for real-time log forwarding
 - Cache precedence, strict TLS boolean parsing, conda/local version reporting,

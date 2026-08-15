@@ -43,7 +43,7 @@ class LocalSbkResolutionTests(unittest.TestCase):
             after = sorted(path.relative_to(root) for path in root.rglob("*"))
             self.assertEqual(install.source, DependencySource.LOCAL)
             self.assertEqual(install.home, root.resolve())
-            self.assertEqual(install.sbk_yal, root / "bin" / "sbk-yal")
+            self.assertEqual(install.sbk_yal, (root / "bin" / "sbk-yal").resolve())
             self.assertEqual(before, after)
 
     def test_built_source_checkout_layout_is_used(self):
@@ -54,7 +54,7 @@ class LocalSbkResolutionTests(unittest.TestCase):
             install = resolve_local_sbk(root)
 
             self.assertEqual(install.source, DependencySource.LOCAL)
-            self.assertEqual(install.home, home)
+            self.assertEqual(install.home, home.resolve())
 
     def test_gem_executable_is_only_required_for_gem_workloads(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -156,7 +156,7 @@ class LocalChartsResolutionTests(unittest.TestCase):
 
             after = sorted(path.relative_to(root) for path in root.rglob("*"))
             self.assertEqual(install.source, DependencySource.LOCAL)
-            self.assertEqual(install.cli, cli)
+            self.assertEqual(install.cli, cli.resolve())
             self.assertEqual(before, after)
 
     def test_environment_root_layout_is_used(self):
@@ -166,7 +166,7 @@ class LocalChartsResolutionTests(unittest.TestCase):
 
             install = resolve_local_sbk_charts(root)
 
-            self.assertEqual(install.cli, cli)
+            self.assertEqual(install.cli, cli.resolve())
 
     def test_local_folder_overrides_conda(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -177,7 +177,7 @@ class LocalChartsResolutionTests(unittest.TestCase):
                 install = ensure_sbk_charts("4.26.7.1", local_folder=root)
 
             self.assertEqual(install.source, DependencySource.LOCAL)
-            self.assertEqual(install.cli, cli)
+            self.assertEqual(install.cli, cli.resolve())
             run.assert_called_once_with(
                 [str(cli), "-h"], capture_output=True, text=True,
                 timeout=60,
@@ -257,6 +257,9 @@ class ResolutionOutputTests(unittest.TestCase):
             _print_charts_resolution(charts, "4.26.7.1")
 
         text = output.getvalue()
+        # Windows runners may use a legacy console encoding such as cp1252.
+        # Dependency status output must remain printable there.
+        text.encode("cp1252")
         self.assertIn("SBK source       : LOCAL", text)
         self.assertIn("sbk-charts source: LOCAL", text)
         self.assertIn("/local/SBK/bin/sbk-yal", text)

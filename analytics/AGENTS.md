@@ -165,7 +165,7 @@ when the API supplies one.
 - `_ai_args()`: Convert AI parameters to CLI flags
 
 **Dependencies Required**:
-- Pillow>=12.0 (for image handling in Excel files)
+- Pillow>=11.3 on Python 3.9, or Pillow>=12.0 on Python 3.10+ (for image handling in Excel files)
 - openpyxl-image-loader>=1.0 (for image loading)
 
 ### 8. System Info Module (`system_info.py`)
@@ -271,7 +271,7 @@ pip install sbk-analytics
 - requests>=2.28
 - openpyxl>=3.1
 - psutil>=5.9
-- Pillow>=12.0 (for Excel image handling)
+- Pillow>=11.3 on Python 3.9, or Pillow>=12.0 on Python 3.10+ (for Excel image handling)
 - openpyxl-image-loader>=1.0 (for image loading)
 
 ### External Dependencies
