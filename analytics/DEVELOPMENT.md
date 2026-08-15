@@ -32,6 +32,7 @@ sbk-analytics -c examples/file-rocksdb-write-60s.yml
 ```
 analytics/              # Main package
 ├── cli.py             # CLI entry point
+├── policy.py          # runtime policy and managed-artifact metadata
 ├── config.py          # YAML config parsing
 ├── releases.py        # Dependency resolution (JDK, SBK, sbk-charts)
 ├── runner.py          # SBK execution (serial/parallel)
@@ -46,6 +47,7 @@ analytics/              # Main package
 ## Key Files
 
 - `sbk-config.env` - SBK versions, URLs, cache folders
+- `sbk-bootstrap.env` - shared Bash/PowerShell bootstrap policy
 - `sbk-analytics` - canonical application and platform dispatcher
 - `sbk-analytics.sh` - Linux/macOS environment bootstrap and CLI launcher
 - `sbk-analytics.ps1` - Windows environment bootstrap and CLI launcher
@@ -53,6 +55,18 @@ analytics/              # Main package
 - `pyproject.toml` - Package configuration
 - `examples/` - Example configurations
 - `AGENTS.md` - Comprehensive AI agent documentation
+
+## Runtime policy changes
+
+Change cross-cutting operational defaults in `analytics/policy.py`. Its frozen
+dataclasses own dependency identities and repository defaults, managed-cache
+layout, network/retry settings, process and benchmark timing, SSH behavior,
+configuration defaults, and exit codes. Keep release version pins in
+`sbk-config.env`, and keep constants used by only one algorithm next to that
+algorithm. Add or update `tests/test_policy.py` whenever policy metadata or an
+ordering constraint changes. Pre-Python values shared by the native launchers
+belong in `sbk-bootstrap.env`; keep its minimum/fallback Python versions aligned
+with `pyproject.toml` and `environment.yml`.
 
 ## Common Tasks
 

@@ -27,6 +27,7 @@ from . import __version__
 from .charts import run_sbk_charts
 from .config import load_config
 from .errors import ConfigurationError, DependencyResolutionError, SbkAnalyticsError
+from .policy import APPLICATION, RUNTIME_POLICY, SBK_ARTIFACT, SBK_CHARTS_ARTIFACT
 from .properties import parse_properties
 from .processes import ProcessExit, child_process_cleanup
 from .releases import (
@@ -42,7 +43,9 @@ from .runner import _read_yml, run_jobs
 from .system_info import append_system_sheet
 from .yaml_gen import generate_instance_yaml
 
-log = logging.getLogger("sbk-analytics")
+log = logging.getLogger(APPLICATION.name)
+CACHE_POLICY = RUNTIME_POLICY.cache
+EXIT_CODES = RUNTIME_POLICY.exit_codes
 
 
 def _print_sbk_resolution(install: SbkInstall, version: str) -> None:
@@ -88,7 +91,11 @@ def _print_banner() -> None:
         print(banner.format(version=__version__), file=sys.stderr, flush=True)
     except Exception:
         # Fallback if banner file is missing
-        print(f"sbk-analytics version: {__version__}", file=sys.stderr, flush=True)
+        print(
+            f"{APPLICATION.name} version: {__version__}",
+            file=sys.stderr,
+            flush=True,
+        )
 
 
 def _parse_nodes(value) -> list[str]:
@@ -161,7 +168,7 @@ def _bundled_versions_file() -> Path:
 
 def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     p = argparse.ArgumentParser(
-        prog="sbk-analytics",
+        prog=APPLICATION.command_name,
         description=(
             "Orchestrate multiple SBK (sbk-yal / sbk-gem-yal) benchmark runs and "
             "feed the resulting CSVs into sbk-charts for combined Excel + AI analytics."
@@ -170,7 +177,7 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     p.add_argument(
         "--version",
         action="version",
-        version=f"sbk-analytics {__version__}",
+        version=f"{APPLICATION.name} {__version__}",
     )
     p.add_argument(
         "command", nargs="?", choices=("run", "deps", "config"), default="run",
@@ -233,7 +240,8 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         help=(
             "Working directory for generated YAMLs, CSV files, per-class logs "
             "and the final Excel report. Precedence: this flag > the input "
-            "YAML's `workdir:` key > /tmp/sbk-analytics."
+            "YAML's `workdir:` key > "
+            f"{RUNTIME_POLICY.configuration.default_workdir}."
         ),
     )
     p.add_argument(
@@ -316,15 +324,19 @@ def _dependency_status(versions) -> dict:
     root = versions.downloads_folder or cache_root()
     sbk_cache = (
         root / versions.sbk if versions.downloads_folder
-        else root / "sbk" / versions.sbk
+        else root / SBK_ARTIFACT.cache_namespace / versions.sbk
     )
-    charts_cache = root / "sbk-charts" / versions.sbk_charts
+    charts_cache = (
+        root / SBK_CHARTS_ARTIFACT.cache_namespace / versions.sbk_charts
+    )
     status = {
         "sbk": {
             "configured_local": str(versions.sbk_local_folder)
             if versions.sbk_local_folder else None,
             "managed_cache": str(sbk_cache),
-            "cache_complete": (sbk_cache / ".ok").is_file(),
+            "cache_complete": (
+                sbk_cache / CACHE_POLICY.completion_marker
+            ).is_file(),
         },
         "sbk_charts": {
             "configured_local": str(versions.sbk_charts_local_folder)
@@ -332,11 +344,16 @@ def _dependency_status(versions) -> dict:
             "configured_executable": str(versions.sbk_charts_local_executable)
             if versions.sbk_charts_local_executable else None,
             "managed_cache": str(charts_cache),
-            "cache_complete": (charts_cache / ".ok").is_file(),
+            "cache_complete": (
+                charts_cache / CACHE_POLICY.completion_marker
+            ).is_file(),
         },
         "jdk": {
             "managed_cache": str(versions.jdk_folder / versions.sbk_jdk),
-            "cache_complete": (versions.jdk_folder / versions.sbk_jdk / ".ok").is_file(),
+            "cache_complete": (
+                versions.jdk_folder / versions.sbk_jdk /
+                CACHE_POLICY.completion_marker
+            ).is_file(),
         },
         "ssl_verify": versions.ssl_verify,
     }
@@ -355,7 +372,7 @@ def _init_local_config(output: Path) -> int:
     output.write_text(template, encoding="utf-8")
     print(f"Created local configuration: {output}")
     print("Edit sbk.local.folder and/or sbk-charts.local.folder before use.")
-    return 0
+    return EXIT_CODES.success
 
 
 def _cleanup_benchmark_data(cfg, work: Path) -> list[Path]:
@@ -453,7 +470,7 @@ def _execute(args: argparse.Namespace, json_stream=None) -> int:
             for name in ("sbk", "sbk_charts", "jdk"):
                 print(f"  {name}: {status[name]}")
             print(f"  ssl_verify: {versions.ssl_verify}")
-        return 0
+        return EXIT_CODES.success
     cfg = load_config(args.config) if args.config is not None else None
 
     if versions.sbk_local_folder is not None:
@@ -485,7 +502,7 @@ def _execute(args: argparse.Namespace, json_stream=None) -> int:
     # Working directory: precedence is
     #   1. -w / --work-dir CLI flag
     #   2. workdir: in the input YAML (just after `mode:`)
-    #   3. /tmp/sbk-analytics  (DEFAULT_WORKDIR)
+    #   3. the centralized configuration policy default
     work = None
     if cfg is not None:
         work = args.work_dir if args.work_dir is not None else Path(cfg.workdir)
@@ -498,7 +515,7 @@ def _execute(args: argparse.Namespace, json_stream=None) -> int:
     #    ensure_jdk() first checks the existing SBK_JAVA_HOME / JAVA_HOME /
     #    `java` on PATH for a matching major version; only downloads if none
     #    match. The user pins the required major version in sbk-config.env via
-    #    `sbk.jdk.version=...` (default 25).
+    #    `sbk.jdk.version=...` (with a centralized runtime-policy default).
     print("\n=== Resolving dependencies ===", flush=True)
     print(
         "Explicit local folders take priority; other missing dependencies "
@@ -536,10 +553,10 @@ def _execute(args: argparse.Namespace, json_stream=None) -> int:
         _print_charts_resolution(charts, versions.sbk_charts)
         summary = _dependency_summary(sbk, charts, versions)
         summary["status"] = "ok"
-        summary["exit_code"] = 0
+        summary["exit_code"] = EXIT_CODES.success
         _emit_json(json_stream, summary)
         print("\nDependency check passed.", flush=True)
-        return 0
+        return EXIT_CODES.success
 
     assert cfg is not None and work is not None
 
@@ -611,13 +628,13 @@ def _execute(args: argparse.Namespace, json_stream=None) -> int:
             flush=True,
         )
         _emit_json(json_stream, {
-            "status": "failed", "exit_code": 2,
+            "status": "failed", "exit_code": EXIT_CODES.no_usable_csv,
             "reason": "no usable CSV input",
             "sbk": _dependency_summary_sbk(sbk),
             "successful_instances": [],
             "failed_instances": [r.class_name for r in failed],
         })
-        return 2
+        return EXIT_CODES.no_usable_csv
 
     if failed:
         print(
@@ -666,10 +683,10 @@ def _execute(args: argparse.Namespace, json_stream=None) -> int:
         log.error("sbk-charts did not produce expected output: %s", output_xlsx)
         _emit_json(json_stream, {
             **_dependency_summary(sbk, charts, versions),
-            "status": "failed", "exit_code": 3,
+            "status": "failed", "exit_code": EXIT_CODES.missing_output,
             "reason": "expected output was not produced",
         })
-        return 3
+        return EXIT_CODES.missing_output
 
     # 6. Append system sheet (one row per distinct host: local + remote nodes
     #    visited by sbk-gem-yal instances).
@@ -680,15 +697,15 @@ def _execute(args: argparse.Namespace, json_stream=None) -> int:
         log.error("failed to append system sheet: %s", e)
         _emit_json(json_stream, {
             **_dependency_summary(sbk, charts, versions),
-            "status": "failed", "exit_code": 4,
+            "status": "failed", "exit_code": EXIT_CODES.system_info_failure,
             "reason": "failed to append system sheet",
         })
-        return 4
+        return EXIT_CODES.system_info_failure
 
     summary = {
             **_dependency_summary(sbk, charts, versions),
             "status": "ok",
-            "exit_code": 0,
+            "exit_code": EXIT_CODES.success,
             "output": str(output_xlsx),
             "successful_instances": [r.class_name for r in succeeded],
             "failed_instances": [r.class_name for r in failed],
@@ -707,7 +724,7 @@ def _execute(args: argparse.Namespace, json_stream=None) -> int:
     _emit_json(json_stream, summary)
     print(f"Filesystem free space after run: {usage.free / (1024 ** 3):.2f} GiB")
     print(f"\nDone. Output: {output_xlsx}", flush=True)
-    return 0
+    return EXIT_CODES.success
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -739,10 +756,10 @@ def main(argv: list[str] | None = None) -> int:
             print(f"ERROR: {exc}", file=sys.stderr)
             print("Run with -vv for a traceback.", file=sys.stderr)
         _emit_json(machine_stdout, {
-            "status": "error", "exit_code": 5,
+            "status": "error", "exit_code": EXIT_CODES.handled_error,
             "error": str(exc), "error_type": exc.__class__.__name__,
         })
-        return 5
+        return EXIT_CODES.handled_error
 
 
 if __name__ == "__main__":

@@ -16,16 +16,48 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Continue"
 $CliArgs = [string[]] @($args)
 
-$MinimumPythonMajor = 3
-$MinimumPythonMinor = 9
 $SourceRoot = $PSScriptRoot
+$BootstrapPolicyPath = Join-Path $SourceRoot "sbk-bootstrap.env"
+if (-not (Test-Path -LiteralPath $BootstrapPolicyPath -PathType Leaf)) {
+    [Console]::Error.WriteLine(
+        "[sbk-analytics] ERROR: bootstrap policy is missing: $BootstrapPolicyPath"
+    )
+    exit 1
+}
+$BootstrapPolicy = @{}
+foreach ($line in Get-Content -LiteralPath $BootstrapPolicyPath) {
+    $trimmed = $line.Trim()
+    if (-not $trimmed -or $trimmed.StartsWith("#")) {
+        continue
+    }
+    $parts = $trimmed.Split("=", 2)
+    if ($parts.Count -ne 2) {
+        throw "invalid bootstrap policy line: $line"
+    }
+    $BootstrapPolicy[$parts[0].Trim()] = $parts[1].Trim()
+}
+function Get-BootstrapPolicyValue {
+    param([string] $Name)
+    if (-not $BootstrapPolicy.ContainsKey($Name)) {
+        throw "bootstrap policy is missing required key: $Name"
+    }
+    return $BootstrapPolicy[$Name]
+}
+$MinimumPythonMajor = [int] (Get-BootstrapPolicyValue `
+    "SBK_ANALYTICS_MIN_PYTHON_MAJOR")
+$MinimumPythonMinor = [int] (Get-BootstrapPolicyValue `
+    "SBK_ANALYTICS_MIN_PYTHON_MINOR")
+$CondaPythonVersion = Get-BootstrapPolicyValue "SBK_ANALYTICS_CONDA_PYTHON"
+$ManagedVenvFolder = Get-BootstrapPolicyValue "SBK_ANALYTICS_VENV_FOLDER"
+$ManagedCondaFolder = Get-BootstrapPolicyValue "SBK_ANALYTICS_CONDA_FOLDER"
+$BootstrapMarker = Get-BootstrapPolicyValue "SBK_ANALYTICS_BOOTSTRAP_MARKER"
 $EnvironmentHome = if ($env:SBK_ANALYTICS_ENV_HOME) {
     [IO.Path]::GetFullPath($env:SBK_ANALYTICS_ENV_HOME)
 } else {
     $SourceRoot
 }
-$ManagedVenv = Join-Path $EnvironmentHome ".venv"
-$ManagedConda = Join-Path $EnvironmentHome ".conda"
+$ManagedVenv = Join-Path $EnvironmentHome $ManagedVenvFolder
+$ManagedConda = Join-Path $EnvironmentHome $ManagedCondaFolder
 
 function Write-LauncherLog {
     param([string] $Message)
@@ -134,6 +166,7 @@ function Get-EnvironmentFingerprint {
             "pyproject.toml",
             "requirements.txt",
             "environment.yml",
+            "sbk-bootstrap.env",
             "sbk-analytics",
             "sbk-analytics.ps1"
         )) {
@@ -158,7 +191,7 @@ function Test-EnvironmentReady {
         [string] $Python,
         [string] $EnvironmentRoot
     )
-    $marker = Join-Path $EnvironmentRoot ".sbk-analytics-bootstrap"
+    $marker = Join-Path $EnvironmentRoot $BootstrapMarker
     $fingerprint = Get-EnvironmentFingerprint $Python
     if (-not $fingerprint -or -not (Test-Path -LiteralPath $marker -PathType Leaf)) {
         return $false
@@ -208,7 +241,7 @@ function Initialize-Environment {
         return $false
     }
     try {
-        Set-Content -LiteralPath (Join-Path $EnvironmentRoot ".sbk-analytics-bootstrap") `
+        Set-Content -LiteralPath (Join-Path $EnvironmentRoot $BootstrapMarker) `
             -Value $fingerprint -Encoding ASCII -ErrorAction Stop
     } catch {
         Write-LauncherLog "could not record environment state: $($_.Exception.Message)"
@@ -295,7 +328,8 @@ function New-ManagedConda {
     $python = Join-Path $ManagedConda "python.exe"
     if (-not (Test-SupportedPython $python)) {
         Write-LauncherLog "creating fallback Conda environment: $ManagedConda"
-        & $conda create --yes --prefix $ManagedConda python=3.10 pip |
+        & $conda create --yes --prefix $ManagedConda `
+            "python=$CondaPythonVersion" pip |
             ForEach-Object { [Console]::Error.WriteLine($_) }
         $condaExitCode = $LASTEXITCODE
         if ($condaExitCode -ne 0) {
@@ -337,6 +371,9 @@ if ($systemPython) {
 [void] (New-ManagedConda)
 
 if (-not $systemPython -and -not (Resolve-Executable "conda")) {
-    Stop-Launcher "Python 3.9 or newer is required, and Conda is not available to provide it"
+    Stop-Launcher (
+        "Python $MinimumPythonMajor.$MinimumPythonMinor or newer is required, " +
+        "and Conda is not available to provide it"
+    )
 }
 Stop-Launcher "could not create a working venv or Conda environment; check the installation errors above"

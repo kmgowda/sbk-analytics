@@ -71,6 +71,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   installer races
 
 ### Changed
+- Centralized application/dependency metadata, cache layout, network behavior,
+  process/benchmark/SSH timing, configuration defaults, and exit codes in
+  immutable typed runtime policy objects
+- Centralized shared Bash/PowerShell environment names, interpreter versions,
+  and bootstrap marker metadata in `sbk-bootstrap.env`
 - Updated documentation to clarify JDK resolution priority order
 - Enhanced README.md with AI agent documentation section
 - Local SBK is validated before JDK/network work, and sbk-charts resolution is

@@ -26,6 +26,7 @@ sbk-analytics/
 │   ├── errors.py                # User-facing dependency/config error types
 │   ├── charts.py                # sbk-charts invocation
 │   ├── properties.py            # .env file parsing
+│   ├── policy.py                # Runtime policy and artifact registry
 │   ├── releases.py              # Dependency resolution (JDK, SBK, sbk-charts)
 │   ├── runner.py                # SBK execution (serial/parallel)
 │   ├── processes.py             # Managed process trees and signal cleanup
@@ -38,6 +39,7 @@ sbk-analytics/
 │   ├── config.yml
 │   └── local-smoke-test.yml      # Fast local end-to-end validation
 ├── sbk-config.env              # SBK configuration (versions, URLs, folders)
+├── sbk-bootstrap.env           # Shared native-launcher policy
 ├── sbk-analytics               # Unified cross-platform launcher
 ├── sbk-analytics.sh            # Self-bootstrapping Linux/macOS launcher
 ├── sbk-analytics.ps1           # Self-bootstrapping Windows launcher
@@ -129,6 +131,23 @@ when the API supplies one.
 - `JdkInstall`: JDK installation metadata
 - `SbkInstall`: SBK installation metadata
 - `ChartsInstall`: sbk-charts installation metadata
+
+### Runtime Policy Module (`policy.py`)
+
+**Purpose**: provide the single source of truth for application and managed
+artifact identities plus operational defaults shared by multiple subsystems.
+
+**Centralized policy groups**:
+- application, SBK, sbk-charts, and JDK metadata
+- cache marker/home/metadata filenames and cache namespaces
+- GitHub, download, retry, pip trust, and dependency probe behavior
+- process termination, benchmark watchdog, SSH, and system-info timing
+- configuration defaults, accepted values, and CLI exit codes
+
+Version pins remain operator configuration in `sbk-config.env`; algorithm-local
+constants remain next to their algorithms. New cross-cutting operational values
+must be added to the appropriate immutable policy dataclass instead of directly
+to a consumer module.
 
 **Environment Variables Set**:
 - `SBK_JAVA_HOME`: Points to resolved JDK (not JAVA_HOME to avoid conflicts)
@@ -349,6 +368,10 @@ selections never fall back to the network.
     include the unified application, source path, and environment interpreter
     identity/version, so moving the checkout or changing Python triggers an
     editable reinstall
+11. **Central policy**: cross-cutting runtime defaults and managed-artifact
+    identity/layout belong in `analytics/policy.py`; do not duplicate them in
+    resolver, runner, process, CLI, or system-info modules. Pre-Python launcher
+    defaults shared by Bash and PowerShell belong in `sbk-bootstrap.env`
 
 ### Common Tasks
 

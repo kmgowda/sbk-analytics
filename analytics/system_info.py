@@ -40,7 +40,11 @@ import psutil
 from openpyxl import load_workbook
 from openpyxl.utils import get_column_letter
 
+from .policy import RUNTIME_POLICY
+
 log = logging.getLogger(__name__)
+SYSTEM_INFO_POLICY = RUNTIME_POLICY.system_info
+SSH_POLICY = RUNTIME_POLICY.ssh
 
 
 # Columns of the system sheet, in order.
@@ -85,7 +89,8 @@ def _cpu_brand() -> str:
                 pass
             if shutil.which("lscpu"):
                 out = subprocess.run(
-                    ["lscpu"], capture_output=True, text=True, timeout=5,
+                    ["lscpu"], capture_output=True, text=True,
+                    timeout=SYSTEM_INFO_POLICY.local_command_timeout_s,
                 ).stdout
                 for line in out.splitlines():
                     if line.lower().startswith("model name"):
@@ -93,7 +98,8 @@ def _cpu_brand() -> str:
         elif sysname == "Darwin":
             out = subprocess.run(
                 ["sysctl", "-n", "machdep.cpu.brand_string"],
-                capture_output=True, text=True, timeout=5,
+                capture_output=True, text=True,
+                timeout=SYSTEM_INFO_POLICY.local_command_timeout_s,
             ).stdout.strip()
             if out:
                 return out
@@ -227,8 +233,8 @@ def collect_remote_system_info(
     *,
     user: str = "",
     password: str = "",
-    port: int = 22,
-    timeout_s: float = 30.0,
+    port: int = SSH_POLICY.default_port,
+    timeout_s: float = SSH_POLICY.system_info_command_timeout_s,
 ) -> dict[str, str]:
     """Return system + container info for a remote node, via SSH.
 
@@ -240,10 +246,9 @@ def collect_remote_system_info(
     ssh_args = [
         "ssh",
         "-p", str(int(port)),
-        "-o", "StrictHostKeyChecking=no",
-        "-o", "UserKnownHostsFile=/dev/null",
+        *SSH_POLICY.host_key_arguments,
         "-o", "BatchMode=" + ("no" if password else "yes"),
-        "-o", "ConnectTimeout=5",
+        "-o", f"ConnectTimeout={SSH_POLICY.connect_timeout_s}",
         target,
         "bash -s",
     ]
@@ -319,7 +324,7 @@ def append_system_sheet(
     xlsx_path: Path,
     *,
     sources: Iterable[dict],
-    sheet_name: str = "system",
+    sheet_name: str = SYSTEM_INFO_POLICY.default_sheet_name,
 ) -> None:
     """Append (or replace) the ``system`` sheet on the xlsx with one row per
     distinct system.

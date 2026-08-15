@@ -54,13 +54,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlparse
 
+from .policy import RUNTIME_POLICY, SBK_ARTIFACT, SBK_CHARTS_ARTIFACT
 
-DEFAULT_SBK_URL = "https://github.com/kmgowda/SBK"
-DEFAULT_SBK_CHARTS_URL = "https://github.com/kmgowda/sbk-charts"
-DEFAULT_SBK_JDK_VERSION = "25"
-DEFAULT_JDK_FOLDER = "./.jdk"
-DEFAULT_SSL_VERIFY = "false"
-DEFAULT_VERSION_POLICY = "warn"
+
+DEPENDENCY_POLICY = RUNTIME_POLICY.dependencies
+CACHE_POLICY = RUNTIME_POLICY.cache
+CONFIGURATION_POLICY = RUNTIME_POLICY.configuration
 
 
 def _norm(key: str) -> str:
@@ -78,7 +77,10 @@ def _normalise_repo_url(url: str) -> str:
         # treat as owner/repo
         parts = [p for p in s.split("/") if p]
         if len(parts) == 2:
-            return f"https://github.com/{parts[0]}/{parts[1]}"
+            return (
+                f"{RUNTIME_POLICY.network.github_web_url}/"
+                f"{parts[0]}/{parts[1]}"
+            )
         raise ValueError(
             f"expected '<owner>/<repo>' or a full URL, got: {url!r}"
         )
@@ -168,14 +170,16 @@ def parse_properties(path: str | Path) -> Versions:
                 return value
         return None
 
-    sbk_url_raw = _get("sbk.url", "sbk_url", default=DEFAULT_SBK_URL)
+    sbk_url_raw = _get(
+        "sbk.url", "sbk_url", default=SBK_ARTIFACT.repository_url
+    )
     sbk_charts_url_raw = _get(
         "sbk.charts.url", "sbk_charts_url", "sbkcharts.url",
-        default=DEFAULT_SBK_CHARTS_URL,
+        default=SBK_CHARTS_ARTIFACT.repository_url,
     )
     sbk_jdk = _get(
         "sbk.jdk.version", "sbk_jdk_version", "jdk.version", "jdk_version",
-        default=DEFAULT_SBK_JDK_VERSION,
+        default=DEPENDENCY_POLICY.default_jdk_version,
     ).strip()
     
     downloads_folder_raw = _get_optional(
@@ -194,16 +198,16 @@ def parse_properties(path: str | Path) -> Versions:
     )
     jdk_folder_raw = _get(
         "sbk.jdk.folder", "sbk_jdk_folder", "jdk.folder", "jdk_folder",
-        default=DEFAULT_JDK_FOLDER,
+        default=CACHE_POLICY.default_jdk_folder,
     )
     
     ssl_verify_raw = _get(
         "ssl.verify", "ssl_verify", "verify", "verify.ssl",
-        default=DEFAULT_SSL_VERIFY,
+        default=str(DEPENDENCY_POLICY.default_ssl_verify).lower(),
     )
     bool_values = {
-        "1": True, "true": True, "yes": True, "on": True,
-        "0": False, "false": False, "no": False, "off": False,
+        **{token: True for token in CONFIGURATION_POLICY.true_tokens},
+        **{token: False for token in CONFIGURATION_POLICY.false_tokens},
     }
     try:
         ssl_verify = bool_values[ssl_verify_raw.strip().lower()]
@@ -214,10 +218,13 @@ def parse_properties(path: str | Path) -> Versions:
     ssl_ca_bundle_raw = _get_optional("ssl.ca.bundle", "ssl_ca_bundle")
 
     def _policy(*aliases: str) -> str:
-        value = _get(*aliases, default=DEFAULT_VERSION_POLICY).strip().lower()
-        if value not in ("warn", "exact", "ignore"):
+        value = _get(
+            *aliases, default=DEPENDENCY_POLICY.default_version_policy
+        ).strip().lower()
+        if value not in DEPENDENCY_POLICY.version_policies:
             raise ValueError(
-                f"{aliases[0]} must be warn, exact, or ignore, got {value!r}"
+                f"{aliases[0]} must be one of "
+                f"{DEPENDENCY_POLICY.version_policies}, got {value!r}"
             )
         return value
 

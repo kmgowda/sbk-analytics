@@ -17,6 +17,10 @@ import subprocess
 import sys
 import time
 
+from .policy import RUNTIME_POLICY
+
+PROCESS_POLICY = RUNTIME_POLICY.processes
+
 
 def _group_exists(pgid: int) -> bool:
     try:
@@ -37,7 +41,7 @@ def _kill_group(pgid: int, grace_s: float) -> None:
     while time.monotonic() < deadline:
         if not _group_exists(pgid):
             return
-        time.sleep(0.05)
+        time.sleep(PROCESS_POLICY.guard_poll_interval_s)
     try:
         os.killpg(pgid, signal.SIGKILL)
     except ProcessLookupError:
@@ -52,7 +56,9 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     read_fd, pgid, grace_s = int(args[0]), int(args[1]), float(args[2])
     while _group_exists(pgid):
-        readable, _, _ = select.select([read_fd], [], [], 0.25)
+        readable, _, _ = select.select(
+            [read_fd], [], [], PROCESS_POLICY.guard_pipe_poll_interval_s
+        )
         if not readable:
             continue
         command = os.read(read_fd, 1)

@@ -13,6 +13,7 @@ analytics/
 ├── config.py             # YAML configuration parsing
 ├── charts.py             # sbk-charts invocation
 ├── properties.py         # .env file parsing
+├── policy.py             # runtime policy and artifact metadata
 ├── releases.py           # Dependency resolution (JDK, SBK, sbk-charts)
 ├── runner.py             # SBK execution (serial/parallel)
 ├── system_info.py        # System information collection
@@ -29,6 +30,11 @@ Parses and validates YAML configuration files. Defines the `OrchestratorConfig` 
 
 ### properties.py
 Parses .env-style configuration files (like sbk-config.env). Handles case-insensitive key matching.
+
+### policy.py
+Defines immutable application/artifact metadata and cross-cutting runtime
+policy for cache layout, dependency/network operations, process and benchmark
+timing, SSH behavior, configuration defaults, and exit codes.
 
 ### releases.py
 Resolves and caches external dependencies:

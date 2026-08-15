@@ -11,12 +11,23 @@
 
 set -u
 
-readonly MIN_PYTHON_MAJOR=3
-readonly MIN_PYTHON_MINOR=9
 readonly SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)"
+readonly BOOTSTRAP_POLICY_FILE="$SCRIPT_DIR/sbk-bootstrap.env"
+if [[ ! -r "$BOOTSTRAP_POLICY_FILE" ]]; then
+    printf '[sbk-analytics] ERROR: bootstrap policy is missing: %s\n' \
+        "$BOOTSTRAP_POLICY_FILE" >&2
+    exit 1
+fi
+# The policy is distributed with this trusted launcher and contains only
+# simple assignments shared with the PowerShell implementation.
+# shellcheck disable=SC1090
+. "$BOOTSTRAP_POLICY_FILE"
+readonly MIN_PYTHON_MAJOR="$SBK_ANALYTICS_MIN_PYTHON_MAJOR"
+readonly MIN_PYTHON_MINOR="$SBK_ANALYTICS_MIN_PYTHON_MINOR"
 readonly ENV_HOME="${SBK_ANALYTICS_ENV_HOME:-$SCRIPT_DIR}"
-readonly MANAGED_VENV="$ENV_HOME/.venv"
-readonly MANAGED_CONDA="$ENV_HOME/.conda"
+readonly MANAGED_VENV="$ENV_HOME/$SBK_ANALYTICS_VENV_FOLDER"
+readonly MANAGED_CONDA="$ENV_HOME/$SBK_ANALYTICS_CONDA_FOLDER"
+readonly BOOTSTRAP_MARKER="$SBK_ANALYTICS_BOOTSTRAP_MARKER"
 
 log() {
     printf '[sbk-analytics] %s\n' "$*" >&2
@@ -75,6 +86,7 @@ for name in (
     "pyproject.toml",
     "requirements.txt",
     "environment.yml",
+    "sbk-bootstrap.env",
     "sbk-analytics",
     "sbk-analytics.sh",
 ):
@@ -88,7 +100,7 @@ print(digest.hexdigest())
 
 environment_is_ready() {
     local python_bin="$1" env_root="$2" fingerprint marker
-    marker="$env_root/.sbk-analytics-bootstrap"
+    marker="$env_root/$BOOTSTRAP_MARKER"
     fingerprint="$(environment_fingerprint "$python_bin")" || return 1
     [[ -r "$marker" ]] || return 1
     [[ "$(<"$marker")" == "$fingerprint" ]] || return 1
@@ -120,7 +132,7 @@ bootstrap_environment() {
     "$python_bin" -m ensurepip --upgrade >/dev/null 2>&1 || true
     "$python_bin" -m pip install --disable-pip-version-check -e "$SCRIPT_DIR" >&2 || return 1
     fingerprint="$(environment_fingerprint "$python_bin")" || return 1
-    printf '%s\n' "$fingerprint" >"$env_root/.sbk-analytics-bootstrap" || return 1
+    printf '%s\n' "$fingerprint" >"$env_root/$BOOTSTRAP_MARKER" || return 1
 }
 
 activate_and_run() {
@@ -169,7 +181,8 @@ create_or_repair_conda() {
     mkdir -p "$ENV_HOME" || return 1
     if ! is_supported_python "$python_bin"; then
         log "creating fallback Conda environment: $MANAGED_CONDA"
-        "$conda_bin" create --yes --prefix "$MANAGED_CONDA" python=3.10 pip >&2 || return 1
+        "$conda_bin" create --yes --prefix "$MANAGED_CONDA" \
+            "python=$SBK_ANALYTICS_CONDA_PYTHON" pip >&2 || return 1
     fi
     is_supported_python "$python_bin" || return 1
     bootstrap_environment "$python_bin" "$MANAGED_CONDA" || return 1
@@ -205,6 +218,6 @@ fi
 create_or_repair_conda || true
 
 if [[ -z "$SYSTEM_PYTHON" ]] && ! command -v conda >/dev/null 2>&1; then
-    fail "Python 3.9 or newer is required, and Conda is not available to provide it"
+    fail "Python $MIN_PYTHON_MAJOR.$MIN_PYTHON_MINOR or newer is required, and Conda is not available to provide it"
 fi
 fail "could not create a working venv or Conda environment; check the installation errors above"

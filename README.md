@@ -96,7 +96,9 @@ follow this order:
    Python 3.10 and install this checkout.
 
 The environment is bootstrapped again only when the project dependency files
-or launcher change. Installer output and launcher status go to stderr, so
+or launcher/bootstrap policy change. Shared launcher defaults such as minimum
+Python, fallback Conda Python, environment folders, and marker name live in
+`sbk-bootstrap.env`. Installer output and launcher status go to stderr, so
 the launchers keep `--json` stdout machine-readable. Bash uses `exec` for the
 final process; PowerShell waits for Python and returns its exit code.
 
@@ -114,6 +116,13 @@ The bootstrap fingerprint includes the absolute checkout path and the selected
 environment's Python identity and version information. Moving the checkout or
 replacing/upgrading its environment interpreter therefore causes one
 intentional editable reinstall on the next launch.
+
+Runtime policy and artifact metadata are centralized in
+`analytics/policy.py`. This is the canonical source for dependency identities,
+repository defaults, managed-cache filenames, network/retry limits, process
+grace periods, benchmark watchdog timing, SSH behavior, configuration defaults,
+and application exit codes. Release version pins remain in `sbk-config.env` so
+operators can update them without changing Python code.
 
 ### For macOS/Linux (Recommended with Conda)
 ```bash
@@ -1067,6 +1076,7 @@ into those folders.
 ```
 sbk-analytics/
 ├── sbk-config.env            # bundled SBK / sbk-charts release pins
+├── sbk-bootstrap.env         # shared Bash/PowerShell bootstrap policy
 ├── sbk-analytics             # unified cross-platform application
 ├── sbk-analytics.sh          # self-bootstrapping Linux/macOS launcher
 ├── sbk-analytics.ps1         # self-bootstrapping Windows launcher
@@ -1078,6 +1088,7 @@ sbk-analytics/
 │   └── file-rocksdb-write.yml      # 120s file + rocksdb single-writer example
 └── analytics/
     ├── cli.py                # argument parsing + orchestration
+    ├── policy.py             # runtime policy + artifact metadata
     ├── properties.py         # sbk-config.env parser
     ├── config.py             # input YAML parser (sbk, classes, sbk-charts)
     ├── releases.py           # GitHub release download + cached install

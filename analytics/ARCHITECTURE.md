@@ -12,6 +12,15 @@ environment, reuse or create a launcher-managed environment, and install the
 checkout when dependency inputs change. Bash replaces itself with
 `python -m analytics`; PowerShell waits for Python and propagates its exit code.
 
+`policy.py` is the dependency-free policy boundary used by the CLI,
+configuration parser, resolver, runner, process manager, charts adapter, and
+system-info collector. Immutable typed policy groups centralize values that
+cross module boundaries, while `sbk-config.env` remains the operator-controlled
+source for release version pins and local dependency selections.
+The native launchers load their smaller pre-Python policy boundary from
+`sbk-bootstrap.env`, because `analytics.policy` cannot be imported until a
+compatible interpreter and environment exist.
+
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                        User Input                           │
