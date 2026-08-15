@@ -13,6 +13,22 @@ If you're new to sbk-analytics, start with:
 
 ### Installation Problems
 
+**Problem**: a self-bootstrapping launcher cannot prepare an environment
+- Use `./sbk-analytics` on Linux/macOS or a Windows-compatible POSIX shell.
+  Native Windows PowerShell uses `sbk-analytics.ps1` with PowerShell 5.1 or
+  newer because Windows does not directly execute extensionless POSIX scripts
+- If Windows execution policy blocks the script, run
+  `powershell -ExecutionPolicy Bypass -File .\sbk-analytics.ps1 <arguments>`
+- Install Python 3.9 or newer; if venv creation is unavailable, install Conda
+- Confirm package repositories are reachable on the first bootstrap
+- Confirm the checkout, or `SBK_ANALYTICS_ENV_HOME`, is writable
+- Use `SBK_ANALYTICS_PYTHON=/path/to/python` to prefer a known interpreter
+- `SBK_ANALYTICS_PYTHON` must be one executable path or command name, without
+  arguments; on Windows do not set it to `py -3`, because that fallback is
+  discovered automatically
+- Moving the checkout or changing the environment's Python interpreter causes
+  one expected reinstall because both are part of the bootstrap fingerprint
+
 **Problem**: `pip install -e .` fails
 - Ensure you're using Python 3.9+
 - Try using conda: `conda env create -f environment.yml`

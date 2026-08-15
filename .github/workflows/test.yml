@@ -37,6 +37,7 @@ jobs:
           python -m unittest discover -s tests -p "test_properties.py" -v
           python -m unittest discover -s tests -p "test_dependency_hardening.py" -v
           python -m unittest discover -s tests -p "test_process_cleanup.py" -v
+          python -m unittest discover -s tests -p "test_launcher.py" -v
 
   conda:
     runs-on: ubuntu-latest

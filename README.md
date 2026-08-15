@@ -53,6 +53,68 @@ before a long run.
 
 ## Quick Start
 
+### Self-bootstrapping application
+
+The repository includes an extensionless `sbk-analytics` application, modeled
+after the sbk-dashboard launcher, that selects the native bootstrap launcher
+and passes every argument unchanged.
+
+Linux/macOS:
+
+```bash
+./sbk-analytics --version
+./sbk-analytics deps doctor
+./sbk-analytics -c examples/file-rocksdb-write-60s.yml
+```
+
+Windows Git Bash/MSYS2/Cygwin can use the same application:
+
+```bash
+./sbk-analytics --version
+```
+
+Native Windows PowerShell uses the platform launcher because Windows does not
+directly execute extensionless POSIX scripts:
+
+```powershell
+.\sbk-analytics.ps1 --version
+.\sbk-analytics.ps1 deps doctor
+.\sbk-analytics.ps1 -c examples\file-rocksdb-write-60s.yml
+
+# If local execution policy blocks scripts:
+powershell -ExecutionPolicy Bypass -File .\sbk-analytics.ps1 --version
+```
+
+The unified application dispatches to `sbk-analytics.sh` on Linux/macOS and
+`sbk-analytics.ps1` on Windows-compatible POSIX shells. Both native launchers
+follow this order:
+
+1. Reuse a compatible active `VIRTUAL_ENV`, then an active `CONDA_PREFIX`.
+2. Reuse the launcher-managed `.venv`, then `.conda` environment.
+3. With Python 3.9 or newer, create or repair `.venv` and install this checkout.
+4. If venv creation or installation fails, use Conda to create `.conda` with
+   Python 3.10 and install this checkout.
+
+The environment is bootstrapped again only when the project dependency files
+or launcher change. Installer output and launcher status go to stderr, so
+the launchers keep `--json` stdout machine-readable. Bash uses `exec` for the
+final process; PowerShell waits for Python and returns its exit code.
+
+Set `SBK_ANALYTICS_PYTHON=/path/to/python` to prefer a particular interpreter,
+or `SBK_ANALYTICS_ENV_HOME=/path/to/folder` to store the managed `.venv` and
+`.conda` outside the checkout. Environment creation can still fail when package
+repositories are unreachable or the selected location is not writable.
+
+`SBK_ANALYTICS_PYTHON` accepts one executable path or command name, not a
+command plus arguments. On Windows, use a path such as
+`C:\Python312\python.exe`; do not set it to `py -3`. The PowerShell launcher
+already discovers the Windows `py` launcher and supplies `-3` automatically.
+
+The bootstrap fingerprint includes the absolute checkout path and the selected
+environment's Python identity and version information. Moving the checkout or
+replacing/upgrading its environment interpreter therefore causes one
+intentional editable reinstall on the next launch.
+
 ### For macOS/Linux (Recommended with Conda)
 ```bash
 conda env create -f environment.yml
@@ -1005,6 +1067,9 @@ into those folders.
 ```
 sbk-analytics/
 ├── sbk-config.env            # bundled SBK / sbk-charts release pins
+├── sbk-analytics             # unified cross-platform application
+├── sbk-analytics.sh          # self-bootstrapping Linux/macOS launcher
+├── sbk-analytics.ps1         # self-bootstrapping Windows launcher
 ├── pyproject.toml            # entry point: sbk-analytics → analytics.cli:main
 ├── requirements.txt
 ├── README.md

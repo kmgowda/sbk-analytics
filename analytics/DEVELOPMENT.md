@@ -9,6 +9,12 @@ Quick reference for developers and AI agents working on sbk-analytics.
 git clone https://github.com/kmgowda/sbk-analytics.git
 cd sbk-analytics
 
+# Self-bootstrap and run on Linux/macOS (no activation required)
+./sbk-analytics --version
+
+# Or on Windows PowerShell
+.\sbk-analytics.ps1 --version
+
 # Create environment
 conda env create -f environment.yml  # or use venv
 conda activate sbk-analytics
@@ -40,6 +46,9 @@ analytics/              # Main package
 ## Key Files
 
 - `sbk-config.env` - SBK versions, URLs, cache folders
+- `sbk-analytics` - canonical application and platform dispatcher
+- `sbk-analytics.sh` - Linux/macOS environment bootstrap and CLI launcher
+- `sbk-analytics.ps1` - Windows environment bootstrap and CLI launcher
 - `requirements.txt` - Python dependencies
 - `pyproject.toml` - Package configuration
 - `examples/` - Example configurations

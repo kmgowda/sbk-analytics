@@ -4,6 +4,14 @@ This document provides a high-level architectural overview of sbk-analytics.
 
 ## System Architecture
 
+The extensionless `sbk-analytics` application is the canonical launcher. It
+dispatches to `sbk-analytics.sh` on Linux/macOS or `sbk-analytics.ps1` from a
+Windows-compatible POSIX shell. Native PowerShell invokes the `.ps1` launcher
+directly. These bootstrap layers reuse an active compatible venv/Conda
+environment, reuse or create a launcher-managed environment, and install the
+checkout when dependency inputs change. Bash replaces itself with
+`python -m analytics`; PowerShell waits for Python and propagates its exit code.
+
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                        User Input                           │
