@@ -179,7 +179,7 @@ class LocalChartsResolutionTests(unittest.TestCase):
             self.assertEqual(install.source, DependencySource.LOCAL)
             self.assertEqual(install.cli, cli.resolve())
             run.assert_called_once_with(
-                [str(cli), "-h"], capture_output=True, text=True,
+                [str(cli.resolve()), "-h"], capture_output=True, text=True,
                 timeout=60,
             )
 
