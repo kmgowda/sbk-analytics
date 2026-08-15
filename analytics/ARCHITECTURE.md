@@ -68,6 +68,14 @@ This document provides a high-level architectural overview of sbk-analytics.
                           │
                           ▼
 ┌─────────────────────────────────────────────────────────────┐
+│          Process Lifecycle Module (processes.py)             │
+│  - Isolated workload process trees                           │
+│  - Signal and parent-death cleanup                           │
+│  - POSIX liveness guard / Windows Job Object                 │
+└─────────────────────────┬───────────────────────────────────┘
+                          │
+                          ▼
+┌─────────────────────────────────────────────────────────────┐
 │                    CSV Collection                           │
 │  - Collect successful CSV files                             │
 │  - Filter failed instances                                  │
@@ -133,6 +141,19 @@ CSV files → charts.py → sbk-charts → Excel report
 Excel report → system_info.py → System sheet
 System sheet → Final Excel output
 ```
+
+### 5. Process Lifecycle Flow
+```
+cli.py signal context → runner.py / charts.py → managed process tree
+catchable signal → workload-specific cleanup → TERM → 3 s grace → KILL
+POSIX parent death → liveness-pipe EOF → independent guard → TERM/KILL group
+Windows parent death → Job Object handle close → kill complete job tree
+```
+
+Every SBK and sbk-charts invocation is registered until its complete process
+tree exits. Normal wrapper exit also triggers removal of any remaining
+descendants in its workload group. Catchable sbk-gem interruptions retain best-effort remote SSH
+cleanup; no local mechanism can initiate new remote cleanup after SIGKILL.
 
 ## Key Design Decisions
 

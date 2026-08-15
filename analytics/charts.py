@@ -11,12 +11,12 @@
 from __future__ import annotations
 
 import logging
-import subprocess
 import sys
 from pathlib import Path
 from typing import Any
 
 from .config import OrchestratorConfig
+from .processes import managed_popen, terminate_process
 from .releases import ChartsInstall
 
 log = logging.getLogger(__name__)
@@ -103,9 +103,13 @@ def run_sbk_charts(
     # status messages, not debug logs.
     print("\n".join(banner), file=sys.stderr, flush=True)
 
-    proc = subprocess.run(
+    proc = managed_popen(
         cmd, cwd=str(cwd),
         stdout=sys.stderr if output_to_stderr else None,
         stderr=sys.stderr if output_to_stderr else None,
     )
-    return proc.returncode
+    try:
+        return proc.wait()
+    except BaseException:
+        terminate_process(proc)
+        raise

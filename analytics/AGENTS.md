@@ -28,6 +28,8 @@ sbk-analytics/
 │   ├── properties.py            # .env file parsing
 │   ├── releases.py              # Dependency resolution (JDK, SBK, sbk-charts)
 │   ├── runner.py                # SBK execution (serial/parallel)
+│   ├── processes.py             # Managed process trees and signal cleanup
+│   ├── _process_guard.py        # POSIX parent-death companion
 │   ├── system_info.py           # System information collection
 │   └── yaml_gen.py              # YAML generation for SBK instances
 ├── examples/                     # Example configuration files
@@ -155,6 +157,19 @@ when the API supplies one.
 **Key Functions**:
 - `generate_instance_yaml()`: Convert configuration to SBK YAML format
 - Handles both sbk-yal and sbk-gem-yal formats
+
+### Process Lifecycle Module (`processes.py`)
+**Purpose**: Ensure SBK and sbk-charts descendants never outlive the local
+sbk-analytics invocation
+
+**Key behavior**:
+- Starts each workload in an isolated POSIX session or Windows process group
+- Uses a POSIX liveness-pipe guard for cleanup after abrupt parent death
+- Uses a Windows `KILL_ON_JOB_CLOSE` Job Object for descendant cleanup
+- Handles SIGINT, SIGTERM, SIGHUP, SIGQUIT, and Windows SIGBREAK with a
+  3-second graceful window
+- Registers an `atexit` fallback and escalates from tree TERM to tree KILL
+- Runner exception paths retain best-effort remote cleanup for sbk-gem jobs
 
 ### 7. Charts Module (`charts.py`)
 **Purpose**: Invoke sbk-charts for analytics
@@ -311,6 +326,8 @@ selections never fall back to the network.
    never modified, and never silently replaced by downloads
 7. **Lazy charts**: Normal runs resolve sbk-charts only after usable CSV input
 8. **Machine output**: `--json` reserves stdout for one JSON document
+9. **Process ownership**: SBK and charts launches must use `managed_popen()`;
+   never introduce a direct `Popen`/`run` for long-lived workload commands
 
 ### Common Tasks
 
@@ -413,6 +430,7 @@ Excel Output
 - Always check if changes affect both conda and venv environments
 - Test JDK resolution logic with different JAVA_HOME settings
 - Verify macOS compatibility for any subprocess handling
+- Run `tests.test_process_cleanup` after modifying process or signal handling
 - Ensure dependency caching works correctly
 
 ### When Adding Features

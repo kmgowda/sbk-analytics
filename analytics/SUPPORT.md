@@ -55,6 +55,15 @@ If you're new to sbk-analytics, start with:
 - Use verbose logging: `sbk-analytics -c config.yml -v`
 - Check SBK logs in workdir/logs/ (parallel mode)
 
+**Problem**: a workload appears to remain after sbk-analytics is stopped
+- Current releases terminate the complete local process tree for `sbk-yal`,
+  `sbk-gem-yal`, and `sbk-charts`; verify with `ps`/Task Manager that the
+  process is from the same invocation
+- Allow up to 3 seconds for graceful shutdown before forced termination
+- Use `-v` to see termination messages for catchable signals
+- Remote SBK clients receive best-effort SSH cleanup on catchable interrupts;
+  after an uncatchable local kill, inspect the remote nodes separately
+
 **Problem**: `cleanup: on-success` did not remove benchmark data
 - Cleanup intentionally supports only `class: file` and its `file`/`fname`
   parameter
