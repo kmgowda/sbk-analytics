@@ -48,6 +48,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Opt-in, workdir-confined file benchmark cleanup and disk-space reporting
 
 ### Fixed
+- Catchable signals now preserve the one-document `--json` contract and their
+  `128 + signal` exit code; pip installer and parallel progress output are
+  explicitly routed to stderr
+- POSIX cleanup tolerates permission-denied process groups without interrupting
+  the remaining managed-process sweep
 - CI portability across Python 3.9, macOS, and Windows by using a
   Python-compatible Pillow constraint, canonical path assertions, and
   console-safe dependency status markers

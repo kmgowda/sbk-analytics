@@ -1,3 +1,4 @@
+import json
 import os
 import signal
 import subprocess
@@ -12,7 +13,12 @@ import psutil
 
 from analytics.charts import run_sbk_charts
 from analytics.config import OrchestratorConfig
-from analytics.processes import ProcessExit, managed_popen, terminate_process
+from analytics.processes import (
+    ProcessExit,
+    _signal_posix_group,
+    managed_popen,
+    terminate_process,
+)
 from analytics.releases import ChartsInstall, DependencySource
 from analytics.runner import run_jobs
 
@@ -122,9 +128,57 @@ class ForcedParentExitTests(unittest.TestCase):
     def test_forced_parent_exit_cleans_child_and_grandchild(self):
         self._assert_parent_exit_cleans_tree(forced=True)
 
+    @unittest.skipIf(os.name == "nt", "POSIX signal exit-code behavior")
+    def test_sigterm_cli_json_is_one_document(self):
+        with tempfile.TemporaryDirectory() as directory:
+            ready = Path(directory) / "ready"
+            code = (
+                "import pathlib,time\n"
+                "from unittest import mock\n"
+                "from analytics.cli import main\n"
+                f"ready=pathlib.Path({str(ready)!r})\n"
+                "def wait_for_signal(*_args, **_kwargs):\n"
+                "    ready.write_text('ready', encoding='utf-8')\n"
+                "    time.sleep(60)\n"
+                "with mock.patch('analytics.cli._execute', "
+                "side_effect=wait_for_signal):\n"
+                "    raise SystemExit(main(['deps', 'status', '--json']))\n"
+            )
+            env = os.environ.copy()
+            env["PYTHONPATH"] = (
+                str(ROOT) + os.pathsep + env.get("PYTHONPATH", "")
+            )
+            process = subprocess.Popen(
+                [sys.executable, "-c", code],
+                cwd=str(ROOT),
+                env=env,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            try:
+                _wait_for_file(ready)
+                os.kill(process.pid, signal.SIGTERM)
+                stdout, _stderr = process.communicate(timeout=10)
+            finally:
+                if process.poll() is None:
+                    process.kill()
+                    process.wait(timeout=5)
+            payload = json.loads(stdout)
+            self.assertEqual(process.returncode, 128 + signal.SIGTERM)
+            self.assertEqual(payload["exit_code"], 128 + signal.SIGTERM)
+            self.assertEqual(payload["signal"], signal.SIGTERM)
+
 
 @unittest.skipIf(os.name == "nt", "POSIX process-group behavior")
 class ManagedProcessTests(unittest.TestCase):
+    def test_permission_error_during_group_signal_is_best_effort(self):
+        with mock.patch(
+            "analytics.processes.os.killpg", side_effect=PermissionError("denied")
+        ), self.assertLogs("analytics.processes", level="WARNING") as logs:
+            _signal_posix_group(1234, signal.SIGTERM)
+        self.assertIn("permission denied", "\n".join(logs.output))
+
     def test_normal_wrapper_exit_removes_remaining_descendant(self):
         with tempfile.TemporaryDirectory() as directory:
             pid_file = Path(directory) / "grand.pid"

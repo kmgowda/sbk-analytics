@@ -294,6 +294,16 @@ def _signal_posix_group(pgid: int, signum: int) -> None:
         os.killpg(pgid, signum)
     except ProcessLookupError:
         return
+    except PermissionError as exc:
+        # Cleanup is best effort: one inaccessible group must not prevent the
+        # registry sweep from attempting every other managed workload.
+        log.warning(
+            "permission denied signalling workload process group pgid=%s "
+            "signal=%s: %s",
+            pgid,
+            signum,
+            exc,
+        )
 
 
 def _create_windows_kill_job(process: subprocess.Popen) -> int | None:

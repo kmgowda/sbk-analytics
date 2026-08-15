@@ -41,6 +41,29 @@ from .errors import CacheError, DependencyResolutionError, LocalPackageError
 log = logging.getLogger(__name__)
 
 
+def _run_pip(cmd: list[str], pip_env: dict[str, str]) -> None:
+    """Run pip with all installer output kept off machine-readable stdout."""
+    try:
+        sys.stderr.fileno()
+    except (AttributeError, OSError, ValueError):
+        # Embedded callers and tests may replace stderr with an in-memory
+        # stream that Popen cannot inherit. Capture and relay in that case.
+        result = subprocess.run(
+            cmd,
+            check=True,
+            env=pip_env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+        )
+        if result.stdout:
+            print(result.stdout, end="", file=sys.stderr, flush=True)
+        return
+    subprocess.run(
+        cmd, check=True, env=pip_env, stdout=sys.stderr, stderr=sys.stderr
+    )
+
+
 def cache_root() -> Path:
     """Return the environment-selected cache, then the platform default."""
     root = os.environ.get("SBK_ANALYTICS_DOWNLOADS_FOLDER") or os.environ.get(
@@ -755,7 +778,7 @@ def ensure_sbk_charts(
         # Install sbk-charts
         cmd = pip_args + [spec]
         log.info("installing sbk-charts in conda environment: %s", spec)
-        subprocess.run(cmd, check=True, env=pip_env)
+        _run_pip(cmd, pip_env)
         
         # Return a ChartsInstall pointing to the conda environment
         return ChartsInstall(
@@ -846,12 +869,12 @@ def _ensure_sbk_charts_locked(
     # Upgrade pip first
     cmd = pip_args + ["--quiet", "--upgrade", "pip"]
     log.info("upgrading pip in venv")
-    subprocess.run(cmd, check=True, env=pip_env)
+    _run_pip(cmd, pip_env)
     
     # Install sbk-charts
     cmd = pip_args + [spec]
     log.info("installing sbk-charts: %s", spec)
-    subprocess.run(cmd, check=True, env=pip_env)
+    _run_pip(cmd, pip_env)
 
     if not install.cli.exists():
         # some versions expose differently named entry points

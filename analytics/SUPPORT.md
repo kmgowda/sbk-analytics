@@ -63,6 +63,9 @@ If you're new to sbk-analytics, start with:
 - Use `-v` to see termination messages for catchable signals
 - Remote SBK clients receive best-effort SSH cleanup on catchable interrupts;
   after an uncatchable local kill, inspect the remote nodes separately
+- Remote cleanup disables SSH host-key checking and runs
+  `pkill -9 -f io.sbk.main`; use only trusted, dedicated benchmark nodes,
+  because other matching SBK workloads on those nodes will also be stopped
 
 **Problem**: `cleanup: on-success` did not remove benchmark data
 - Cleanup intentionally supports only `class: file` and its `file`/`fname`

@@ -2,7 +2,9 @@ import contextlib
 import io
 import json
 import os
+import signal
 import stat
+import sys
 import tarfile
 import tempfile
 import unittest
@@ -13,10 +15,11 @@ from unittest import mock
 from analytics.cli import _apply_overrides, _cleanup_benchmark_data, _parse_args, main
 from analytics.config import Instance, OrchestratorConfig, load_config
 from analytics.errors import CacheError, LocalPackageError
+from analytics.processes import ProcessExit
 from analytics.properties import parse_properties
 from analytics.releases import (
     ChartsInstall, DependencySource, JdkInstall, SbkInstall, _cache_lock,
-    _charts_version, _extract, cache_root,
+    _charts_version, _extract, _run_pip, cache_root,
     resolve_local_sbk_charts,
 )
 from analytics.runner import RunResult
@@ -82,6 +85,21 @@ class PropertiesHardeningTests(unittest.TestCase):
             self.assertEqual(
                 _charts_version(Path("/tools/sbk-charts")), "4.26.7.1"
             )
+
+    def test_pip_output_is_relayed_to_stderr_not_stdout(self):
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+        command = [
+            sys.executable,
+            "-c",
+            "import sys; print('pip-out'); print('pip-err', file=sys.stderr)",
+        ]
+        with contextlib.redirect_stdout(stdout), \
+                contextlib.redirect_stderr(stderr):
+            _run_pip(command, os.environ.copy())
+        self.assertEqual(stdout.getvalue(), "")
+        self.assertIn("pip-out", stderr.getvalue())
+        self.assertIn("pip-err", stderr.getvalue())
 
     def test_cache_lock_can_be_acquired(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -191,6 +209,25 @@ class CliFlowTests(unittest.TestCase):
         payload = json.loads(stdout.getvalue())
         self.assertEqual(payload["status"], "error")
         self.assertEqual(payload["exit_code"], 5)
+
+    def test_json_signal_is_one_parseable_document_with_signal_exit_code(self):
+        for signum in (signal.SIGINT, signal.SIGTERM):
+            with self.subTest(signum=signum):
+                stdout = io.StringIO()
+                stderr = io.StringIO()
+                with contextlib.redirect_stdout(stdout), \
+                        contextlib.redirect_stderr(stderr), \
+                        mock.patch(
+                            "analytics.cli._execute",
+                            side_effect=ProcessExit(signum),
+                        ):
+                    rc = main(["deps", "status", "--json"])
+                payload = json.loads(stdout.getvalue())
+                self.assertEqual(rc, 128 + signum)
+                self.assertEqual(payload["status"], "error")
+                self.assertEqual(payload["exit_code"], 128 + signum)
+                self.assertEqual(payload["signal"], signum)
+                self.assertEqual(payload["error_type"], "ProcessExit")
 
     def test_json_config_init_is_one_parseable_document(self):
         with tempfile.TemporaryDirectory() as directory:

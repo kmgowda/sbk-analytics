@@ -246,6 +246,11 @@ def _kill_remote_sbk_clients(yml_path: Path) -> None:
             "remote sbk kill: 'sshpass' not on PATH but gempass is set; "
             "attempting key-based ssh which may fail"
         )
+    log.warning(
+        "remote sbk kill is best effort and insecure: SSH host-key checking "
+        "is disabled, and every remote process matching %r will be killed",
+        _remote_kill_pattern(),
+    )
 
     threads: list[threading.Thread] = []
     for node in nodes:
@@ -634,6 +639,7 @@ def _run_parallel(
                 ]
                 print(
                     f"[parallel] {len(running)} running: {', '.join(elapsed)}",
+                    file=sys.stderr,
                     flush=True,
                 )
                 last_print = now

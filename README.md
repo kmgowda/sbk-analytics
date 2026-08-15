@@ -801,6 +801,12 @@ Remote-kill credentials come from the instance's `gemuser` / `gempass` /
 if present on PATH); otherwise key-based SSH is attempted. Failures (e.g.
 unreachable nodes) are logged but do **not** fail the overall run.
 
+Remote cleanup is intentionally broad and best-effort: it disables SSH
+host-key checking and kills every process on each configured node whose command
+line matches `io.sbk.main`. Run only against trusted benchmark nodes that are
+not shared with unrelated SBK workloads. A warning is logged whenever this
+cleanup is attempted.
+
 Whatever CSV the instance had written up to the kill is preserved and fed
 into the single `sbk-charts` invocation at the end.
 

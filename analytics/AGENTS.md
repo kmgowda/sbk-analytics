@@ -170,6 +170,9 @@ sbk-analytics invocation
   3-second graceful window
 - Registers an `atexit` fallback and escalates from tree TERM to tree KILL
 - Runner exception paths retain best-effort remote cleanup for sbk-gem jobs
+- Remote sbk-gem cleanup deliberately disables SSH host-key checking and uses
+  the broad `pkill -9 -f io.sbk.main` pattern; it must be treated as an
+  insecure operation for trusted, dedicated benchmark nodes only
 
 ### 7. Charts Module (`charts.py`)
 **Purpose**: Invoke sbk-charts for analytics

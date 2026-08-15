@@ -28,7 +28,7 @@ from .charts import run_sbk_charts
 from .config import load_config
 from .errors import ConfigurationError, DependencyResolutionError, SbkAnalyticsError
 from .properties import parse_properties
-from .processes import child_process_cleanup
+from .processes import ProcessExit, child_process_cleanup
 from .releases import (
     ChartsInstall,
     DependencySource,
@@ -714,25 +714,35 @@ def main(argv: list[str] | None = None) -> int:
     """Run the CLI with concise expected errors and opt-in tracebacks."""
     args = _parse_args(argv)
     machine_stdout = sys.stdout if args.json else None
-    with child_process_cleanup():
-        try:
+    try:
+        with child_process_cleanup():
             if machine_stdout is not None:
                 with redirect_stdout(sys.stderr):
                     return _execute(args, json_stream=machine_stdout)
             return _execute(args)
-        except (SbkAnalyticsError, OSError, KeyError, ValueError, RuntimeError,
-                subprocess.CalledProcessError) as exc:
-            verbosity = args.verbose
-            if verbosity >= 2:
-                traceback.print_exc()
-            else:
-                print(f"ERROR: {exc}", file=sys.stderr)
-                print("Run with -vv for a traceback.", file=sys.stderr)
-            _emit_json(machine_stdout, {
-                "status": "error", "exit_code": 5,
-                "error": str(exc), "error_type": exc.__class__.__name__,
-            })
-            return 5
+    except ProcessExit as exc:
+        exit_code = int(exc.code)
+        message = f"terminated by signal {exc.signum}"
+        print(f"ERROR: {message}", file=sys.stderr)
+        _emit_json(machine_stdout, {
+            "status": "error", "exit_code": exit_code,
+            "error": message, "error_type": exc.__class__.__name__,
+            "signal": exc.signum,
+        })
+        return exit_code
+    except (SbkAnalyticsError, OSError, KeyError, ValueError, RuntimeError,
+            subprocess.CalledProcessError) as exc:
+        verbosity = args.verbose
+        if verbosity >= 2:
+            traceback.print_exc()
+        else:
+            print(f"ERROR: {exc}", file=sys.stderr)
+            print("Run with -vv for a traceback.", file=sys.stderr)
+        _emit_json(machine_stdout, {
+            "status": "error", "exit_code": 5,
+            "error": str(exc), "error_type": exc.__class__.__name__,
+        })
+        return 5
 
 
 if __name__ == "__main__":
