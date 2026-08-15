@@ -4,6 +4,12 @@ This document provides a high-level architectural overview of sbk-analytics.
 
 ## System Architecture
 
+On Linux and macOS, `sbk-analytics.sh` is an optional bootstrap layer before
+the CLI. It reuses an active compatible venv/Conda environment, reuses or
+creates a launcher-managed environment, installs the checkout when dependency
+inputs change, and then replaces itself with `python -m analytics`. Using
+`exec` keeps the CLI as the signal-owning process.
+
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                        User Input                           │

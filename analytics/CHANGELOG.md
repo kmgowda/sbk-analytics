@@ -32,6 +32,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Self-bootstrapping `sbk-analytics.sh` launcher for Linux and macOS with active
+  environment reuse, managed venv creation, Conda fallback, dependency-change
+  detection, argument forwarding, and signal/exit-code preservation
 - Managed child-process trees for `sbk-yal`, `sbk-gem-yal`, and `sbk-charts`,
   including signal cleanup, POSIX parent-death guards, Windows kill-on-close
   jobs, and forced-exit integration tests

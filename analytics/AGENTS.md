@@ -38,6 +38,7 @@ sbk-analytics/
 │   ├── config.yml
 │   └── local-smoke-test.yml      # Fast local end-to-end validation
 ├── sbk-config.env              # SBK configuration (versions, URLs, folders)
+├── sbk-analytics.sh            # Self-bootstrapping Linux/macOS launcher
 ├── sbk-config.local.env.example # Local-package configuration template
 ├── environment.yml              # Conda environment specification
 ├── requirements.txt             # Python dependencies
@@ -255,6 +256,9 @@ classes:
 
 ### For Development
 ```bash
+# Linux/macOS automatic environment setup
+./sbk-analytics.sh --version
+
 # Create virtual environment
 python -m venv .venv
 source .venv/bin/activate
@@ -331,6 +335,9 @@ selections never fall back to the network.
 8. **Machine output**: `--json` reserves stdout for one JSON document
 9. **Process ownership**: SBK and charts launches must use `managed_popen()`;
    never introduce a direct `Popen`/`run` for long-lived workload commands
+10. **Launcher bootstrap**: `sbk-analytics.sh` reuses active or managed
+    environments, prefers venv creation, falls back to Conda, forwards all CLI
+    arguments, and `exec`s Python so signal and exit-code behavior is preserved
 
 ### Common Tasks
 

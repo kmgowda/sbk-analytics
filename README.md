@@ -53,6 +53,35 @@ before a long run.
 
 ## Quick Start
 
+### Self-bootstrapping launcher for Linux/macOS
+
+The repository includes an executable launcher that prepares Python and then
+passes every argument unchanged to sbk-analytics:
+
+```bash
+./sbk-analytics.sh --version
+./sbk-analytics.sh deps doctor
+./sbk-analytics.sh -c examples/file-rocksdb-write-60s.yml
+```
+
+The launcher requires Bash and follows this order:
+
+1. Reuse a compatible active `VIRTUAL_ENV`, then an active `CONDA_PREFIX`.
+2. Reuse the launcher-managed `.venv`, then `.conda` environment.
+3. With Python 3.9 or newer, create or repair `.venv` and install this checkout.
+4. If venv creation or installation fails, use Conda to create `.conda` with
+   Python 3.10 and install this checkout.
+
+The environment is bootstrapped again only when the project dependency files
+or launcher change. Installer output and launcher status go to stderr, so
+`./sbk-analytics.sh --json ...` keeps stdout machine-readable. The launcher
+uses `exec` for the final process, preserving signals and exit codes.
+
+Set `SBK_ANALYTICS_PYTHON=/path/to/python` to prefer a particular interpreter,
+or `SBK_ANALYTICS_ENV_HOME=/path/to/folder` to store the managed `.venv` and
+`.conda` outside the checkout. Environment creation can still fail when package
+repositories are unreachable or the selected location is not writable.
+
 ### For macOS/Linux (Recommended with Conda)
 ```bash
 conda env create -f environment.yml
@@ -1005,6 +1034,7 @@ into those folders.
 ```
 sbk-analytics/
 ├── sbk-config.env            # bundled SBK / sbk-charts release pins
+├── sbk-analytics.sh          # self-bootstrapping Linux/macOS launcher
 ├── pyproject.toml            # entry point: sbk-analytics → analytics.cli:main
 ├── requirements.txt
 ├── README.md

@@ -13,6 +13,13 @@ If you're new to sbk-analytics, start with:
 
 ### Installation Problems
 
+**Problem**: `./sbk-analytics.sh` cannot prepare an environment
+- The launcher supports Linux and macOS and requires Bash
+- Install Python 3.9 or newer; if venv creation is unavailable, install Conda
+- Confirm package repositories are reachable on the first bootstrap
+- Confirm the checkout, or `SBK_ANALYTICS_ENV_HOME`, is writable
+- Use `SBK_ANALYTICS_PYTHON=/path/to/python` to prefer a known interpreter
+
 **Problem**: `pip install -e .` fails
 - Ensure you're using Python 3.9+
 - Try using conda: `conda env create -f environment.yml`
