@@ -241,7 +241,7 @@ sbk-analytics --version
 #### Venv Environment Behavior
 
 When using venv, sbk-analytics:
-- Creates a separate venv for sbk-charts under `{sbk.folder}/sbk-charts/{version}/venv`
+- Creates a separate venv for sbk-charts under `{downloads.folder}/sbk-charts/{version}/venv`
 - Downloads and installs all dependencies including PyTorch via pip
 - Respects SSL verification settings from `sbk-config.env`
 - Caches installations for faster subsequent runs
@@ -544,7 +544,7 @@ carries both the **GitHub URL** and the **release tag** for each project:
 # sbk-config.env  (bundled at the project root)
 sbk.url=https://github.com/kmgowda/SBK
 sbk.version=10.0
-sbk.folder=./.sbk
+downloads.folder=./.sbk
 sbk.jdk.version=25
 sbk.jdk.folder=./.jdk
 ssl.verify=true
@@ -593,7 +593,7 @@ Recognised keys (case-insensitive; dots / underscores / dashes interchangeable):
 | --- | --- | --- |
 | `sbk.url`        | no (defaults to `https://github.com/kmgowda/SBK`)        | Full URL `https://github.com/<owner>/<repo>` or `<owner>/<repo>` shorthand. |
 | `sbk.version`    | yes | Tag that exists on that repository's Releases page. |
-| `sbk.folder`     | no (defaults to `./.sbk`) | Local folder for SBK installation. Use `./.sbk` for project-local cache. |
+| `downloads.folder` | no (defaults to `./.sbk`) | Shared local folder for downloaded SBK and sbk-charts installations. Use `./.sbk` for a project-local cache. |
 | `sbk.jdk.version`| no (defaults to `25`) | Required JDK major version. |
 | `sbk.jdk.folder`| no (defaults to `./.jdk`) | Local folder for JDK installation. Use `./.jdk` for project-local cache. |
 | `ssl.verify`     | no (defaults to `true`) | Enable SSL verification for downloads. |

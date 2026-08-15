@@ -152,7 +152,7 @@ sbk-analytics/
 ```
 sbk.url=https://github.com/kmgowda/SBK
 sbk.version=10.0
-sbk.folder=./.sbk
+downloads.folder=./.sbk
 sbk.jdk.version=25
 sbk.jdk.folder=./.jdk
 ssl.verify=true

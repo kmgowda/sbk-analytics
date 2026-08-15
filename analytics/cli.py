@@ -125,7 +125,7 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         default=None,
         help=(
             "SBK configuration file (key=value): sbk.version, "
-            "sbk-charts.version, sbk.folder, etc. Defaults to the bundled "
+            "sbk-charts.version, downloads.folder, etc. Defaults to the bundled "
             "<project>/sbk-config.env shipped with sbk-analytics."
         ),
     )
@@ -231,10 +231,10 @@ def main(argv: list[str] | None = None) -> int:
     log.info("JDK %s home: %s", versions.sbk_jdk, jdk.home)
     print(f"✓ JDK {versions.sbk_jdk} ready", flush=True)
     
-    sbk = ensure_sbk(versions.sbk, repo=versions.sbk_repo, sbk_folder=versions.sbk_folder, ssl_verify=versions.ssl_verify)
+    sbk = ensure_sbk(versions.sbk, repo=versions.sbk_repo, downloads_folder=versions.downloads_folder, ssl_verify=versions.ssl_verify)
     print(f"✓ SBK {versions.sbk} ready", flush=True)
     
-    charts = ensure_sbk_charts(versions.sbk_charts, repo_url=versions.sbk_charts_url, sbk_folder=versions.sbk_folder, ssl_verify=versions.ssl_verify)
+    charts = ensure_sbk_charts(versions.sbk_charts, repo_url=versions.sbk_charts_url, downloads_folder=versions.downloads_folder, ssl_verify=versions.ssl_verify)
     print(f"✓ sbk-charts {versions.sbk_charts} ready", flush=True)
 
     executable = sbk.sbk_gem_yal if cfg.uses_gem else sbk.sbk_yal

@@ -228,13 +228,13 @@ def _extract(archive: Path, dest: Path) -> Path:
 # ---------- SBK ----------
 
 
-def ensure_sbk(version: str, repo: str = "kmgowda/SBK", sbk_folder: Path | None = None, ssl_verify: bool = True) -> SbkInstall:
+def ensure_sbk(version: str, repo: str = "kmgowda/SBK", downloads_folder: Path | None = None, ssl_verify: bool = True) -> SbkInstall:
     """Ensure SBK <version> is downloaded + extracted, return install info."""
     # Use specified folder if provided, otherwise use cache
-    if sbk_folder is None:
+    if downloads_folder is None:
         cache = _cache_root() / "sbk" / version
     else:
-        cache = sbk_folder / version
+        cache = downloads_folder / version
         cache.mkdir(parents=True, exist_ok=True)
     
     marker = cache / ".ok"
@@ -324,7 +324,7 @@ def ensure_sbk(version: str, repo: str = "kmgowda/SBK", sbk_folder: Path | None 
 def ensure_sbk_charts(
     version: str,
     repo_url: str = "https://github.com/kmgowda/sbk-charts",
-    sbk_folder: Path | None = None,
+    downloads_folder: Path | None = None,
     ssl_verify: bool = True,
 ) -> ChartsInstall:
     """Ensure sbk-charts <version> is installed in a dedicated venv."""
@@ -393,11 +393,11 @@ def ensure_sbk_charts(
         # Return a ChartsInstall pointing to the conda environment
         return ChartsInstall(venv_dir=Path(sys.prefix))
     
-    # Use sbk_folder for caching if provided, otherwise use cache
-    if sbk_folder is None:
+    # Use downloads_folder for caching if provided, otherwise use cache
+    if downloads_folder is None:
         cache = _cache_root() / "sbk-charts" / version
     else:
-        cache = sbk_folder / "sbk-charts" / version
+        cache = downloads_folder / "sbk-charts" / version
         cache.mkdir(parents=True, exist_ok=True)
     
     venv_dir = cache / "venv"

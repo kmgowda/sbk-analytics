@@ -14,7 +14,8 @@ Recognised keys (case-insensitive; dots / underscores / dashes equivalent):
     sbk.url                -> GitHub repo URL for SBK
                               (e.g. https://github.com/kmgowda/SBK)
     sbk.version            -> SBK release tag on that repo
-    sbk.folder             -> Local folder for SBK and sbk-charts installation (default: ./.sbk)
+    downloads.folder       -> Shared local folder for downloaded SBK and
+                              sbk-charts installations (default: ./.sbk)
     sbk.jdk.version        -> JDK major version required by that SBK release
                               (default: 25). The orchestrator first looks for
                               an already-installed JDK whose major version
@@ -46,7 +47,7 @@ from urllib.parse import urlparse
 DEFAULT_SBK_URL = "https://github.com/kmgowda/SBK"
 DEFAULT_SBK_CHARTS_URL = "https://github.com/kmgowda/sbk-charts"
 DEFAULT_SBK_JDK_VERSION = "25"
-DEFAULT_SBK_FOLDER = "./.sbk"
+DEFAULT_DOWNLOADS_FOLDER = "./.sbk"
 DEFAULT_JDK_FOLDER = "./.jdk"
 DEFAULT_SSL_VERIFY = "true"
 
@@ -101,7 +102,7 @@ class Versions:
     sbk_url: str           # canonical SBK repo URL
     sbk_charts_url: str    # canonical sbk-charts repo URL
     sbk_jdk: str           # required JDK major version, e.g. "25"
-    sbk_folder: Path       # local folder for SBK installation
+    downloads_folder: Path  # shared folder for downloaded SBK and sbk-charts installations
     jdk_folder: Path       # local folder for JDK installation
     ssl_verify: bool       # enable SSL verification for downloads
 
@@ -152,9 +153,9 @@ def parse_properties(path: str | Path) -> Versions:
         default=DEFAULT_SBK_JDK_VERSION,
     ).strip()
     
-    sbk_folder_raw = _get(
-        "sbk.folder", "sbk_folder", "sbk.dir", "sbk_dir",
-        default=DEFAULT_SBK_FOLDER,
+    downloads_folder_raw = _get(
+        "downloads.folder", "downloads_folder",
+        default=DEFAULT_DOWNLOADS_FOLDER,
     )
     jdk_folder_raw = _get(
         "sbk.jdk.folder", "sbk_jdk_folder", "jdk.folder", "jdk_folder",
@@ -175,7 +176,7 @@ def parse_properties(path: str | Path) -> Versions:
         sbk_url=_normalise_repo_url(sbk_url_raw),
         sbk_charts_url=_normalise_repo_url(sbk_charts_url_raw),
         sbk_jdk=sbk_jdk,
-        sbk_folder=_resolve_folder(sbk_folder_raw, p),
+        downloads_folder=_resolve_folder(downloads_folder_raw, p),
         jdk_folder=_resolve_folder(jdk_folder_raw, p),
         ssl_verify=ssl_verify,
     )
