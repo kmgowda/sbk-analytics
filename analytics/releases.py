@@ -27,6 +27,7 @@ import time
 import venv
 import zipfile
 from dataclasses import dataclass
+from enum import Enum
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -49,17 +50,32 @@ def _use_specified_cache(specified_folder: Path) -> Path:
     return _cache_root()
 
 
+class DependencySource(str, Enum):
+    """How a resolved dependency was obtained for this invocation."""
+
+    LOCAL = "LOCAL"
+    MANAGED_CACHE = "MANAGED_CACHE"
+    DOWNLOADED = "DOWNLOADED"
+    CONDA = "CONDA"
+
+
 @dataclass
 class SbkInstall:
-    home: Path  # extracted SBK distribution root (contains bin/)
+    home: Path  # selected SBK distribution root (contains bin/)
+    source: DependencySource = DependencySource.MANAGED_CACHE
+    _sbk_yal: Path | None = None
+    _sbk_gem_yal: Path | None = None
 
     @property
     def sbk_yal(self) -> Path:
-        return self.home / "bin" / "sbk-yal"
+        return self._sbk_yal or self.home / "bin" / "sbk-yal"
 
     @property
-    def sbk_gem_yal(self) -> Path:
-        return self.home / "bin" / "sbk-gem-yal"
+    def sbk_gem_yal(self) -> Path | None:
+        if self._sbk_gem_yal is not None:
+            return self._sbk_gem_yal
+        default = self.home / "bin" / "sbk-gem-yal"
+        return default if default.is_file() else None
 
 
 @dataclass
@@ -75,22 +91,113 @@ class JdkInstall:
 
 @dataclass
 class ChartsInstall:
-    venv_dir: Path  # python venv with sbk-charts installed
+    venv_dir: Path  # selected sbk-charts checkout or environment root
+    source: DependencySource = DependencySource.MANAGED_CACHE
+    _cli: Path | None = None
+    _python: Path | None = None
 
     @property
     def cli(self) -> Path:
+        if self._cli is not None:
+            return self._cli
         if os.name == "nt":
             return self.venv_dir / "Scripts" / "sbk-charts.exe"
         return self.venv_dir / "bin" / "sbk-charts"
 
     @property
     def python(self) -> Path:
+        if self._python is not None:
+            return self._python
         if os.name == "nt":
             return self.venv_dir / "Scripts" / "python.exe"
         return self.venv_dir / "bin" / "python"
 
 
 # ---------- helpers ----------
+
+
+def _local_directory(folder: Path, dependency: str) -> Path:
+    """Return a canonical local dependency directory or fail clearly.
+
+    An explicitly configured local folder is authoritative: callers must not
+    fall back to a download when this validation fails.
+    """
+    try:
+        root = folder.expanduser().resolve(strict=True)
+    except (OSError, RuntimeError) as exc:
+        raise RuntimeError(
+            f"{dependency} local folder does not exist: {folder}"
+        ) from exc
+    if not root.is_dir():
+        raise RuntimeError(f"{dependency} local folder is not a directory: {root}")
+    return root
+
+
+def _require_executable(path: Path, dependency: str) -> Path:
+    """Validate a local command without modifying its permissions."""
+    if not path.is_file():
+        raise RuntimeError(f"{dependency} executable is missing: {path}")
+    if not os.access(path, os.X_OK):
+        raise RuntimeError(f"{dependency} executable is not executable: {path}")
+    return path
+
+
+def resolve_local_sbk(folder: Path, *, require_gem: bool = False) -> SbkInstall:
+    """Resolve a ready-to-run SBK distribution or built source checkout.
+
+    Supported roots contain either ``bin/sbk-yal`` (a distribution) or
+    ``build/install/sbk/bin/sbk-yal`` (a Gradle ``installDist`` checkout).
+    The bounded list deliberately avoids selecting stale artifacts via a
+    recursive filesystem search.
+    """
+    root = _local_directory(folder, "SBK")
+    homes = (root, root / "build" / "install" / "sbk")
+    for home in homes:
+        sbk_yal = home / "bin" / "sbk-yal"
+        if not sbk_yal.is_file():
+            continue
+        sbk_gem_yal = home / "bin" / "sbk-gem-yal"
+        resolved_gem = None
+        if sbk_gem_yal.is_file() and os.access(sbk_gem_yal, os.X_OK):
+            resolved_gem = sbk_gem_yal
+        elif require_gem:
+            _require_executable(sbk_gem_yal, "SBK sbk-gem-yal")
+        return SbkInstall(
+            home=home,
+            source=DependencySource.LOCAL,
+            _sbk_yal=_require_executable(sbk_yal, "SBK sbk-yal"),
+            _sbk_gem_yal=resolved_gem,
+        )
+    checked = ", ".join(str(home / "bin" / "sbk-yal") for home in homes)
+    raise RuntimeError(
+        "SBK local folder is not a ready-to-run distribution or built "
+        f"checkout: {root}; checked: {checked}"
+    )
+
+
+def resolve_local_sbk_charts(folder: Path) -> ChartsInstall:
+    """Resolve a ready-to-run local sbk-charts checkout or environment."""
+    root = _local_directory(folder, "sbk-charts")
+    if os.name == "nt":
+        candidates = (
+            root / "sbk-charts.exe",
+            root / "Scripts" / "sbk-charts.exe",
+        )
+    else:
+        candidates = (root / "sbk-charts", root / "bin" / "sbk-charts")
+    for cli in candidates:
+        if cli.is_file():
+            return ChartsInstall(
+                venv_dir=root,
+                source=DependencySource.LOCAL,
+                _cli=_require_executable(cli, "sbk-charts"),
+                _python=Path(sys.executable),
+            )
+    checked = ", ".join(str(candidate) for candidate in candidates)
+    raise RuntimeError(
+        f"sbk-charts local folder has no supported executable: {root}; "
+        f"checked: {checked}"
+    )
 
 
 def _gh_release(repo: str, tag: str, ssl_verify: bool = True) -> dict:
@@ -228,8 +335,19 @@ def _extract(archive: Path, dest: Path) -> Path:
 # ---------- SBK ----------
 
 
-def ensure_sbk(version: str, repo: str = "kmgowda/SBK", downloads_folder: Path | None = None, ssl_verify: bool = True) -> SbkInstall:
-    """Ensure SBK <version> is downloaded + extracted, return install info."""
+def ensure_sbk(
+    version: str,
+    repo: str = "kmgowda/SBK",
+    downloads_folder: Path | None = None,
+    ssl_verify: bool = True,
+    local_folder: Path | None = None,
+    require_gem: bool = False,
+) -> SbkInstall:
+    """Resolve local SBK first, otherwise use/download the pinned release."""
+    if local_folder is not None:
+        log.info("using explicitly configured local SBK folder: %s", local_folder)
+        return resolve_local_sbk(local_folder, require_gem=require_gem)
+
     # Use specified folder if provided, otherwise use cache
     if downloads_folder is None:
         cache = _cache_root() / "sbk" / version
@@ -243,9 +361,15 @@ def ensure_sbk(version: str, repo: str = "kmgowda/SBK", downloads_folder: Path |
     if marker.exists() and home_file.exists():
         home = Path(home_file.read_text().strip())
         # Validate that the extracted distribution still has the binaries.
-        if (home / "bin" / "sbk-yal").exists():
+        has_yal = (home / "bin" / "sbk-yal").exists()
+        has_required_gem = (
+            not require_gem or (home / "bin" / "sbk-gem-yal").exists()
+        )
+        if has_yal and has_required_gem:
             log.info("SBK %s already installed at %s (cache hit)", version, home)
-            return SbkInstall(home=home)
+            return SbkInstall(
+                home=home, source=DependencySource.MANAGED_CACHE
+            )
         log.warning(
             "SBK %s cache marker exists but binaries missing at %s; re-installing",
             version, home,
@@ -307,6 +431,13 @@ def ensure_sbk(version: str, repo: str = "kmgowda/SBK", downloads_folder: Path |
             except OSError:
                 pass
 
+    _require_executable(home / "bin" / "sbk-yal", "downloaded SBK sbk-yal")
+    if require_gem:
+        _require_executable(
+            home / "bin" / "sbk-gem-yal",
+            "downloaded SBK sbk-gem-yal",
+        )
+
     home_file.write_text(str(home.resolve()))
     marker.touch()
     # Free disk: the ~1+ GB archive is no longer needed once extracted.
@@ -315,7 +446,7 @@ def ensure_sbk(version: str, repo: str = "kmgowda/SBK", downloads_folder: Path |
     except OSError as e:
         log.debug("could not remove archive %s: %s", archive, e)
     log.info("SBK %s ready at %s", version, home)
-    return SbkInstall(home=home)
+    return SbkInstall(home=home, source=DependencySource.DOWNLOADED)
 
 
 # ---------- sbk-charts ----------
@@ -326,8 +457,18 @@ def ensure_sbk_charts(
     repo_url: str = "https://github.com/kmgowda/sbk-charts",
     downloads_folder: Path | None = None,
     ssl_verify: bool = True,
+    local_folder: Path | None = None,
 ) -> ChartsInstall:
-    """Ensure sbk-charts <version> is installed in a dedicated venv."""
+    """Resolve local sbk-charts first, otherwise use conda/cache/download."""
+    # Local selection must precede conda detection so an explicit path is
+    # always authoritative and never silently replaced by another package.
+    if local_folder is not None:
+        log.info(
+            "using explicitly configured local sbk-charts folder: %s",
+            local_folder,
+        )
+        return resolve_local_sbk_charts(local_folder)
+
     # Check if we're in a conda environment - if so, install directly
     if "CONDA_PREFIX" in os.environ:
         log.info("Detected conda environment, installing sbk-charts directly")
@@ -353,7 +494,9 @@ def ensure_sbk_charts(
                 pass
         
         if already_installed:
-            return ChartsInstall(venv_dir=Path(sys.prefix))
+            return ChartsInstall(
+                venv_dir=Path(sys.prefix), source=DependencySource.CONDA
+            )
         
         # Install sbk-charts in the current conda environment
         pip_url = repo_url.rstrip("/")
@@ -391,7 +534,9 @@ def ensure_sbk_charts(
         subprocess.run(cmd, check=True, env=pip_env)
         
         # Return a ChartsInstall pointing to the conda environment
-        return ChartsInstall(venv_dir=Path(sys.prefix))
+        return ChartsInstall(
+            venv_dir=Path(sys.prefix), source=DependencySource.CONDA
+        )
     
     # Use downloads_folder for caching if provided, otherwise use cache
     if downloads_folder is None:
@@ -403,7 +548,9 @@ def ensure_sbk_charts(
     venv_dir = cache / "venv"
     marker = cache / ".ok"
 
-    install = ChartsInstall(venv_dir=venv_dir)
+    install = ChartsInstall(
+        venv_dir=venv_dir, source=DependencySource.MANAGED_CACHE
+    )
     if marker.exists() and install.cli.exists() and install.python.exists():
         log.info(
             "sbk-charts %s already installed at %s (cache hit)", version, venv_dir
@@ -466,8 +613,11 @@ def ensure_sbk_charts(
         bindir = venv_dir / ("Scripts" if os.name == "nt" else "bin")
         candidates = list(bindir.glob("sbk-charts*")) + list(bindir.glob("sb-charts*"))
         if candidates:
-            install = ChartsInstall(venv_dir=venv_dir)
-            # rewrite expected path; cli property derived dynamically
+            install = ChartsInstall(
+                venv_dir=venv_dir,
+                source=DependencySource.DOWNLOADED,
+                _cli=candidates[0],
+            )
             log.warning(
                 "sbk-charts CLI not at expected path; found: %s",
                 [c.name for c in candidates],
@@ -479,7 +629,12 @@ def ensure_sbk_charts(
 
     marker.touch()
     log.info("sbk-charts %s installed successfully", version)
-    return install
+    return ChartsInstall(
+        venv_dir=venv_dir,
+        source=DependencySource.DOWNLOADED,
+        _cli=install.cli,
+        _python=install.python,
+    )
 
 
 # ---------- JDK (Adoptium / Temurin) ----------

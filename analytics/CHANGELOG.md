@@ -32,6 +32,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Explicit `sbk.local.folder` and `sbk-charts.local.folder` resolution with
+  local-first precedence, fail-fast validation, and dependency-source output
 - AGENTS.md documentation for AI coding assistants
 - CONTRIBUTING.md for contributors and AI agents
 - CHANGELOG.md for version history tracking

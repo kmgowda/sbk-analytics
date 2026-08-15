@@ -96,8 +96,8 @@ sbk-analytics -c examples/config.yml
 
 ### External
 - JDK (auto-downloaded)
-- SBK (auto-downloaded)
-- sbk-charts (auto-installed)
+- SBK (explicit local checkout or auto-downloaded)
+- sbk-charts (explicit local checkout, conda package, or auto-installed)
 
 ## Debugging
 
@@ -111,6 +111,10 @@ sbk-analytics -c config.yml -vv   # extra verbose
 - JDK: `.jdk/<version>/` or `./.jdk/`
 - SBK: `.sbk/<version>/`
 - sbk-charts: `.sbk/sbk-charts/<version>/`
+
+Local overrides use `sbk.local.folder` and `sbk-charts.local.folder` in
+`sbk-config.env`. They are resolved before cache/network handling and must
+already contain executable commands.
 
 ### Common issues
 - **JDK version mismatch**: Check `sbk.jdk.version` in sbk-config.env

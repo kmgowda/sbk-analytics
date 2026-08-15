@@ -23,6 +23,14 @@ If you're new to sbk-analytics, start with:
 - Verify SSL settings in `sbk-config.env`
 - Try with `ssl.verify=false` in sbk-config.env
 
+**Problem**: a configured local SBK or sbk-charts folder is rejected
+- Confirm the local package is already built and runnable
+- SBK must contain `bin/sbk-yal`, either directly or under
+  `build/install/sbk/`; GEM workloads also require `bin/sbk-gem-yal`
+- sbk-charts must contain `sbk-charts` at its root or `bin/sbk-charts`
+- Ensure the commands are executable; invalid explicit local folders never
+  fall back to downloaded packages
+
 ### Runtime Issues
 
 **Problem**: JDK version mismatch (`UnsupportedClassVersionError`)

@@ -14,6 +14,8 @@ Recognised keys (case-insensitive; dots / underscores / dashes equivalent):
     sbk.url                -> GitHub repo URL for SBK
                               (e.g. https://github.com/kmgowda/SBK)
     sbk.version            -> SBK release tag on that repo
+    sbk.local.folder       -> Optional ready-to-run local SBK distribution or
+                              built source checkout; bypasses cache/download
     downloads.folder       -> Shared local folder for downloaded SBK and
                               sbk-charts installations (default: ./.sbk)
     sbk.jdk.version        -> JDK major version required by that SBK release
@@ -27,6 +29,9 @@ Recognised keys (case-insensitive; dots / underscores / dashes equivalent):
     sbk-charts.url         -> GitHub repo URL for sbk-charts
                               (e.g. https://github.com/kmgowda/sbk-charts)
     sbk-charts.version     -> sbk-charts release tag on that repo
+    sbk-charts.local.folder
+                           -> Optional ready-to-run local sbk-charts checkout
+                              or environment; bypasses conda/cache/download
 
 The URLs may be either ``https://github.com/<owner>/<repo>`` or just
 ``<owner>/<repo>``. If a URL is missing, a sensible default is used:
@@ -103,6 +108,8 @@ class Versions:
     sbk_charts_url: str    # canonical sbk-charts repo URL
     sbk_jdk: str           # required JDK major version, e.g. "25"
     downloads_folder: Path  # shared folder for downloaded SBK and sbk-charts installations
+    sbk_local_folder: Path | None  # optional ready-to-run local SBK folder
+    sbk_charts_local_folder: Path | None  # optional local sbk-charts folder
     jdk_folder: Path       # local folder for JDK installation
     ssl_verify: bool       # enable SSL verification for downloads
 
@@ -143,6 +150,14 @@ def parse_properties(path: str | Path) -> Versions:
             f"missing required property; expected one of {aliases} in {p}"
         )
 
+    def _get_optional(*aliases: str) -> str | None:
+        """Return the first non-empty optional property, or ``None``."""
+        for alias in aliases:
+            value = data.get(_norm(alias))
+            if value:
+                return value
+        return None
+
     sbk_url_raw = _get("sbk.url", "sbk_url", default=DEFAULT_SBK_URL)
     sbk_charts_url_raw = _get(
         "sbk.charts.url", "sbk_charts_url", "sbkcharts.url",
@@ -156,6 +171,13 @@ def parse_properties(path: str | Path) -> Versions:
     downloads_folder_raw = _get(
         "downloads.folder", "downloads_folder",
         default=DEFAULT_DOWNLOADS_FOLDER,
+    )
+    sbk_local_folder_raw = _get_optional(
+        "sbk.local.folder", "sbk_local_folder"
+    )
+    sbk_charts_local_folder_raw = _get_optional(
+        "sbk.charts.local.folder", "sbk_charts_local_folder",
+        "sbkcharts.local.folder",
     )
     jdk_folder_raw = _get(
         "sbk.jdk.folder", "sbk_jdk_folder", "jdk.folder", "jdk_folder",
@@ -177,6 +199,16 @@ def parse_properties(path: str | Path) -> Versions:
         sbk_charts_url=_normalise_repo_url(sbk_charts_url_raw),
         sbk_jdk=sbk_jdk,
         downloads_folder=_resolve_folder(downloads_folder_raw, p),
+        sbk_local_folder=(
+            _resolve_folder(sbk_local_folder_raw, p)
+            if sbk_local_folder_raw is not None
+            else None
+        ),
+        sbk_charts_local_folder=(
+            _resolve_folder(sbk_charts_local_folder_raw, p)
+            if sbk_charts_local_folder_raw is not None
+            else None
+        ),
         jdk_folder=_resolve_folder(jdk_folder_raw, p),
         ssl_verify=ssl_verify,
     )

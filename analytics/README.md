@@ -33,8 +33,8 @@ Parses .env-style configuration files (like sbk-config.env). Handles case-insens
 ### releases.py
 Resolves and caches external dependencies:
 - JDK resolution with priority order (SBK_JAVA_HOME, JAVA_HOME, PATH, cached, download)
-- SBK release download and caching
-- sbk-charts installation (conda or venv)
+- SBK resolution with priority order (explicit local folder, cached, download)
+- sbk-charts resolution with priority order (explicit local folder, conda, cached, install)
 
 ### runner.py
 Executes SBK instances in serial or parallel mode. Handles subprocess management, log forwarding, and hung JVM detection.
