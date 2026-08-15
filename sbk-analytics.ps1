@@ -1,3 +1,11 @@
+# Copyright (c) KMG. All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
 # Self-bootstrapping launcher for sbk-analytics on Windows.
 # Run with: powershell -ExecutionPolicy Bypass -File .\sbk-analytics.ps1 <arguments>
 
@@ -93,11 +101,34 @@ function Find-SystemPython {
 }
 
 function Get-EnvironmentFingerprint {
+    param([string] $Python)
+    $identityCode = @'
+import pathlib
+import platform
+import json
+import sys
+
+print(json.dumps((
+    platform.python_implementation(),
+    platform.python_version(),
+    sys.implementation.cache_tag or "",
+    str(pathlib.Path(sys.executable).resolve()),
+    str(pathlib.Path(sys.prefix).resolve()),
+    str(pathlib.Path(sys.base_prefix).resolve()),
+), ensure_ascii=True))
+'@
+    $identityOutput = & $Python -c $identityCode 2>$null
+    if ($LASTEXITCODE -ne 0) {
+        return $null
+    }
+    $identity = [string] ($identityOutput | Select-Object -Last 1)
     $stream = New-Object IO.MemoryStream
     $sha256 = [Security.Cryptography.SHA256]::Create()
     try {
         $rootBytes = [Text.Encoding]::UTF8.GetBytes($SourceRoot)
         $stream.Write($rootBytes, 0, $rootBytes.Length)
+        $identityBytes = [Text.Encoding]::UTF8.GetBytes("`0python`0$identity")
+        $stream.Write($identityBytes, 0, $identityBytes.Length)
         foreach ($name in @(
             "pyproject.toml",
             "requirements.txt",
@@ -126,7 +157,7 @@ function Test-EnvironmentReady {
         [string] $EnvironmentRoot
     )
     $marker = Join-Path $EnvironmentRoot ".sbk-analytics-bootstrap"
-    $fingerprint = Get-EnvironmentFingerprint
+    $fingerprint = Get-EnvironmentFingerprint $Python
     if (-not $fingerprint -or -not (Test-Path -LiteralPath $marker -PathType Leaf)) {
         return $false
     }
@@ -170,7 +201,7 @@ function Initialize-Environment {
     if ($pipExitCode -ne 0) {
         return $false
     }
-    $fingerprint = Get-EnvironmentFingerprint
+    $fingerprint = Get-EnvironmentFingerprint $Python
     if (-not $fingerprint) {
         return $false
     }

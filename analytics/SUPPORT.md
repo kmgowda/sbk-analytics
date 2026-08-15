@@ -22,6 +22,11 @@ If you're new to sbk-analytics, start with:
 - Confirm package repositories are reachable on the first bootstrap
 - Confirm the checkout, or `SBK_ANALYTICS_ENV_HOME`, is writable
 - Use `SBK_ANALYTICS_PYTHON=/path/to/python` to prefer a known interpreter
+- `SBK_ANALYTICS_PYTHON` must be one executable path or command name, without
+  arguments; on Windows do not set it to `py -3`, because that fallback is
+  discovered automatically
+- Moving the checkout or changing the environment's Python interpreter causes
+  one expected reinstall because both are part of the bootstrap fingerprint
 
 **Problem**: `pip install -e .` fails
 - Ensure you're using Python 3.9+

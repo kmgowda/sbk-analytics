@@ -96,6 +96,16 @@ or `SBK_ANALYTICS_ENV_HOME=/path/to/folder` to store the managed `.venv` and
 `.conda` outside the checkout. Environment creation can still fail when package
 repositories are unreachable or the selected location is not writable.
 
+`SBK_ANALYTICS_PYTHON` accepts one executable path or command name, not a
+command plus arguments. On Windows, use a path such as
+`C:\Python312\python.exe`; do not set it to `py -3`. The PowerShell launcher
+already discovers the Windows `py` launcher and supplies `-3` automatically.
+
+The bootstrap fingerprint includes the absolute checkout path and the selected
+environment's Python implementation, version, executable, prefixes, and cache
+tag. Moving the checkout or replacing/upgrading its environment interpreter
+therefore causes one intentional editable reinstall on the next launch.
+
 ### For macOS/Linux (Recommended with Conda)
 ```bash
 conda env create -f environment.yml

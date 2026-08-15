@@ -1,4 +1,12 @@
 #!/usr/bin/env bash
+# Copyright (c) KMG. All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
 # Self-bootstrapping launcher for sbk-analytics on Linux and macOS.
 
 set -u
@@ -47,11 +55,22 @@ environment_fingerprint() {
     local python_bin="$1"
     "$python_bin" -c '
 import hashlib
+import platform
 import pathlib
 import sys
 
 root = pathlib.Path(sys.argv[1])
 digest = hashlib.sha256(str(root).encode())
+identity = "\0".join((
+    platform.python_implementation(),
+    platform.python_version(),
+    sys.implementation.cache_tag or "",
+    str(pathlib.Path(sys.executable).resolve()),
+    str(pathlib.Path(sys.prefix).resolve()),
+    str(pathlib.Path(sys.base_prefix).resolve()),
+))
+digest.update(b"\0python\0")
+digest.update(identity.encode())
 for name in ("pyproject.toml", "requirements.txt", "environment.yml", "sbk-analytics.sh"):
     path = root / name
     if path.is_file():
@@ -130,7 +149,7 @@ create_or_repair_venv() {
     python_bin="$MANAGED_VENV/bin/python"
     mkdir -p "$ENV_HOME" || return 1
     log "creating Python virtual environment: $MANAGED_VENV"
-    "$system_python" -m venv "$MANAGED_VENV" || return 1
+    "$system_python" -m venv "$MANAGED_VENV" >&2 || return 1
     is_supported_python "$python_bin" || return 1
     bootstrap_environment "$python_bin" "$MANAGED_VENV" || return 1
     activate_and_run venv "$MANAGED_VENV" "$python_bin" "${CLI_ARGS[@]}"

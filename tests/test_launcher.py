@@ -33,7 +33,7 @@ set -u
 if [[ "${1:-}" == "-c" ]]; then
     case "${2:-}" in
         *version_info*) exit "${FAKE_PYTHON_INCOMPATIBLE:-0}" ;;
-        *hashlib*) printf 'test-fingerprint\\n'; exit 0 ;;
+        *hashlib*) printf '%s\\n' "${FAKE_FINGERPRINT:-test-fingerprint}"; exit 0 ;;
         *"import analytics"*) exit 0 ;;
     esac
 fi
@@ -72,12 +72,15 @@ exit 1
         })
         self.env.pop("VIRTUAL_ENV", None)
         self.env.pop("CONDA_PREFIX", None)
+        self.bash = shutil.which("bash")
+        if self.bash is None:
+            self.skipTest("bash is required for the Unix launcher tests")
 
     def _run(self, *arguments, **env_updates):
         env = self.env.copy()
         env.update(env_updates)
         return subprocess.run(
-            ["/bin/bash", str(LAUNCHER), *arguments],
+            [self.bash, str(LAUNCHER), *arguments],
             cwd=self.root,
             env=env,
             capture_output=True,
@@ -141,6 +144,13 @@ chmod +x "$prefix/bin/python"
         self.assertTrue(
             (self.root / "environments" / ".venv" / "bin" / "python").is_file()
         )
+
+    def test_interpreter_fingerprint_change_reinstalls_environment(self):
+        first = self._run("--version")
+        second = self._run("--version", FAKE_FINGERPRINT="new-interpreter")
+        self.assertEqual(first.returncode, 0, first.stderr)
+        self.assertEqual(second.returncode, 0, second.stderr)
+        self.assertEqual(self.log.read_text().count("\t-m\tpip"), 2)
 
     def test_conda_is_used_when_venv_setup_fails(self):
         self._install_fake_conda()
