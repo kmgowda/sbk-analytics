@@ -91,7 +91,7 @@ sbk-analytics -c examples/config.yml
 - requests>=2.28
 - openpyxl>=3.1
 - psutil>=5.9
-- Pillow>=12.0 (for Excel images)
+- Pillow>=11.3 on Python 3.9, or Pillow>=12.0 on Python 3.10+ (for Excel images)
 - openpyxl-image-loader>=1.0 (for image loading)
 
 ### External

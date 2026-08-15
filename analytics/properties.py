@@ -25,13 +25,19 @@ Recognised keys (case-insensitive; dots / underscores / dashes equivalent):
                               on PATH), and only downloads Temurin of this
                               major version if none is found.
     sbk.jdk.folder         -> Local folder for JDK installation (default: ./.jdk)
-    ssl.verify             -> Enable SSL verification for downloads (default: true)
+    ssl.verify             -> Enable SSL verification for downloads (default: false)
+    ssl.ca.bundle          -> Optional PEM CA bundle used when verification is enabled
     sbk-charts.url         -> GitHub repo URL for sbk-charts
                               (e.g. https://github.com/kmgowda/sbk-charts)
     sbk-charts.version     -> sbk-charts release tag on that repo
     sbk-charts.local.folder
                            -> Optional ready-to-run local sbk-charts checkout
                               or environment; bypasses conda/cache/download
+    sbk-charts.local.executable
+                           -> Optional direct path to a local sbk-charts command
+    sbk.version.policy     -> local version handling: warn | exact | ignore
+    sbk-charts.version.policy
+                           -> local/conda version handling: warn | exact | ignore
 
 The URLs may be either ``https://github.com/<owner>/<repo>`` or just
 ``<owner>/<repo>``. If a URL is missing, a sensible default is used:
@@ -52,9 +58,9 @@ from urllib.parse import urlparse
 DEFAULT_SBK_URL = "https://github.com/kmgowda/SBK"
 DEFAULT_SBK_CHARTS_URL = "https://github.com/kmgowda/sbk-charts"
 DEFAULT_SBK_JDK_VERSION = "25"
-DEFAULT_DOWNLOADS_FOLDER = "./.sbk"
 DEFAULT_JDK_FOLDER = "./.jdk"
-DEFAULT_SSL_VERIFY = "true"
+DEFAULT_SSL_VERIFY = "false"
+DEFAULT_VERSION_POLICY = "warn"
 
 
 def _norm(key: str) -> str:
@@ -107,11 +113,15 @@ class Versions:
     sbk_url: str           # canonical SBK repo URL
     sbk_charts_url: str    # canonical sbk-charts repo URL
     sbk_jdk: str           # required JDK major version, e.g. "25"
-    downloads_folder: Path  # shared folder for downloaded SBK and sbk-charts installations
+    downloads_folder: Path | None  # explicitly configured shared download cache
     sbk_local_folder: Path | None  # optional ready-to-run local SBK folder
     sbk_charts_local_folder: Path | None  # optional local sbk-charts folder
+    sbk_charts_local_executable: Path | None  # optional direct charts command
     jdk_folder: Path       # local folder for JDK installation
     ssl_verify: bool       # enable SSL verification for downloads
+    ssl_ca_bundle: Path | None
+    sbk_version_policy: str
+    sbk_charts_version_policy: str
 
     @property
     def sbk_repo(self) -> str:
@@ -168,9 +178,8 @@ def parse_properties(path: str | Path) -> Versions:
         default=DEFAULT_SBK_JDK_VERSION,
     ).strip()
     
-    downloads_folder_raw = _get(
-        "downloads.folder", "downloads_folder",
-        default=DEFAULT_DOWNLOADS_FOLDER,
+    downloads_folder_raw = _get_optional(
+        "downloads.folder", "downloads_folder"
     )
     sbk_local_folder_raw = _get_optional(
         "sbk.local.folder", "sbk_local_folder"
@@ -178,6 +187,10 @@ def parse_properties(path: str | Path) -> Versions:
     sbk_charts_local_folder_raw = _get_optional(
         "sbk.charts.local.folder", "sbk_charts_local_folder",
         "sbkcharts.local.folder",
+    )
+    sbk_charts_local_executable_raw = _get_optional(
+        "sbk.charts.local.executable", "sbk_charts_local_executable",
+        "sbkcharts.local.executable",
     )
     jdk_folder_raw = _get(
         "sbk.jdk.folder", "sbk_jdk_folder", "jdk.folder", "jdk_folder",
@@ -188,17 +201,41 @@ def parse_properties(path: str | Path) -> Versions:
         "ssl.verify", "ssl_verify", "verify", "verify.ssl",
         default=DEFAULT_SSL_VERIFY,
     )
-    ssl_verify = ssl_verify_raw.lower() in ("1", "true", "yes", "on")
+    bool_values = {
+        "1": True, "true": True, "yes": True, "on": True,
+        "0": False, "false": False, "no": False, "off": False,
+    }
+    try:
+        ssl_verify = bool_values[ssl_verify_raw.strip().lower()]
+    except KeyError as exc:
+        raise ValueError(
+            f"ssl.verify must be true or false, got {ssl_verify_raw!r}"
+        ) from exc
+    ssl_ca_bundle_raw = _get_optional("ssl.ca.bundle", "ssl_ca_bundle")
+
+    def _policy(*aliases: str) -> str:
+        value = _get(*aliases, default=DEFAULT_VERSION_POLICY).strip().lower()
+        if value not in ("warn", "exact", "ignore"):
+            raise ValueError(
+                f"{aliases[0]} must be warn, exact, or ignore, got {value!r}"
+            )
+        return value
 
     return Versions(
-        sbk=_get("sbk.version", "sbk_version"),
+        # Versions are conditionally required by the CLI only for managed
+        # resolution. This permits a minimal local-only file or CLI overrides.
+        sbk=_get("sbk.version", "sbk_version", default=""),
         sbk_charts=_get(
-            "sbk.charts.version", "sbk_charts_version", "sbkcharts.version"
+            "sbk.charts.version", "sbk_charts_version", "sbkcharts.version",
+            default="",
         ),
         sbk_url=_normalise_repo_url(sbk_url_raw),
         sbk_charts_url=_normalise_repo_url(sbk_charts_url_raw),
         sbk_jdk=sbk_jdk,
-        downloads_folder=_resolve_folder(downloads_folder_raw, p),
+        downloads_folder=(
+            _resolve_folder(downloads_folder_raw, p)
+            if downloads_folder_raw is not None else None
+        ),
         sbk_local_folder=(
             _resolve_folder(sbk_local_folder_raw, p)
             if sbk_local_folder_raw is not None
@@ -209,6 +246,16 @@ def parse_properties(path: str | Path) -> Versions:
             if sbk_charts_local_folder_raw is not None
             else None
         ),
+        sbk_charts_local_executable=(
+            _resolve_folder(sbk_charts_local_executable_raw, p)
+            if sbk_charts_local_executable_raw is not None else None
+        ),
         jdk_folder=_resolve_folder(jdk_folder_raw, p),
         ssl_verify=ssl_verify,
+        ssl_ca_bundle=(
+            _resolve_folder(ssl_ca_bundle_raw, p)
+            if ssl_ca_bundle_raw is not None else None
+        ),
+        sbk_version_policy=_policy("sbk.version.policy"),
+        sbk_charts_version_policy=_policy("sbk.charts.version.policy"),
     )

@@ -1,0 +1,17 @@
+# Fast end-to-end validation for local SBK and sbk-charts installations.
+mode: serial
+workdir: /tmp/sbk-analytics-smoke
+cleanup: on-success
+
+sbk:
+  seconds: 2
+  size: 100
+  writers: 1
+
+classes:
+  - class: file
+    file: /tmp/sbk-analytics-smoke/file-smoke.dat
+
+sbk-charts:
+  output: local-smoke-test.xlsx
+  ai_model: noai

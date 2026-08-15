@@ -43,7 +43,7 @@ class LocalSbkResolutionTests(unittest.TestCase):
             after = sorted(path.relative_to(root) for path in root.rglob("*"))
             self.assertEqual(install.source, DependencySource.LOCAL)
             self.assertEqual(install.home, root.resolve())
-            self.assertEqual(install.sbk_yal, root / "bin" / "sbk-yal")
+            self.assertEqual(install.sbk_yal, (root / "bin" / "sbk-yal").resolve())
             self.assertEqual(before, after)
 
     def test_built_source_checkout_layout_is_used(self):
@@ -54,7 +54,7 @@ class LocalSbkResolutionTests(unittest.TestCase):
             install = resolve_local_sbk(root)
 
             self.assertEqual(install.source, DependencySource.LOCAL)
-            self.assertEqual(install.home, home)
+            self.assertEqual(install.home, home.resolve())
 
     def test_gem_executable_is_only_required_for_gem_workloads(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -97,6 +97,7 @@ class LocalSbkResolutionTests(unittest.TestCase):
             def fake_download(_url, archive, **_kwargs):
                 archive.parent.mkdir(parents=True, exist_ok=True)
                 archive.touch()
+                return "a" * 64
 
             def fake_extract(_archive, destination):
                 return _sbk_home(destination / "sbk")
@@ -106,6 +107,7 @@ class LocalSbkResolutionTests(unittest.TestCase):
                     {
                         "name": "sbk-10.4.tar",
                         "browser_download_url": "https://example/sbk-10.4.tar",
+                        "digest": f"sha256:{'a' * 64}",
                     }
                 ]
             }
@@ -115,6 +117,32 @@ class LocalSbkResolutionTests(unittest.TestCase):
                 install = ensure_sbk("10.4", downloads_folder=downloads)
 
             self.assertEqual(install.source, DependencySource.DOWNLOADED)
+            self.assertTrue((downloads / "10.4" / ".ok").is_file())
+            self.assertTrue((downloads / "10.4" / "metadata.json").is_file())
+            self.assertFalse(list(downloads.glob(".10.4.install-*")))
+
+    def test_release_digest_mismatch_is_rejected_before_extraction(self):
+        with tempfile.TemporaryDirectory() as directory:
+            downloads = Path(directory)
+            release = {"assets": [{
+                "name": "sbk-10.4.tar",
+                "browser_download_url": "https://example/sbk-10.4.tar",
+                "digest": f"sha256:{'a' * 64}",
+            }]}
+
+            def fake_download(_url, archive, **_kwargs):
+                archive.parent.mkdir(parents=True, exist_ok=True)
+                archive.touch()
+                return "b" * 64
+
+            with mock.patch(
+                "analytics.releases._gh_release", return_value=release
+            ), mock.patch(
+                "analytics.releases._download", side_effect=fake_download
+            ), mock.patch("analytics.releases._extract") as extract:
+                with self.assertRaisesRegex(RuntimeError, "checksum mismatch"):
+                    ensure_sbk("10.4", downloads_folder=downloads)
+            extract.assert_not_called()
 
 
 class LocalChartsResolutionTests(unittest.TestCase):
@@ -128,7 +156,7 @@ class LocalChartsResolutionTests(unittest.TestCase):
 
             after = sorted(path.relative_to(root) for path in root.rglob("*"))
             self.assertEqual(install.source, DependencySource.LOCAL)
-            self.assertEqual(install.cli, cli)
+            self.assertEqual(install.cli, cli.resolve())
             self.assertEqual(before, after)
 
     def test_environment_root_layout_is_used(self):
@@ -138,7 +166,7 @@ class LocalChartsResolutionTests(unittest.TestCase):
 
             install = resolve_local_sbk_charts(root)
 
-            self.assertEqual(install.cli, cli)
+            self.assertEqual(install.cli, cli.resolve())
 
     def test_local_folder_overrides_conda(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -149,8 +177,11 @@ class LocalChartsResolutionTests(unittest.TestCase):
                 install = ensure_sbk_charts("4.26.7.1", local_folder=root)
 
             self.assertEqual(install.source, DependencySource.LOCAL)
-            self.assertEqual(install.cli, cli)
-            run.assert_not_called()
+            self.assertEqual(install.cli, cli.resolve())
+            run.assert_called_once_with(
+                [str(cli.resolve()), "-h"], capture_output=True, text=True,
+                timeout=60,
+            )
 
     def test_invalid_explicit_folder_never_runs_pip(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -200,6 +231,10 @@ class LocalChartsResolutionTests(unittest.TestCase):
 
             self.assertEqual(install.source, DependencySource.DOWNLOADED)
             self.assertEqual(run.call_count, 2)
+            cache = downloads / "sbk-charts" / "4.26.7.1"
+            self.assertTrue((cache / ".ok").is_file())
+            self.assertTrue((cache / "metadata.json").is_file())
+            self.assertFalse(list(cache.parent.glob(".4.26.7.1.install-*")))
 
 
 class ResolutionOutputTests(unittest.TestCase):
@@ -222,12 +257,16 @@ class ResolutionOutputTests(unittest.TestCase):
             _print_charts_resolution(charts, "4.26.7.1")
 
         text = output.getvalue()
+        # Windows runners may use a legacy console encoding such as cp1252.
+        # Dependency status output must remain printable there.
+        text.encode("cp1252")
         self.assertIn("SBK source       : LOCAL", text)
         self.assertIn("sbk-charts source: LOCAL", text)
         self.assertIn("/local/SBK/bin/sbk-yal", text)
         self.assertIn("/local/sbk-charts/sbk-charts", text)
-        self.assertIn("ignored for local SBK", text)
-        self.assertIn("ignored for local sbk-charts", text)
+        self.assertIn("detected version : unknown", text)
+        self.assertIn("configured version: 10.4 (policy applies)", text)
+        self.assertIn("configured version: 4.26.7.1 (policy applies)", text)
 
 
 if __name__ == "__main__":

@@ -30,6 +30,12 @@ If you're new to sbk-analytics, start with:
 - sbk-charts must contain `sbk-charts` at its root or `bin/sbk-charts`
 - Ensure the commands are executable; invalid explicit local folders never
   fall back to downloaded packages
+- Run `sbk-analytics deps doctor -p sbk-config.env -vv` for executable,
+  version, JDK, and sbk-charts startup checks
+- Use `sbk-analytics deps status -p sbk-config.env --json` for a read-only
+  view that never downloads or modifies dependencies
+- If a checkout layout is unusual, configure the exact command with
+  `sbk-charts.local.executable` or `--sbk-charts-executable`
 
 ### Runtime Issues
 
@@ -49,6 +55,12 @@ If you're new to sbk-analytics, start with:
 - Use verbose logging: `sbk-analytics -c config.yml -v`
 - Check SBK logs in workdir/logs/ (parallel mode)
 
+**Problem**: `cleanup: on-success` did not remove benchmark data
+- Cleanup intentionally supports only `class: file` and its `file`/`fname`
+  parameter
+- The resolved data path must be strictly inside `workdir`
+- RocksDB, other drivers, external paths, CSVs, logs, and reports are preserved
+
 ### Output Issues
 
 **Problem**: Excel report not generated
@@ -58,7 +70,7 @@ If you're new to sbk-analytics, start with:
 - Check sbk-charts logs
 
 **Problem**: SBK logo missing in Excel
-- Ensure Pillow>=12.0 is installed
+- Ensure Pillow>=11.3 on Python 3.9, or Pillow>=12.0 on Python 3.10+
 - Ensure openpyxl-image-loader>=1.0 is installed
 - Reinstall dependencies: `pip install -r requirements.txt`
 
