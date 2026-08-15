@@ -53,10 +53,12 @@ before a long run.
 
 ## Quick Start
 
-### Self-bootstrapping launcher for Linux/macOS
+### Self-bootstrapping launchers
 
-The repository includes an executable launcher that prepares Python and then
-passes every argument unchanged to sbk-analytics:
+The repository includes native launchers that prepare Python and then pass
+every argument unchanged to sbk-analytics.
+
+Linux/macOS:
 
 ```bash
 ./sbk-analytics.sh --version
@@ -64,7 +66,19 @@ passes every argument unchanged to sbk-analytics:
 ./sbk-analytics.sh -c examples/file-rocksdb-write-60s.yml
 ```
 
-The launcher requires Bash and follows this order:
+Windows PowerShell:
+
+```powershell
+.\sbk-analytics.ps1 --version
+.\sbk-analytics.ps1 deps doctor
+.\sbk-analytics.ps1 -c examples\file-rocksdb-write-60s.yml
+
+# If local execution policy blocks scripts:
+powershell -ExecutionPolicy Bypass -File .\sbk-analytics.ps1 --version
+```
+
+The Bash launcher supports Linux/macOS, the PowerShell launcher supports
+Windows, and both follow this order:
 
 1. Reuse a compatible active `VIRTUAL_ENV`, then an active `CONDA_PREFIX`.
 2. Reuse the launcher-managed `.venv`, then `.conda` environment.
@@ -74,8 +88,8 @@ The launcher requires Bash and follows this order:
 
 The environment is bootstrapped again only when the project dependency files
 or launcher change. Installer output and launcher status go to stderr, so
-`./sbk-analytics.sh --json ...` keeps stdout machine-readable. The launcher
-uses `exec` for the final process, preserving signals and exit codes.
+the launchers keep `--json` stdout machine-readable. Bash uses `exec` for the
+final process; PowerShell waits for Python and returns its exit code.
 
 Set `SBK_ANALYTICS_PYTHON=/path/to/python` to prefer a particular interpreter,
 or `SBK_ANALYTICS_ENV_HOME=/path/to/folder` to store the managed `.venv` and
@@ -1035,6 +1049,7 @@ into those folders.
 sbk-analytics/
 ├── sbk-config.env            # bundled SBK / sbk-charts release pins
 ├── sbk-analytics.sh          # self-bootstrapping Linux/macOS launcher
+├── sbk-analytics.ps1         # self-bootstrapping Windows launcher
 ├── pyproject.toml            # entry point: sbk-analytics → analytics.cli:main
 ├── requirements.txt
 ├── README.md

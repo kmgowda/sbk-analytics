@@ -13,8 +13,11 @@ If you're new to sbk-analytics, start with:
 
 ### Installation Problems
 
-**Problem**: `./sbk-analytics.sh` cannot prepare an environment
-- The launcher supports Linux and macOS and requires Bash
+**Problem**: a self-bootstrapping launcher cannot prepare an environment
+- Use `sbk-analytics.sh` with Bash on Linux/macOS or `sbk-analytics.ps1` with
+  Windows PowerShell 5.1 or newer
+- If Windows execution policy blocks the script, run
+  `powershell -ExecutionPolicy Bypass -File .\sbk-analytics.ps1 <arguments>`
 - Install Python 3.9 or newer; if venv creation is unavailable, install Conda
 - Confirm package repositories are reachable on the first bootstrap
 - Confirm the checkout, or `SBK_ANALYTICS_ENV_HOME`, is writable

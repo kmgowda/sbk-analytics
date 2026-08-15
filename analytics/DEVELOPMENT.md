@@ -12,6 +12,9 @@ cd sbk-analytics
 # Self-bootstrap and run on Linux/macOS (no activation required)
 ./sbk-analytics.sh --version
 
+# Or on Windows PowerShell
+.\sbk-analytics.ps1 --version
+
 # Create environment
 conda env create -f environment.yml  # or use venv
 conda activate sbk-analytics
@@ -44,6 +47,7 @@ analytics/              # Main package
 
 - `sbk-config.env` - SBK versions, URLs, cache folders
 - `sbk-analytics.sh` - Linux/macOS environment bootstrap and CLI launcher
+- `sbk-analytics.ps1` - Windows environment bootstrap and CLI launcher
 - `requirements.txt` - Python dependencies
 - `pyproject.toml` - Package configuration
 - `examples/` - Example configurations

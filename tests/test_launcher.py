@@ -1,3 +1,4 @@
+import json
 import os
 import shutil
 import subprocess
@@ -8,6 +9,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 LAUNCHER = ROOT / "sbk-analytics.sh"
+WINDOWS_LAUNCHER = ROOT / "sbk-analytics.ps1"
 
 
 @unittest.skipIf(os.name == "nt", "launcher supports Linux and macOS")
@@ -162,6 +164,54 @@ chmod +x "$prefix/bin/python"
         )
         self.assertEqual(result.returncode, 7)
         self.assertIn(f"using conda environment: {active}", result.stderr)
+
+
+@unittest.skipUnless(os.name == "nt", "PowerShell launcher requires Windows")
+class WindowsLauncherTests(unittest.TestCase):
+    def test_real_bootstrap_reuse_json_and_exit_code(self):
+        with tempfile.TemporaryDirectory() as directory:
+            environment_home = Path(directory) / "environments"
+            env = os.environ.copy()
+            env["SBK_ANALYTICS_ENV_HOME"] = str(environment_home)
+            env.pop("VIRTUAL_ENV", None)
+            env.pop("CONDA_PREFIX", None)
+            base_command = [
+                "powershell.exe",
+                "-NoLogo",
+                "-NoProfile",
+                "-NonInteractive",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+                str(WINDOWS_LAUNCHER),
+            ]
+
+            first = subprocess.run(
+                [*base_command, "--version"],
+                cwd=ROOT,
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=300,
+            )
+            self.assertEqual(first.returncode, 0, first.stderr)
+            self.assertIn("sbk-analytics", first.stdout)
+            self.assertIn("using venv environment", first.stderr)
+
+            second = subprocess.run(
+                [*base_command, "deps", "status", "--json"],
+                cwd=ROOT,
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+            self.assertEqual(second.returncode, 0, second.stderr)
+            self.assertNotIn("installing sbk-analytics", second.stderr)
+            self.assertIn("sbk", json.loads(second.stdout))
+            self.assertTrue(
+                (environment_home / ".venv" / "Scripts" / "python.exe").is_file()
+            )
 
 
 if __name__ == "__main__":
