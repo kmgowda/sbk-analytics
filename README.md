@@ -133,8 +133,8 @@ orchestrates need a working runtime on the host:
 | --- | --- | --- |
 | Python    | ≥ 3.9      | Tested with 3.10 / 3.12. |
 | JDK       | ≥ matching SBK build (e.g. SBK 10.0 needs **JDK 25**) | Automatically resolved and cached by default. The SBK release archive ships `.class` files compiled with a specific JDK. |
-| `git`     | any        | Used by `pip` to install `sbk-charts` from its GitHub tag. |
-| Internet access | yes  | First run downloads the JDK, SBK release tar from GitHub, and pip-installs `sbk-charts`. Subsequent runs are offline. |
+| `git`     | any        | Used by `pip` when installing a configured remote sbk-charts tag. Not needed for a ready-to-run local sbk-charts checkout. |
+| Internet access | conditional | Needed for dependencies that are neither configured locally nor already cached. |
 
 If your network intercepts TLS (corporate proxy with a custom root CA),
 set `ssl.verify=false` in your `sbk-config.env` file:
@@ -485,9 +485,13 @@ sbk-analytics -c examples/file-rocksdb-write.yml -w ./run-1 -v
 
 What this does, step by step:
 
-1. **Resolve versions.** Reads `<repo>/sbk-config.env` for the SBK, JDK, and
-   sbk-charts release tags.
-2. **Download / install (once).**
+1. **Resolve dependencies.** Reads `<repo>/sbk-config.env`. Explicit
+   `sbk.local.folder` and `sbk-charts.local.folder` values take priority;
+   otherwise the configured release tags are resolved from cache or GitHub.
+2. **Use local or download / install (once).**
+   - Validates ready-to-run local folders without modifying them. An invalid
+     explicitly configured local folder fails immediately and never falls back
+     to a remote package.
    - Downloads the JDK (if needed) from Temurin and extracts it to
      `./.jdk/<jdk.version>/extracted/` (or cache if configured differently). Cached on subsequent runs.
    - Downloads the SBK release archive from GitHub and extracts it to
@@ -544,6 +548,7 @@ carries both the **GitHub URL** and the **release tag** for each project:
 # sbk-config.env  (bundled at the project root)
 sbk.url=https://github.com/kmgowda/SBK
 sbk.version=10.0
+# sbk.local.folder=/root/projects/SBK
 downloads.folder=./.sbk
 sbk.jdk.version=25
 sbk.jdk.folder=./.jdk
@@ -551,6 +556,7 @@ ssl.verify=true
 
 sbk-charts.url=https://github.com/kmgowda/sbk-charts
 sbk-charts.version=4.26.6.2
+# sbk-charts.local.folder=/root/projects/sbk-charts
 ```
 
 ### JDK Resolution Order
@@ -593,12 +599,38 @@ Recognised keys (case-insensitive; dots / underscores / dashes interchangeable):
 | --- | --- | --- |
 | `sbk.url`        | no (defaults to `https://github.com/kmgowda/SBK`)        | Full URL `https://github.com/<owner>/<repo>` or `<owner>/<repo>` shorthand. |
 | `sbk.version`    | yes | Tag that exists on that repository's Releases page. |
+| `sbk.local.folder` | no | Ready-to-run SBK distribution or built source checkout. Takes priority over cache and URL. |
 | `downloads.folder` | no (defaults to `./.sbk`) | Shared local folder for downloaded SBK and sbk-charts installations. Use `./.sbk` for a project-local cache. |
 | `sbk.jdk.version`| no (defaults to `25`) | Required JDK major version. |
 | `sbk.jdk.folder`| no (defaults to `./.jdk`) | Local folder for JDK installation. Use `./.jdk` for project-local cache. |
 | `ssl.verify`     | no (defaults to `true`) | Enable SSL verification for downloads. |
 | `sbk-charts.url` | no (defaults to `https://github.com/kmgowda/sbk-charts`) | Same format as `sbk.url`. |
 | `sbk-charts.version` | yes | Tag on the sbk-charts repository. |
+| `sbk-charts.local.folder` | no | Ready-to-run sbk-charts checkout or environment. Takes priority over conda, cache, and URL. |
+
+### Using local SBK and sbk-charts
+
+Use the two local-folder settings independently or together:
+
+```ini
+sbk.local.folder=/root/projects/SBK
+sbk-charts.local.folder=/root/projects/sbk-charts
+```
+
+An SBK distribution root must contain `bin/sbk-yal`; GEM workloads also
+require `bin/sbk-gem-yal`. A built SBK source checkout is accepted when the
+same commands are under `build/install/sbk/bin/` (for example, after Gradle
+`installDist`). A local sbk-charts folder must contain either
+`sbk-charts` at its root or `bin/sbk-charts`.
+
+Local folders are authoritative and read-only from sbk-analytics' perspective:
+it does not create `.ok`/`.home`, change permissions, install dependencies, or
+fall back to GitHub when validation fails. Relative paths are resolved against
+the directory containing `sbk-config.env`.
+
+Every run prints `LOCAL`, `MANAGED_CACHE`, `DOWNLOADED`, or `CONDA`, together
+with the exact selected folder and executable. The configured remote version
+is informational and ignored for a local checkout.
 
 You don't need to pass `-p` / `--properties` — `sbk-analytics` automatically
 uses the bundled file. Pass `-p <path>` only if you want to override it
@@ -866,7 +898,17 @@ When `SBK_ANALYTICS_CACHE` is set or folders are explicitly set to non-default v
 The original SBK tarball and JDK archive are removed after extraction. Re-runs of the same
 versions hit the cache and skip the download + install entirely.
 
+Local folders configured with `sbk.local.folder` or
+`sbk-charts.local.folder` are outside this managed cache. sbk-analytics only
+validates and invokes them; it never writes cache markers or installation data
+into those folders.
+
 ## Troubleshooting
+
+- **A configured local package is rejected** — confirm the folder has one of
+  the supported ready-to-run layouts documented above and that its commands
+  are executable. Explicit local folders fail fast and do not fall back to a
+  download.
 
 - **`UnsupportedClassVersionError: ... class file version 69.0 ...`** — your
   JDK is older than what the SBK release expects. SBK 10.0 needs JDK 25. The

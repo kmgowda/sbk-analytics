@@ -108,8 +108,8 @@ sbk-config.env → properties.py → releases.py
 ### 2. Dependency Resolution Flow
 ```
 releases.py → ensure_jdk() → JDK cache
-releases.py → ensure_sbk() → SBK cache
-releases.py → ensure_sbk_charts() → sbk-charts installation
+releases.py → ensure_sbk() → local SBK or SBK cache/download
+releases.py → ensure_sbk_charts() → local, conda, or cached sbk-charts
 ```
 
 ### 3. Execution Flow
@@ -213,6 +213,7 @@ System info → System sheet → Excel report
 - JDK: Cached by version
 - SBK: Cached by version
 - sbk-charts: Cached by version
+- Explicit local SBK/sbk-charts folders bypass managed caches and are never modified
 
 ### Parallel Execution
 - Concurrent SBK instances

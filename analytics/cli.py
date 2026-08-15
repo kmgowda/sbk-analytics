@@ -21,12 +21,51 @@ from . import __version__
 from .charts import run_sbk_charts
 from .config import load_config
 from .properties import parse_properties
-from .releases import ensure_jdk, ensure_sbk, ensure_sbk_charts
+from .releases import (
+    ChartsInstall,
+    DependencySource,
+    SbkInstall,
+    ensure_jdk,
+    ensure_sbk,
+    ensure_sbk_charts,
+)
 from .runner import _read_yml, run_jobs
 from .system_info import append_system_sheet
 from .yaml_gen import generate_instance_yaml
 
 log = logging.getLogger("sbk-analytics")
+
+
+def _print_sbk_resolution(install: SbkInstall, version: str) -> None:
+    """Print the selected SBK source even when verbose logging is disabled."""
+    print(f"✓ SBK source       : {install.source.value}", flush=True)
+    print(f"  folder           : {install.home}", flush=True)
+    print(f"  sbk-yal          : {install.sbk_yal}", flush=True)
+    gem_executable = install.sbk_gem_yal or "not available (not required)"
+    print(f"  sbk-gem-yal      : {gem_executable}", flush=True)
+    if install.source is DependencySource.LOCAL:
+        print(f"  remote version   : {version} (ignored for local SBK)", flush=True)
+    else:
+        print(f"  version          : {version}", flush=True)
+
+
+def _print_charts_resolution(install: ChartsInstall, version: str) -> None:
+    """Print the selected sbk-charts source and exact executable."""
+    print(f"✓ sbk-charts source: {install.source.value}", flush=True)
+    print(f"  folder           : {install.venv_dir}", flush=True)
+    print(f"  executable       : {install.cli}", flush=True)
+    if install.source is DependencySource.LOCAL:
+        print(
+            f"  remote version   : {version} (ignored for local sbk-charts)",
+            flush=True,
+        )
+    elif install.source is DependencySource.CONDA:
+        print(
+            f"  configured version: {version} (existing conda version not verified)",
+            flush=True,
+        )
+    else:
+        print(f"  version          : {version}", flush=True)
 
 
 def _print_banner() -> None:
@@ -125,7 +164,8 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         default=None,
         help=(
             "SBK configuration file (key=value): sbk.version, "
-            "sbk-charts.version, downloads.folder, etc. Defaults to the bundled "
+            "sbk-charts.version, downloads.folder, sbk.local.folder, "
+            "sbk-charts.local.folder, etc. Defaults to the bundled "
             "<project>/sbk-config.env shipped with sbk-analytics."
         ),
     )
@@ -199,8 +239,21 @@ def main(argv: list[str] | None = None) -> int:
     log.info("using properties file: %s", properties_path)
     cfg = load_config(args.config)
 
-    log.info("SBK: %s @ %s", versions.sbk_url, versions.sbk)
-    log.info("sbk-charts: %s @ %s", versions.sbk_charts_url, versions.sbk_charts)
+    if versions.sbk_local_folder is not None:
+        log.info("SBK local folder: %s", versions.sbk_local_folder)
+    else:
+        log.info("SBK: %s @ %s", versions.sbk_url, versions.sbk)
+    if versions.sbk_charts_local_folder is not None:
+        log.info(
+            "sbk-charts local folder: %s",
+            versions.sbk_charts_local_folder,
+        )
+    else:
+        log.info(
+            "sbk-charts: %s @ %s",
+            versions.sbk_charts_url,
+            versions.sbk_charts,
+        )
     log.info(
         "mode=%s instances=%d uses_gem=%s",
         cfg.mode,
@@ -224,18 +277,34 @@ def main(argv: list[str] | None = None) -> int:
     #    match. The user pins the required major version in sbk-config.env via
     #    `sbk.jdk.version=...` (default 25).
     print("\n=== Resolving dependencies ===", flush=True)
-    print("This may take a while on first run (downloads and caches JDK, SBK, sbk-charts)...", flush=True)
-    print("Download progress will be shown in the logs below...", flush=True)
+    print(
+        "Explicit local folders take priority; other missing dependencies "
+        "are downloaded and cached.",
+        flush=True,
+    )
     
     jdk = ensure_jdk(versions.sbk_jdk, jdk_folder=versions.jdk_folder, ssl_verify=versions.ssl_verify)
     log.info("JDK %s home: %s", versions.sbk_jdk, jdk.home)
     print(f"✓ JDK {versions.sbk_jdk} ready", flush=True)
     
-    sbk = ensure_sbk(versions.sbk, repo=versions.sbk_repo, downloads_folder=versions.downloads_folder, ssl_verify=versions.ssl_verify)
-    print(f"✓ SBK {versions.sbk} ready", flush=True)
+    sbk = ensure_sbk(
+        versions.sbk,
+        repo=versions.sbk_repo,
+        downloads_folder=versions.downloads_folder,
+        ssl_verify=versions.ssl_verify,
+        local_folder=versions.sbk_local_folder,
+        require_gem=cfg.uses_gem,
+    )
+    _print_sbk_resolution(sbk, versions.sbk)
     
-    charts = ensure_sbk_charts(versions.sbk_charts, repo_url=versions.sbk_charts_url, downloads_folder=versions.downloads_folder, ssl_verify=versions.ssl_verify)
-    print(f"✓ sbk-charts {versions.sbk_charts} ready", flush=True)
+    charts = ensure_sbk_charts(
+        versions.sbk_charts,
+        repo_url=versions.sbk_charts_url,
+        downloads_folder=versions.downloads_folder,
+        ssl_verify=versions.ssl_verify,
+        local_folder=versions.sbk_charts_local_folder,
+    )
+    _print_charts_resolution(charts, versions.sbk_charts)
 
     executable = sbk.sbk_gem_yal if cfg.uses_gem else sbk.sbk_yal
     executables = {

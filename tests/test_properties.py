@@ -6,7 +6,7 @@ from analytics.properties import parse_properties
 
 
 class PropertiesTests(unittest.TestCase):
-    def _parse(self, folder_line: str):
+    def _parse(self, *extra_lines: str):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             properties = root / "sbk-config.env"
@@ -15,7 +15,7 @@ class PropertiesTests(unittest.TestCase):
                     [
                         "sbk.version=10.4",
                         "sbk-charts.version=4.26.7.1",
-                        folder_line,
+                        *extra_lines,
                     ]
                 )
             )
@@ -26,6 +26,21 @@ class PropertiesTests(unittest.TestCase):
         versions, root = self._parse("downloads.folder=./dependencies")
 
         self.assertEqual(versions.downloads_folder, root / "dependencies")
+
+    def test_local_folders_are_resolved_relative_to_properties_file(self):
+        versions, root = self._parse(
+            "sbk.local.folder=../SBK",
+            "sbk-charts.local.folder=./charts",
+        )
+
+        self.assertEqual(versions.sbk_local_folder, root / "../SBK")
+        self.assertEqual(versions.sbk_charts_local_folder, root / "charts")
+
+    def test_local_folders_are_optional(self):
+        versions, _ = self._parse()
+
+        self.assertIsNone(versions.sbk_local_folder)
+        self.assertIsNone(versions.sbk_charts_local_folder)
 
 
 if __name__ == "__main__":

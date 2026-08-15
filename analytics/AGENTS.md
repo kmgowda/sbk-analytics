@@ -85,8 +85,10 @@ sbk-analytics/
   3. java on PATH
   4. Specified jdk folder
   5. Download Temurin JDK
-- `ensure_sbk()`: Download and cache SBK releases
-- `ensure_sbk_charts()`: Install sbk-charts (conda or venv)
+- `resolve_local_sbk()`: Validate a local SBK distribution or built checkout
+- `resolve_local_sbk_charts()`: Validate a local sbk-charts checkout/environment
+- `ensure_sbk()`: Prefer local SBK, otherwise use/download the release cache
+- `ensure_sbk_charts()`: Prefer local sbk-charts, otherwise use conda/cache/install
 
 **Key Classes**:
 - `JdkInstall`: JDK installation metadata
@@ -152,6 +154,7 @@ sbk-analytics/
 ```
 sbk.url=https://github.com/kmgowda/SBK
 sbk.version=10.0
+# sbk.local.folder=/root/projects/SBK
 downloads.folder=./.sbk
 sbk.jdk.version=25
 sbk.jdk.folder=./.jdk
@@ -159,6 +162,7 @@ ssl.verify=true
 
 sbk-charts.url=https://github.com/kmgowda/sbk-charts
 sbk-charts.version=4.26.6.2
+# sbk-charts.local.folder=/root/projects/sbk-charts
 ```
 
 **JDK Resolution Priority**:
@@ -238,8 +242,8 @@ pip install sbk-analytics
 
 ### External Dependencies
 - **JDK**: Temurin/OpenJDK (auto-downloaded)
-- **SBK**: Storage Benchmark Kit (auto-downloaded)
-- **sbk-charts: Analytics package (auto-downloaded)
+- **SBK**: Local ready-to-run checkout or auto-downloaded Storage Benchmark Kit
+- **sbk-charts**: Local ready-to-run checkout, conda package, or auto-installed package
 
 ### Caching
 All external dependencies are cached in:
@@ -263,6 +267,8 @@ All external dependencies are cached in:
 3. **macOS Logging**: Special handling for Java output buffering
 4. **Caching**: External dependencies cached to avoid re-downloads
 5. **Error Handling**: Graceful degradation for missing dependencies
+6. **Local packages**: Explicit local folders are authoritative, validated,
+   never modified, and never silently replaced by downloads
 
 ### Common Tasks
 
