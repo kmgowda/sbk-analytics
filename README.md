@@ -804,6 +804,22 @@ unreachable nodes) are logged but do **not** fail the overall run.
 Whatever CSV the instance had written up to the kill is preserved and fed
 into the single `sbk-charts` invocation at the end.
 
+### Interruption and forced-exit cleanup
+
+`sbk-yal`, `sbk-gem-yal`, and `sbk-charts` run in isolated process trees. If
+`sbk-analytics` receives Ctrl-C, SIGTERM, SIGHUP, SIGQUIT, or Windows SIGBREAK,
+it asks every active tree to stop, waits up to 3 seconds, and then force-kills
+anything that remains. This applies in serial and parallel modes and includes
+shells, JVMs, and other descendants created by the launched command.
+
+Abrupt parent death is covered too: POSIX platforms use an independent
+parent-liveness guard, while Windows uses a kill-on-close Job Object. Thus an
+uncatchable parent kill does not leave local SBK or sbk-charts descendants
+running. For `sbk-gem-yal`, catchable interruptions also perform the existing
+best-effort SSH cleanup of remote SBK clients. An uncatchable local kill cannot
+run new SSH commands, so remote-host cleanup in that specific case depends on
+the remote SBK/GEM connection lifecycle.
+
 #### When the timeout does NOT apply
 
 If the instance does **not** set `seconds:` (or sets it to `0` / a negative
@@ -878,6 +894,7 @@ or absolute) and that location is honoured verbatim.
 | 4 | failed to append the system sheet |
 | 5 | configuration or dependency resolution failed |
 | other | `sbk-charts` exit code |
+| `128 + signal` | terminated by a catchable operating-system signal (for example, 130 for Ctrl-C and 143 for SIGTERM) |
 
 ## Caching
 
@@ -968,7 +985,7 @@ into those folders.
   `GIT_SSL_CAINFO` to the local CA bundle (see [Prerequisites](#prerequisites)).
 - **An SBK instance hangs after printing the `Total ...` line** — known
   upstream issue (RocksDB driver and a few others don't release JVM threads
-  on shutdown). `sbk-analytics` kills the process at `seconds + 5` and uses
+  on shutdown). `sbk-analytics` kills the process at `seconds + 15` and uses
   the CSV that has already been flushed.
 - **`sbk-charts` complains about a missing `banner.txt` or `images/sbk-logo.png`** —
   packaging quirks of some sbk-charts versions. `sbk-analytics` already supplies a
@@ -995,6 +1012,8 @@ sbk-analytics/
     ├── releases.py           # GitHub release download + cached install
     ├── yaml_gen.py           # per-instance sbkArgs/sbkGemArgs YAML generator
     ├── runner.py             # serial / parallel SBK execution + watchdog
+    ├── processes.py          # managed workload trees + signal cleanup
+    ├── _process_guard.py     # POSIX/Windows parent-death companion
     ├── charts.py             # single sbk-charts invocation
     └── system_info.py        # appends `system` sheet to the final xlsx
 ```

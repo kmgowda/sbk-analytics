@@ -30,6 +30,8 @@ analytics/              # Main package
 ├── releases.py        # Dependency resolution (JDK, SBK, sbk-charts)
 ├── runner.py          # SBK execution (serial/parallel)
 ├── charts.py          # sbk-charts invocation
+├── processes.py       # managed process trees and signal cleanup
+├── _process_guard.py  # POSIX parent-death companion
 ├── yaml_gen.py        # YAML generation for SBK
 ├── properties.py      # .env file parsing
 └── system_info.py     # System info collection
@@ -44,6 +46,14 @@ analytics/              # Main package
 - `AGENTS.md` - Comprehensive AI agent documentation
 
 ## Common Tasks
+
+### Validate process cleanup
+```bash
+python -m unittest -v tests.test_process_cleanup
+```
+
+These integration tests terminate a controller normally and forcibly, then
+verify that both its managed child and grandchild have stopped.
 
 ### Run a benchmark
 ```bash

@@ -21,6 +21,13 @@ from pathlib import Path
 
 import yaml
 
+from .processes import (
+    ManagedProcess,
+    managed_popen,
+    terminate_all,
+    terminate_process,
+)
+
 log = logging.getLogger(__name__)
 
 PARALLEL_WARNING = (
@@ -298,7 +305,7 @@ def _ssh_pkill_one(node: str, user: str, password: str, port: int,
 
 
 def _hung_jvm_watchdog(
-    proc: subprocess.Popen,
+    proc: ManagedProcess,
     csv_path: Path,
     yml_path: Path,
     *,
@@ -441,7 +448,7 @@ def _run_serial(
         
         if use_forwarding:
             log.debug("Using explicit output forwarding for SBK logs")
-            proc = subprocess.Popen(
+            proc = managed_popen(
                 cmd,
                 env=env_unbuffered,
                 stdout=subprocess.PIPE,
@@ -465,16 +472,23 @@ def _run_serial(
             forward_thread.start()
         else:
             log.debug("Using default subprocess configuration")
-            proc = subprocess.Popen(
+            proc = managed_popen(
                 cmd,
                 env=env_unbuffered,
                 stdout=sys.stderr if output_to_stderr else None,
                 stderr=sys.stderr if output_to_stderr else None,
             )
-        rc = _hung_jvm_watchdog(
-            proc, csv_path, yml_path,
-            expected_seconds=seconds, is_gem=is_gem,
-        )
+        try:
+            rc = _hung_jvm_watchdog(
+                proc, csv_path, yml_path,
+                expected_seconds=seconds, is_gem=is_gem,
+            )
+        except BaseException:
+            _terminate_sbk_process(proc, yml_path, is_gem=is_gem)
+            raise
+        finally:
+            if use_forwarding:
+                forward_thread.join(timeout=1)
         dur = time.monotonic() - start
         results.append(
             RunResult(
@@ -506,7 +520,7 @@ def _run_parallel(
     #    expected_seconds, remote_deadline, local_deadline, is_gem)
     procs: list[
         tuple[
-            str, Path, Path, Path, subprocess.Popen, float,
+            str, Path, Path, Path, ManagedProcess, float,
             int | None, float | None, float | None, bool,
         ]
     ] = []
@@ -535,7 +549,7 @@ def _run_parallel(
         )
         start = time.monotonic()
         try:
-            p = subprocess.Popen(
+            p = managed_popen(
                 cmd,
                 stdout=f,
                 stderr=subprocess.STDOUT,
@@ -564,62 +578,71 @@ def _run_parallel(
     pending = {i for i in range(len(procs))}
     last_print = 0.0
     HEARTBEAT = 5.0
-    while pending:
-        time.sleep(0.5)
-        now = time.monotonic()
-        for i in list(pending):
-            (class_name, yml_path, csv_path, _, p, p_start,
-             seconds, remote_dl, local_dl, is_gem) = procs[i]
-            if p.poll() is not None:
-                pending.discard(i)
-                continue
+    try:
+        while pending:
+            time.sleep(0.5)
+            now = time.monotonic()
+            for i in list(pending):
+                (class_name, yml_path, csv_path, _, p, p_start,
+                 seconds, remote_dl, local_dl, is_gem) = procs[i]
+                if p.poll() is not None:
+                    pending.discard(i)
+                    continue
 
-            # Stage 1: gem-mode remote kill at seconds + 10.
-            if (
-                remote_dl is not None
-                and i not in remote_kill_threads
-                and now >= remote_dl
-            ):
-                log.warning(
-                    "[parallel] class=%s sbk-gem-yal: %ds + %ds grace reached; "
-                    "killing remote sbk clients",
-                    class_name, seconds, int(REMOTE_KILL_GRACE_S),
-                )
-                t = threading.Thread(
-                    target=_kill_remote_sbk_clients, args=(yml_path,),
-                    daemon=True,
-                )
-                t.start()
-                remote_kill_threads[i] = t
+                # Stage 1: gem-mode remote kill at seconds + 10.
+                if (
+                    remote_dl is not None
+                    and i not in remote_kill_threads
+                    and now >= remote_dl
+                ):
+                    log.warning(
+                        "[parallel] class=%s sbk-gem-yal: %ds + %ds grace "
+                        "reached; killing remote sbk clients",
+                        class_name, seconds, int(REMOTE_KILL_GRACE_S),
+                    )
+                    t = threading.Thread(
+                        target=_kill_remote_sbk_clients, args=(yml_path,),
+                        daemon=True,
+                    )
+                    t.start()
+                    remote_kill_threads[i] = t
 
-            # Stage 2: local kill at seconds + 15.
-            if local_dl is not None and now >= local_dl:
-                t = remote_kill_threads.get(i)
-                if t is not None:
-                    t.join(timeout=5)
-                size = csv_path.stat().st_size if csv_path.exists() else 0
-                log.warning(
-                    "[parallel] class=%s (%s) did not complete within %ds + "
-                    "%ds; killing local process (csv=%d bytes)",
-                    class_name,
-                    "sbk-gem-yal" if is_gem else "sbk-yal",
-                    seconds, int(LOCAL_KILL_GRACE_S), size,
+                # Stage 2: local kill at seconds + 15.
+                if local_dl is not None and now >= local_dl:
+                    t = remote_kill_threads.get(i)
+                    if t is not None:
+                        t.join(timeout=5)
+                    size = csv_path.stat().st_size if csv_path.exists() else 0
+                    log.warning(
+                        "[parallel] class=%s (%s) did not complete within "
+                        "%ds + %ds; killing local process (csv=%d bytes)",
+                        class_name,
+                        "sbk-gem-yal" if is_gem else "sbk-yal",
+                        seconds, int(LOCAL_KILL_GRACE_S), size,
+                    )
+                    p.terminate()
+                    try:
+                        p.wait(timeout=2)
+                    except subprocess.TimeoutExpired:
+                        p.kill()
+                        p.wait()
+                    pending.discard(i)
+            if pending and (now - last_print) >= HEARTBEAT:
+                running = [procs[i][0] for i in pending]
+                elapsed = [
+                    f"{procs[i][0]}={now - procs[i][5]:.0f}s" for i in pending
+                ]
+                print(
+                    f"[parallel] {len(running)} running: {', '.join(elapsed)}",
+                    flush=True,
                 )
-                p.terminate()
-                try:
-                    p.wait(timeout=2)
-                except subprocess.TimeoutExpired:
-                    p.kill()
-                    p.wait()
-                pending.discard(i)
-        if pending and (now - last_print) >= HEARTBEAT:
-            running = [procs[i][0] for i in pending]
-            elapsed = [f"{procs[i][0]}={now - procs[i][5]:.0f}s" for i in pending]
-            print(
-                f"[parallel] {len(running)} running: {', '.join(elapsed)}",
-                flush=True,
-            )
-            last_print = now
+                last_print = now
+    except BaseException:
+        for (
+            _, yml_path, _, _, process, _, _, _, _, is_gem
+        ) in procs:
+            _terminate_sbk_process(process, yml_path, is_gem=is_gem)
+        raise
 
     results: list[RunResult] = []
     for class_name, yml_path, csv_path, log_path, p, start, *_ in procs:
@@ -641,6 +664,17 @@ def _run_parallel(
             )
         )
     return results
+
+
+def _terminate_sbk_process(
+    process: ManagedProcess, yml_path: Path, *, is_gem: bool
+) -> None:
+    """Terminate one SBK tree and best-effort remote GEM clients."""
+    if process.poll() is not None:
+        return
+    if is_gem:
+        _kill_remote_sbk_clients(yml_path)
+    terminate_process(process)
 
 
 def _sbk_env(jdk_home: Path | None) -> dict[str, str] | None:
@@ -694,15 +728,21 @@ def run_jobs(
                 f"SBK executable not found: {required_executable}"
             )
     env = _sbk_env(jdk_home)
-    if mode == "parallel":
-        return _run_parallel(
-            executable, jobs, log_dir, env=env, executables=executables
+    try:
+        if mode == "parallel":
+            return _run_parallel(
+                executable, jobs, log_dir, env=env, executables=executables
+            )
+        return _run_serial(
+            executable,
+            jobs,
+            env=env,
+            forward_logs=forward_logs,
+            executables=executables,
+            output_to_stderr=output_to_stderr,
         )
-    return _run_serial(
-        executable,
-        jobs,
-        env=env,
-        forward_logs=forward_logs,
-        executables=executables,
-        output_to_stderr=output_to_stderr,
-    )
+    except BaseException:
+        # Covers interruption during process creation before the new process
+        # has been appended to the serial/parallel runner's local collection.
+        terminate_all()
+        raise

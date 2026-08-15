@@ -32,6 +32,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Managed child-process trees for `sbk-yal`, `sbk-gem-yal`, and `sbk-charts`,
+  including signal cleanup, POSIX parent-death guards, Windows kill-on-close
+  jobs, and forced-exit integration tests
 - Explicit `sbk.local.folder` and `sbk-charts.local.folder` resolution with
   local-first precedence, fail-fast validation, and dependency-source output
 - AGENTS.md documentation for AI coding assistants
