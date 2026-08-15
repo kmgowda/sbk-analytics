@@ -8,6 +8,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parent.parent
+APPLICATION = ROOT / "sbk-analytics"
 LAUNCHER = ROOT / "sbk-analytics.sh"
 WINDOWS_LAUNCHER = ROOT / "sbk-analytics.ps1"
 
@@ -88,6 +89,18 @@ exit 1
             timeout=15,
         )
 
+    def _run_application(self, *arguments, **env_updates):
+        env = self.env.copy()
+        env.update(env_updates)
+        return subprocess.run(
+            [str(APPLICATION), *arguments],
+            cwd=self.root,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+
     def _make_active_environment(self, name):
         environment = self.root / name
         python_bin = environment / "bin" / "python"
@@ -132,6 +145,21 @@ chmod +x "$prefix/bin/python"
         )
         self.assertIn(f"using venv environment: {active}", result.stderr)
         self.assertNotIn("\t-m\tvenv", self.log.read_text())
+
+    def test_unified_application_delegates_arguments_and_exit_code(self):
+        active = self._make_active_environment("unified-active-venv")
+        result = self._run_application(
+            "--json",
+            "value with spaces",
+            VIRTUAL_ENV=str(active),
+            FAKE_APP_EXIT="7",
+        )
+        self.assertEqual(result.returncode, 7, result.stderr)
+        self.assertEqual(
+            result.stdout.splitlines(),
+            ["ARG=--json", "ARG=value with spaces"],
+        )
+        self.assertIn(f"using venv environment: {active}", result.stderr)
 
     def test_managed_venv_is_created_then_reused_without_reinstall(self):
         first = self._run("--version")
@@ -222,6 +250,23 @@ class WindowsLauncherTests(unittest.TestCase):
             self.assertTrue(
                 (environment_home / ".venv" / "Scripts" / "python.exe").is_file()
             )
+
+            bash = shutil.which("bash")
+            self.assertIsNotNone(
+                bash,
+                "Git Bash is required for the unified Windows application test",
+            )
+            unified = subprocess.run(
+                [bash, str(APPLICATION), "deps", "status", "--json"],
+                cwd=ROOT,
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+            self.assertEqual(unified.returncode, 0, unified.stderr)
+            self.assertNotIn("installing sbk-analytics", unified.stderr)
+            self.assertIn("sbk", json.loads(unified.stdout))
 
 
 if __name__ == "__main__":

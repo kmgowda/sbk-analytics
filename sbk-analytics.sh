@@ -71,7 +71,13 @@ identity = "\0".join((
 ))
 digest.update(b"\0python\0")
 digest.update(identity.encode())
-for name in ("pyproject.toml", "requirements.txt", "environment.yml", "sbk-analytics.sh"):
+for name in (
+    "pyproject.toml",
+    "requirements.txt",
+    "environment.yml",
+    "sbk-analytics",
+    "sbk-analytics.sh",
+):
     path = root / name
     if path.is_file():
         digest.update(name.encode())

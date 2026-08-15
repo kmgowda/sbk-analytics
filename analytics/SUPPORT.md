@@ -14,8 +14,9 @@ If you're new to sbk-analytics, start with:
 ### Installation Problems
 
 **Problem**: a self-bootstrapping launcher cannot prepare an environment
-- Use `sbk-analytics.sh` with Bash on Linux/macOS or `sbk-analytics.ps1` with
-  Windows PowerShell 5.1 or newer
+- Use `./sbk-analytics` on Linux/macOS or a Windows-compatible POSIX shell.
+  Native Windows PowerShell uses `sbk-analytics.ps1` with PowerShell 5.1 or
+  newer because Windows does not directly execute extensionless POSIX scripts
 - If Windows execution policy blocks the script, run
   `powershell -ExecutionPolicy Bypass -File .\sbk-analytics.ps1 <arguments>`
 - Install Python 3.9 or newer; if venv creation is unavailable, install Conda

@@ -53,20 +53,28 @@ before a long run.
 
 ## Quick Start
 
-### Self-bootstrapping launchers
+### Self-bootstrapping application
 
-The repository includes native launchers that prepare Python and then pass
-every argument unchanged to sbk-analytics.
+The repository includes an extensionless `sbk-analytics` application, modeled
+after the sbk-dashboard launcher, that selects the native bootstrap launcher
+and passes every argument unchanged.
 
 Linux/macOS:
 
 ```bash
-./sbk-analytics.sh --version
-./sbk-analytics.sh deps doctor
-./sbk-analytics.sh -c examples/file-rocksdb-write-60s.yml
+./sbk-analytics --version
+./sbk-analytics deps doctor
+./sbk-analytics -c examples/file-rocksdb-write-60s.yml
 ```
 
-Windows PowerShell:
+Windows Git Bash/MSYS2/Cygwin can use the same application:
+
+```bash
+./sbk-analytics --version
+```
+
+Native Windows PowerShell uses the platform launcher because Windows does not
+directly execute extensionless POSIX scripts:
 
 ```powershell
 .\sbk-analytics.ps1 --version
@@ -77,8 +85,9 @@ Windows PowerShell:
 powershell -ExecutionPolicy Bypass -File .\sbk-analytics.ps1 --version
 ```
 
-The Bash launcher supports Linux/macOS, the PowerShell launcher supports
-Windows, and both follow this order:
+The unified application dispatches to `sbk-analytics.sh` on Linux/macOS and
+`sbk-analytics.ps1` on Windows-compatible POSIX shells. Both native launchers
+follow this order:
 
 1. Reuse a compatible active `VIRTUAL_ENV`, then an active `CONDA_PREFIX`.
 2. Reuse the launcher-managed `.venv`, then `.conda` environment.
@@ -1058,6 +1067,7 @@ into those folders.
 ```
 sbk-analytics/
 ├── sbk-config.env            # bundled SBK / sbk-charts release pins
+├── sbk-analytics             # unified cross-platform application
 ├── sbk-analytics.sh          # self-bootstrapping Linux/macOS launcher
 ├── sbk-analytics.ps1         # self-bootstrapping Windows launcher
 ├── pyproject.toml            # entry point: sbk-analytics → analytics.cli:main

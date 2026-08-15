@@ -134,6 +134,7 @@ function Get-EnvironmentFingerprint {
             "pyproject.toml",
             "requirements.txt",
             "environment.yml",
+            "sbk-analytics",
             "sbk-analytics.ps1"
         )) {
             $path = Join-Path $SourceRoot $name

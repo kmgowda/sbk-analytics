@@ -36,6 +36,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   with active environment reuse, managed venv creation, Conda fallback,
   source/dependency/interpreter change detection, argument forwarding, and
   exit-code preservation
+- Unified extensionless `sbk-analytics` application that selects the native
+  bootstrap launcher on Linux, macOS, and Windows-compatible POSIX shells
 - Managed child-process trees for `sbk-yal`, `sbk-gem-yal`, and `sbk-charts`,
   including signal cleanup, POSIX parent-death guards, Windows kill-on-close
   jobs, and forced-exit integration tests

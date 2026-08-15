@@ -38,6 +38,7 @@ sbk-analytics/
 │   ├── config.yml
 │   └── local-smoke-test.yml      # Fast local end-to-end validation
 ├── sbk-config.env              # SBK configuration (versions, URLs, folders)
+├── sbk-analytics               # Unified cross-platform launcher
 ├── sbk-analytics.sh            # Self-bootstrapping Linux/macOS launcher
 ├── sbk-analytics.ps1           # Self-bootstrapping Windows launcher
 ├── sbk-config.local.env.example # Local-package configuration template
@@ -258,7 +259,7 @@ classes:
 ### For Development
 ```bash
 # Linux/macOS automatic environment setup
-./sbk-analytics.sh --version
+./sbk-analytics --version
 
 # Windows PowerShell automatic environment setup
 .\sbk-analytics.ps1 --version
@@ -339,12 +340,15 @@ selections never fall back to the network.
 8. **Machine output**: `--json` reserves stdout for one JSON document
 9. **Process ownership**: SBK and charts launches must use `managed_popen()`;
    never introduce a direct `Popen`/`run` for long-lived workload commands
-10. **Launcher bootstrap**: `sbk-analytics.sh` and `sbk-analytics.ps1` reuse
-    active or managed environments, prefer venv creation, fall back to Conda,
-    forward all CLI arguments, and preserve the Python CLI exit code. Their
-    fingerprints include the source path plus environment interpreter identity
-    and version, so moving the checkout or changing Python triggers an editable
-    reinstall
+10. **Launcher bootstrap**: the extensionless `sbk-analytics` application
+    dispatches to `sbk-analytics.sh` on Linux/macOS and
+    `sbk-analytics.ps1` in Windows-compatible POSIX shells. Native PowerShell
+    invokes the `.ps1` launcher. The native launchers reuse active or managed
+    environments, prefer venv creation, fall back to Conda, forward all CLI
+    arguments, and preserve the Python CLI exit code. Their fingerprints
+    include the unified application, source path, and environment interpreter
+    identity/version, so moving the checkout or changing Python triggers an
+    editable reinstall
 
 ### Common Tasks
 
