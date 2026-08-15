@@ -2,7 +2,10 @@
 # Run with: powershell -ExecutionPolicy Bypass -File .\sbk-analytics.ps1 <arguments>
 
 Set-StrictMode -Version Latest
-$ErrorActionPreference = "Stop"
+# Windows PowerShell 5.1 promotes native stderr to NativeCommandError when this
+# is "Stop". Python, pip, Conda, and the analytics CLI legitimately use stderr,
+# so native exit codes are checked explicitly instead.
+$ErrorActionPreference = "Continue"
 $CliArgs = [string[]] @($args)
 
 $MinimumPythonMajor = 3
@@ -90,26 +93,31 @@ function Find-SystemPython {
 }
 
 function Get-EnvironmentFingerprint {
-    param([string] $Python)
-    $code = @'
-import hashlib
-import pathlib
-import sys
-
-root = pathlib.Path(sys.argv[1])
-digest = hashlib.sha256(str(root).encode())
-for name in ("pyproject.toml", "requirements.txt", "environment.yml", "sbk-analytics.ps1"):
-    path = root / name
-    if path.is_file():
-        digest.update(name.encode())
-        digest.update(path.read_bytes())
-print(digest.hexdigest())
-'@
-    $output = & $Python -c $code $SourceRoot 2>$null
-    if ($LASTEXITCODE -ne 0) {
-        return $null
+    $stream = New-Object IO.MemoryStream
+    $sha256 = [Security.Cryptography.SHA256]::Create()
+    try {
+        $rootBytes = [Text.Encoding]::UTF8.GetBytes($SourceRoot)
+        $stream.Write($rootBytes, 0, $rootBytes.Length)
+        foreach ($name in @(
+            "pyproject.toml",
+            "requirements.txt",
+            "environment.yml",
+            "sbk-analytics.ps1"
+        )) {
+            $path = Join-Path $SourceRoot $name
+            if (Test-Path -LiteralPath $path -PathType Leaf) {
+                $nameBytes = [Text.Encoding]::UTF8.GetBytes($name)
+                $stream.Write($nameBytes, 0, $nameBytes.Length)
+                $fileBytes = [IO.File]::ReadAllBytes($path)
+                $stream.Write($fileBytes, 0, $fileBytes.Length)
+            }
+        }
+        $hash = $sha256.ComputeHash($stream.ToArray())
+        return ([BitConverter]::ToString($hash)).Replace("-", "").ToLowerInvariant()
+    } finally {
+        $sha256.Dispose()
+        $stream.Dispose()
     }
-    return [string] ($output | Select-Object -Last 1)
 }
 
 function Test-EnvironmentReady {
@@ -118,7 +126,7 @@ function Test-EnvironmentReady {
         [string] $EnvironmentRoot
     )
     $marker = Join-Path $EnvironmentRoot ".sbk-analytics-bootstrap"
-    $fingerprint = Get-EnvironmentFingerprint $Python
+    $fingerprint = Get-EnvironmentFingerprint
     if (-not $fingerprint -or -not (Test-Path -LiteralPath $marker -PathType Leaf)) {
         return $false
     }
@@ -162,13 +170,13 @@ function Initialize-Environment {
     if ($pipExitCode -ne 0) {
         return $false
     }
-    $fingerprint = Get-EnvironmentFingerprint $Python
+    $fingerprint = Get-EnvironmentFingerprint
     if (-not $fingerprint) {
         return $false
     }
     try {
         Set-Content -LiteralPath (Join-Path $EnvironmentRoot ".sbk-analytics-bootstrap") `
-            -Value $fingerprint -Encoding ASCII
+            -Value $fingerprint -Encoding ASCII -ErrorAction Stop
     } catch {
         Write-LauncherLog "could not record environment state: $($_.Exception.Message)"
         return $false
@@ -224,7 +232,8 @@ function Use-ExistingEnvironment {
 
 function New-ManagedVenv {
     param([PSCustomObject] $SystemPython)
-    New-Item -ItemType Directory -Force -Path $EnvironmentHome | Out-Null
+    New-Item -ItemType Directory -Force -Path $EnvironmentHome `
+        -ErrorAction Stop | Out-Null
     Write-LauncherLog "creating Python virtual environment: $ManagedVenv"
     $arguments = @($SystemPython.Prefix) + @("-m", "venv", $ManagedVenv)
     & $SystemPython.Executable @arguments |
@@ -248,7 +257,8 @@ function New-ManagedConda {
     if (-not $conda) {
         return $false
     }
-    New-Item -ItemType Directory -Force -Path $EnvironmentHome | Out-Null
+    New-Item -ItemType Directory -Force -Path $EnvironmentHome `
+        -ErrorAction Stop | Out-Null
     $python = Join-Path $ManagedConda "python.exe"
     if (-not (Test-SupportedPython $python)) {
         Write-LauncherLog "creating fallback Conda environment: $ManagedConda"
