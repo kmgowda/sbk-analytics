@@ -102,26 +102,18 @@ function Find-SystemPython {
 
 function Get-EnvironmentFingerprint {
     param([string] $Python)
-    $identityCode = @'
-import pathlib
-import platform
-import json
-import sys
-
-print(json.dumps((
-    platform.python_implementation(),
-    platform.python_version(),
-    sys.implementation.cache_tag or "",
-    str(pathlib.Path(sys.executable).resolve()),
-    str(pathlib.Path(sys.prefix).resolve()),
-    str(pathlib.Path(sys.base_prefix).resolve()),
-), ensure_ascii=True))
-'@
-    $identityOutput = & $Python -c $identityCode 2>$null
-    if ($LASTEXITCODE -ne 0) {
+    try {
+        $pythonItem = Get-Item -LiteralPath $Python -ErrorAction Stop
+    } catch {
         return $null
     }
-    $identity = [string] ($identityOutput | Select-Object -Last 1)
+    $identity = @(
+        $pythonItem.FullName,
+        $pythonItem.VersionInfo.FileVersion,
+        $pythonItem.VersionInfo.ProductVersion,
+        $pythonItem.Length,
+        $pythonItem.LastWriteTimeUtc.Ticks
+    ) -join "`0"
     $stream = New-Object IO.MemoryStream
     $sha256 = [Security.Cryptography.SHA256]::Create()
     try {
@@ -129,6 +121,15 @@ print(json.dumps((
         $stream.Write($rootBytes, 0, $rootBytes.Length)
         $identityBytes = [Text.Encoding]::UTF8.GetBytes("`0python`0$identity")
         $stream.Write($identityBytes, 0, $identityBytes.Length)
+        $pythonDirectory = Split-Path -Parent $pythonItem.FullName
+        if ((Split-Path -Leaf $pythonDirectory) -eq "Scripts") {
+            $venvConfiguration = Join-Path (Split-Path -Parent $pythonDirectory) `
+                "pyvenv.cfg"
+            if (Test-Path -LiteralPath $venvConfiguration -PathType Leaf) {
+                $configurationBytes = [IO.File]::ReadAllBytes($venvConfiguration)
+                $stream.Write($configurationBytes, 0, $configurationBytes.Length)
+            }
+        }
         foreach ($name in @(
             "pyproject.toml",
             "requirements.txt",

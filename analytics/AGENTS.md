@@ -342,8 +342,9 @@ selections never fall back to the network.
 10. **Launcher bootstrap**: `sbk-analytics.sh` and `sbk-analytics.ps1` reuse
     active or managed environments, prefer venv creation, fall back to Conda,
     forward all CLI arguments, and preserve the Python CLI exit code. Their
-    fingerprints include the source path and environment interpreter identity,
-    so moving the checkout or changing Python triggers an editable reinstall
+    fingerprints include the source path plus environment interpreter identity
+    and version, so moving the checkout or changing Python triggers an editable
+    reinstall
 
 ### Common Tasks
 

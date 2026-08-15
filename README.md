@@ -102,9 +102,9 @@ command plus arguments. On Windows, use a path such as
 already discovers the Windows `py` launcher and supplies `-3` automatically.
 
 The bootstrap fingerprint includes the absolute checkout path and the selected
-environment's Python implementation, version, executable, prefixes, and cache
-tag. Moving the checkout or replacing/upgrading its environment interpreter
-therefore causes one intentional editable reinstall on the next launch.
+environment's Python identity and version information. Moving the checkout or
+replacing/upgrading its environment interpreter therefore causes one
+intentional editable reinstall on the next launch.
 
 ### For macOS/Linux (Recommended with Conda)
 ```bash
