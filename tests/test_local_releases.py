@@ -115,6 +115,9 @@ class LocalSbkResolutionTests(unittest.TestCase):
                 install = ensure_sbk("10.4", downloads_folder=downloads)
 
             self.assertEqual(install.source, DependencySource.DOWNLOADED)
+            self.assertTrue((downloads / "10.4" / ".ok").is_file())
+            self.assertTrue((downloads / "10.4" / "metadata.json").is_file())
+            self.assertFalse(list(downloads.glob(".10.4.install-*")))
 
 
 class LocalChartsResolutionTests(unittest.TestCase):
@@ -150,7 +153,10 @@ class LocalChartsResolutionTests(unittest.TestCase):
 
             self.assertEqual(install.source, DependencySource.LOCAL)
             self.assertEqual(install.cli, cli)
-            run.assert_not_called()
+            run.assert_called_once_with(
+                [str(cli), "-h"], capture_output=True, text=True,
+                timeout=60,
+            )
 
     def test_invalid_explicit_folder_never_runs_pip(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -200,6 +206,10 @@ class LocalChartsResolutionTests(unittest.TestCase):
 
             self.assertEqual(install.source, DependencySource.DOWNLOADED)
             self.assertEqual(run.call_count, 2)
+            cache = downloads / "sbk-charts" / "4.26.7.1"
+            self.assertTrue((cache / ".ok").is_file())
+            self.assertTrue((cache / "metadata.json").is_file())
+            self.assertFalse(list(cache.parent.glob(".4.26.7.1.install-*")))
 
 
 class ResolutionOutputTests(unittest.TestCase):
@@ -226,8 +236,9 @@ class ResolutionOutputTests(unittest.TestCase):
         self.assertIn("sbk-charts source: LOCAL", text)
         self.assertIn("/local/SBK/bin/sbk-yal", text)
         self.assertIn("/local/sbk-charts/sbk-charts", text)
-        self.assertIn("ignored for local SBK", text)
-        self.assertIn("ignored for local sbk-charts", text)
+        self.assertIn("detected version : unknown", text)
+        self.assertIn("configured version: 10.4 (policy applies)", text)
+        self.assertIn("configured version: 4.26.7.1 (policy applies)", text)
 
 
 if __name__ == "__main__":

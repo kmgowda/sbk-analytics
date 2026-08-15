@@ -70,6 +70,7 @@ import yaml
 
 VALID_MODES = ("serial", "parallel")
 VALID_AI = ("huggingface", "ollama", "lmstudio", "noai")
+VALID_CLEANUP = ("never", "on-success")
 
 
 @dataclass
@@ -102,6 +103,7 @@ class OrchestratorConfig:
     # results) to be passed to sbk-charts alongside the freshly-generated
     # instance CSVs.
     use_files: list[str] = field(default_factory=list)
+    cleanup: str = "never"
 
     @property
     def uses_gem(self) -> bool:
@@ -157,6 +159,9 @@ def load_config(path: str | Path) -> OrchestratorConfig:
     workdir = str(
         _first(raw, "workdir", "work_dir", "work-dir", default=DEFAULT_WORKDIR)
     ).strip() or DEFAULT_WORKDIR
+    cleanup = str(_first(raw, "cleanup", default="never")).strip().lower()
+    if cleanup not in VALID_CLEANUP:
+        raise ValueError(f"cleanup must be one of {VALID_CLEANUP}, got {cleanup!r}")
 
     sbk_params = _first(raw, "sbk", "sbk_params", "sbk-params", default={}) or {}
     if not isinstance(sbk_params, dict):
@@ -188,6 +193,7 @@ def load_config(path: str | Path) -> OrchestratorConfig:
         ai_params=dict(ai_params),
         chat=chat,
         use_files=list(use_files),
+        cleanup=cleanup,
     )
 
 

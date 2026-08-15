@@ -15,6 +15,7 @@ into an isolated venv via pip from the GitHub release tag.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
@@ -26,6 +27,8 @@ import tarfile
 import time
 import venv
 import zipfile
+from contextlib import contextmanager
+from datetime import datetime, timezone
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
@@ -33,21 +36,24 @@ from urllib.parse import urlparse
 
 import requests
 
+from .errors import CacheError, DependencyResolutionError, LocalPackageError
+
 log = logging.getLogger(__name__)
 
 
-def _cache_root() -> Path:
-    root = os.environ.get("SBK_ANALYTICS_CACHE")
+def cache_root() -> Path:
+    """Return the environment-selected cache, then the platform default."""
+    root = os.environ.get("SBK_ANALYTICS_DOWNLOADS_FOLDER") or os.environ.get(
+        "SBK_ANALYTICS_CACHE"
+    )
     if root:
         return Path(root)
     return Path.home() / ".cache" / "sbk-analytics"
 
 
-def _use_specified_cache(specified_folder: Path) -> Path:
-    """Use the specified folder from sbk-config.env if provided, otherwise use cache."""
-    if specified_folder and specified_folder != Path("./.jdk") and specified_folder != Path("./.sbk"):
-        return specified_folder
-    return _cache_root()
+def _cache_root() -> Path:
+    """Backward-compatible private alias used by older callers/tests."""
+    return cache_root()
 
 
 class DependencySource(str, Enum):
@@ -65,6 +71,7 @@ class SbkInstall:
     source: DependencySource = DependencySource.MANAGED_CACHE
     _sbk_yal: Path | None = None
     _sbk_gem_yal: Path | None = None
+    detected_version: str | None = None
 
     @property
     def sbk_yal(self) -> Path:
@@ -95,6 +102,7 @@ class ChartsInstall:
     source: DependencySource = DependencySource.MANAGED_CACHE
     _cli: Path | None = None
     _python: Path | None = None
+    detected_version: str | None = None
 
     @property
     def cli(self) -> Path:
@@ -125,24 +133,93 @@ def _local_directory(folder: Path, dependency: str) -> Path:
     try:
         root = folder.expanduser().resolve(strict=True)
     except (OSError, RuntimeError) as exc:
-        raise RuntimeError(
+        raise LocalPackageError(
             f"{dependency} local folder does not exist: {folder}"
         ) from exc
     if not root.is_dir():
-        raise RuntimeError(f"{dependency} local folder is not a directory: {root}")
+        raise LocalPackageError(
+            f"{dependency} local folder is not a directory: {root}"
+        )
     return root
 
 
 def _require_executable(path: Path, dependency: str) -> Path:
     """Validate a local command without modifying its permissions."""
     if not path.is_file():
-        raise RuntimeError(f"{dependency} executable is missing: {path}")
+        raise LocalPackageError(f"{dependency} executable is missing: {path}")
     if not os.access(path, os.X_OK):
-        raise RuntimeError(f"{dependency} executable is not executable: {path}")
+        raise LocalPackageError(f"{dependency} executable is not executable: {path}")
     return path
 
 
-def resolve_local_sbk(folder: Path, *, require_gem: bool = False) -> SbkInstall:
+def _command_version(command: Path, args: list[str], pattern: str) -> str | None:
+    try:
+        result = subprocess.run(
+            [str(command), *args], capture_output=True, text=True, timeout=20
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    stdout = result.stdout if isinstance(result.stdout, str) else ""
+    stderr = result.stderr if isinstance(result.stderr, str) else ""
+    match = re.search(pattern, stdout + stderr, re.I)
+    return match.group(1) if match else None
+
+
+def _charts_version(cli: Path, *, require_ready: bool = False) -> str | None:
+    try:
+        result = subprocess.run(
+            [str(cli), "-h"], capture_output=True, text=True, timeout=60
+        )
+    except subprocess.TimeoutExpired as exc:
+        if require_ready:
+            raise LocalPackageError(
+                f"sbk-charts readiness check timed out after 60s: {cli}"
+            ) from exc
+        result = None
+    if result is not None:
+        stdout = result.stdout if isinstance(result.stdout, str) else ""
+        stderr = result.stderr if isinstance(result.stderr, str) else ""
+        output = stdout + stderr
+        match = re.search(
+            r"(?:Sbk Charts Version\s*:\s*)?(\d+(?:\.\d+)+)",
+            output,
+            re.I,
+        )
+        if require_ready and result.returncode != 0:
+            raise LocalPackageError(
+                f"sbk-charts readiness check failed (rc={result.returncode}): "
+                f"{cli}; {output.strip()[-500:]}"
+            )
+        if match:
+            return match.group(1)
+    python = cli.parent / ("python.exe" if os.name == "nt" else "python")
+    if not python.is_file():
+        return None
+    return _command_version(
+        python,
+        ["-c", "import importlib.metadata as m; print(m.version('sbk-charts'))"],
+        r"(\d+(?:\.\d+)+)",
+    )
+
+
+def _check_version(name: str, detected: str | None, expected: str, policy: str) -> None:
+    if policy == "ignore":
+        return
+    if detected == expected:
+        return
+    message = (
+        f"{name} version mismatch: configured {expected!r}, "
+        f"detected {detected or 'unknown'!r}"
+    )
+    if policy == "exact":
+        raise LocalPackageError(message)
+    log.warning("%s (policy=warn)", message)
+
+
+def resolve_local_sbk(
+    folder: Path, *, require_gem: bool = False, expected_version: str = "",
+    version_policy: str = "warn",
+) -> SbkInstall:
     """Resolve a ready-to-run SBK distribution or built source checkout.
 
     Supported roots contain either ``bin/sbk-yal`` (a distribution) or
@@ -162,45 +239,64 @@ def resolve_local_sbk(folder: Path, *, require_gem: bool = False) -> SbkInstall:
             resolved_gem = sbk_gem_yal
         elif require_gem:
             _require_executable(sbk_gem_yal, "SBK sbk-gem-yal")
+        detected = _command_version(
+            sbk_yal, ["-help"], r"SBK(?:-YAL)?\s+Version:\s*([^\s]+)"
+        )
+        if expected_version:
+            _check_version("SBK", detected, expected_version, version_policy)
         return SbkInstall(
             home=home,
             source=DependencySource.LOCAL,
             _sbk_yal=_require_executable(sbk_yal, "SBK sbk-yal"),
             _sbk_gem_yal=resolved_gem,
+            detected_version=detected,
         )
     checked = ", ".join(str(home / "bin" / "sbk-yal") for home in homes)
-    raise RuntimeError(
+    raise LocalPackageError(
         "SBK local folder is not a ready-to-run distribution or built "
         f"checkout: {root}; checked: {checked}"
     )
 
 
-def resolve_local_sbk_charts(folder: Path) -> ChartsInstall:
+def resolve_local_sbk_charts(
+    folder: Path | None = None, *, executable: Path | None = None,
+    expected_version: str = "", version_policy: str = "warn",
+    preflight: bool = False,
+) -> ChartsInstall:
     """Resolve a ready-to-run local sbk-charts checkout or environment."""
-    root = _local_directory(folder, "sbk-charts")
-    if os.name == "nt":
-        candidates = (
-            root / "sbk-charts.exe",
-            root / "Scripts" / "sbk-charts.exe",
-        )
+    if executable is not None:
+        cli = executable.expanduser().resolve(strict=True)
+        _require_executable(cli, "sbk-charts")
+        root = cli.parent
+        candidates = (cli,)
+    elif folder is not None:
+        root = _local_directory(folder, "sbk-charts")
+        if os.name == "nt":
+            candidates = (root / "sbk-charts.exe", root / "Scripts" / "sbk-charts.exe")
+        else:
+            candidates = (root / "sbk-charts", root / "bin" / "sbk-charts")
     else:
-        candidates = (root / "sbk-charts", root / "bin" / "sbk-charts")
+        raise LocalPackageError("sbk-charts local folder or executable is required")
     for cli in candidates:
         if cli.is_file():
+            detected = _charts_version(cli, require_ready=preflight)
+            if expected_version:
+                _check_version("sbk-charts", detected, expected_version, version_policy)
             return ChartsInstall(
                 venv_dir=root,
                 source=DependencySource.LOCAL,
                 _cli=_require_executable(cli, "sbk-charts"),
                 _python=Path(sys.executable),
+                detected_version=detected,
             )
     checked = ", ".join(str(candidate) for candidate in candidates)
-    raise RuntimeError(
+    raise LocalPackageError(
         f"sbk-charts local folder has no supported executable: {root}; "
         f"checked: {checked}"
     )
 
 
-def _gh_release(repo: str, tag: str, ssl_verify: bool = True) -> dict:
+def _gh_release(repo: str, tag: str, ssl_verify: bool | str = False) -> dict:
     """Fetch release metadata from GitHub for a given tag."""
     url = f"https://api.github.com/repos/{repo}/releases/tags/{tag}"
     headers = {"Accept": "application/vnd.github+json"}
@@ -224,7 +320,10 @@ def _gh_release(repo: str, tag: str, ssl_verify: bool = True) -> dict:
     return r.json()
 
 
-def _download(url: str, dest: Path, *, max_attempts: int = 6, ssl_verify: bool = True) -> None:
+def _download(
+    url: str, dest: Path, *, max_attempts: int = 6,
+    ssl_verify: bool | str = False,
+) -> str:
     """Download `url` to `dest`, resuming via HTTP Range if .part already exists."""
     dest.parent.mkdir(parents=True, exist_ok=True)
     tmp = dest.with_suffix(dest.suffix + ".part")
@@ -297,7 +396,11 @@ def _download(url: str, dest: Path, *, max_attempts: int = 6, ssl_verify: bool =
                     print(progress_msg, flush=True)
                     
             tmp.replace(dest)
-            return
+            digest = hashlib.sha256()
+            with dest.open("rb") as downloaded_file:
+                for block in iter(lambda: downloaded_file.read(1024 * 1024), b""):
+                    digest.update(block)
+            return digest.hexdigest()
         except (requests.exceptions.SSLError,
                 requests.exceptions.ChunkedEncodingError,
                 requests.exceptions.ConnectionError,
@@ -309,18 +412,73 @@ def _download(url: str, dest: Path, *, max_attempts: int = 6, ssl_verify: bool =
                 e.__class__.__name__, wait, tmp.stat().st_size if tmp.exists() else 0,
             )
             time.sleep(wait)
-    raise RuntimeError(f"failed to download {url} after {max_attempts} attempts") from last_err
+    raise DependencyResolutionError(
+        f"failed to download {url} after {max_attempts} attempts"
+    ) from last_err
+
+
+@contextmanager
+def _cache_lock(lock_path: Path):
+    """Serialize installers that target the same dependency/version."""
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    handle = lock_path.open("a+")
+    try:
+        if os.name == "nt":
+            import msvcrt
+            if lock_path.stat().st_size == 0:
+                handle.write("0")
+                handle.flush()
+            handle.seek(0)
+            msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
+        else:
+            import fcntl
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        yield
+    finally:
+        if os.name == "nt":
+            import msvcrt
+            handle.seek(0)
+            msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+        else:
+            import fcntl
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+        handle.close()
+
+
+def _write_metadata(path: Path, **values) -> None:
+    values["installed_at"] = datetime.now(timezone.utc).isoformat()
+    path.write_text(json.dumps(values, indent=2, sort_keys=True) + "\n")
 
 
 def _extract(archive: Path, dest: Path) -> Path:
     """Extract archive into dest/, return the (single) top-level dir inside dest."""
     dest.mkdir(parents=True, exist_ok=True)
     name = archive.name.lower()
+    destination = dest.resolve()
+
+    def safe(member_name: str) -> None:
+        candidate = (destination / member_name).resolve()
+        if candidate != destination and destination not in candidate.parents:
+            raise CacheError(f"unsafe archive path rejected: {member_name}")
+
     if name.endswith(".zip"):
         with zipfile.ZipFile(archive) as zf:
+            for member in zf.infolist():
+                safe(member.filename)
+                mode = member.external_attr >> 16
+                if (mode & 0o170000) == 0o120000:
+                    raise CacheError(f"archive symlink rejected: {member.filename}")
             zf.extractall(dest)
     elif name.endswith((".tar", ".tar.gz", ".tgz", ".tar.bz2")):
         with tarfile.open(archive) as tf:
+            for member in tf.getmembers():
+                safe(member.name)
+                if member.issym() or member.islnk():
+                    raise CacheError(f"archive link rejected: {member.name}")
+                if member.isdev() or member.isfifo():
+                    raise CacheError(
+                        f"archive special file rejected: {member.name}"
+                    )
             tf.extractall(dest)
     else:
         raise RuntimeError(f"unsupported archive type: {archive.name}")
@@ -339,14 +497,18 @@ def ensure_sbk(
     version: str,
     repo: str = "kmgowda/SBK",
     downloads_folder: Path | None = None,
-    ssl_verify: bool = True,
+    ssl_verify: bool | str = False,
     local_folder: Path | None = None,
     require_gem: bool = False,
+    version_policy: str = "warn",
 ) -> SbkInstall:
     """Resolve local SBK first, otherwise use/download the pinned release."""
     if local_folder is not None:
         log.info("using explicitly configured local SBK folder: %s", local_folder)
-        return resolve_local_sbk(local_folder, require_gem=require_gem)
+        return resolve_local_sbk(
+            local_folder, require_gem=require_gem, expected_version=version,
+            version_policy=version_policy,
+        )
 
     # Use specified folder if provided, otherwise use cache
     if downloads_folder is None:
@@ -355,6 +517,17 @@ def ensure_sbk(
         cache = downloads_folder / version
         cache.mkdir(parents=True, exist_ok=True)
     
+    cache.parent.mkdir(parents=True, exist_ok=True)
+    with _cache_lock(cache.parent / f".{cache.name}.lock"):
+        return _ensure_sbk_locked(
+            version, repo, cache, ssl_verify, require_gem
+        )
+
+
+def _ensure_sbk_locked(
+    version: str, repo: str, cache: Path, ssl_verify: bool | str,
+    require_gem: bool,
+) -> SbkInstall:
     marker = cache / ".ok"
     home_file = cache / ".home"
 
@@ -375,6 +548,11 @@ def ensure_sbk(
             version, home,
         )
         marker.unlink(missing_ok=True)
+
+    stage = cache.with_name(f".{cache.name}.install-{os.getpid()}")
+    if stage.exists():
+        shutil.rmtree(stage)
+    stage.mkdir(parents=True)
 
     log.info("fetching SBK release metadata: %s@%s", repo, version)
     rel = _gh_release(repo, version, ssl_verify=ssl_verify)
@@ -403,15 +581,22 @@ def ensure_sbk(
     url = asset["browser_download_url"]
     log.info("selected SBK asset: %s", asset["name"])
 
-    cache.mkdir(parents=True, exist_ok=True)
-    archive = cache / Path(urlparse(url).path).name
+    archive = stage / Path(urlparse(url).path).name
     if not archive.exists():
-        _download(url, archive, ssl_verify=ssl_verify)
+        checksum = _download(url, archive, ssl_verify=ssl_verify)
+    else:
+        checksum = None
+    expected_digest = asset.get("digest")
+    if expected_digest and expected_digest.startswith("sha256:"):
+        expected_sha256 = expected_digest.split(":", 1)[1].lower()
+        if checksum != expected_sha256:
+            raise CacheError(
+                f"SBK asset checksum mismatch for {asset['name']}: "
+                f"expected {expected_sha256}, got {checksum}"
+            )
 
     log.info("extracting SBK archive: %s", archive)
-    extract_dir = cache / "extracted"
-    if extract_dir.exists():
-        shutil.rmtree(extract_dir)
+    extract_dir = stage / "extracted"
     top = _extract(archive, extract_dir)
 
     # Find the directory that actually contains bin/sbk-yal
@@ -438,15 +623,28 @@ def ensure_sbk(
             "downloaded SBK sbk-gem-yal",
         )
 
-    home_file.write_text(str(home.resolve()))
-    marker.touch()
+    relative_home = home.relative_to(stage)
+    final_home = cache / relative_home
+    (stage / ".home").write_text(str(final_home.resolve()))
+    _write_metadata(
+        stage / "metadata.json", dependency="sbk", version=version,
+        source_url=url, asset=asset["name"], sha256=checksum,
+        executables={"sbk-yal": str(final_home / "bin" / "sbk-yal"),
+                     "sbk-gem-yal": str(final_home / "bin" / "sbk-gem-yal")},
+    )
     # Free disk: the ~1+ GB archive is no longer needed once extracted.
     try:
         archive.unlink()
     except OSError as e:
         log.debug("could not remove archive %s: %s", archive, e)
-    log.info("SBK %s ready at %s", version, home)
-    return SbkInstall(home=home, source=DependencySource.DOWNLOADED)
+    # Completion is written inside the staging directory and the entire
+    # installation is then atomically published under the version path.
+    (stage / ".ok").touch()
+    if cache.exists():
+        shutil.rmtree(cache)
+    stage.replace(cache)
+    log.info("SBK %s ready at %s", version, final_home)
+    return SbkInstall(home=final_home, source=DependencySource.DOWNLOADED)
 
 
 # ---------- sbk-charts ----------
@@ -456,18 +654,25 @@ def ensure_sbk_charts(
     version: str,
     repo_url: str = "https://github.com/kmgowda/sbk-charts",
     downloads_folder: Path | None = None,
-    ssl_verify: bool = True,
+    ssl_verify: bool | str = False,
     local_folder: Path | None = None,
+    local_executable: Path | None = None,
+    version_policy: str = "warn",
+    preflight: bool = False,
 ) -> ChartsInstall:
     """Resolve local sbk-charts first, otherwise use conda/cache/download."""
     # Local selection must precede conda detection so an explicit path is
     # always authoritative and never silently replaced by another package.
-    if local_folder is not None:
+    if local_folder is not None or local_executable is not None:
         log.info(
             "using explicitly configured local sbk-charts folder: %s",
-            local_folder,
+            local_executable or local_folder,
         )
-        return resolve_local_sbk_charts(local_folder)
+        return resolve_local_sbk_charts(
+            local_folder, executable=local_executable,
+            expected_version=version, version_policy=version_policy,
+            preflight=preflight,
+        )
 
     # Check if we're in a conda environment - if so, install directly
     if "CONDA_PREFIX" in os.environ:
@@ -475,10 +680,11 @@ def ensure_sbk_charts(
         
         # Check if sbk-charts is already installed
         already_installed = False
+        installed_version = None
         try:
             import importlib.metadata
             try:
-                importlib.metadata.version("sbk-charts")
+                installed_version = importlib.metadata.version("sbk-charts")
                 already_installed = True
                 log.info("sbk-charts already installed in conda environment")
             except importlib.metadata.PackageNotFoundError:
@@ -493,9 +699,19 @@ def ensure_sbk_charts(
             except pkg_resources.DistributionNotFound:
                 pass
         
+        if already_installed and installed_version != version:
+            message = (
+                f"conda sbk-charts version mismatch: configured {version!r}, "
+                f"installed {installed_version!r}"
+            )
+            if version_policy == "exact":
+                raise DependencyResolutionError(message)
+            if version_policy == "warn":
+                log.warning(message)
         if already_installed:
             return ChartsInstall(
-                venv_dir=Path(sys.prefix), source=DependencySource.CONDA
+                venv_dir=Path(sys.prefix), source=DependencySource.CONDA,
+                detected_version=installed_version,
             )
         
         # Install sbk-charts in the current conda environment
@@ -525,6 +741,10 @@ def ensure_sbk_charts(
             # Also set environment variables for git
             pip_env["GIT_SSL_NO_VERIFY"] = "1"
             log.warning("SSL verification DISABLED for pip (ssl.verify=false in sbk-config.env)")
+        elif isinstance(ssl_verify, str):
+            pip_env["PIP_CERT"] = ssl_verify
+            pip_env["GIT_SSL_CAINFO"] = ssl_verify
+            log.info("using custom CA bundle for pip/git: %s", ssl_verify)
         else:
             log.debug("SSL verification enabled for pip (ssl.verify=true in sbk-config.env)")
         
@@ -545,6 +765,16 @@ def ensure_sbk_charts(
         cache = downloads_folder / "sbk-charts" / version
         cache.mkdir(parents=True, exist_ok=True)
     
+    cache.parent.mkdir(parents=True, exist_ok=True)
+    with _cache_lock(cache.parent / f".{cache.name}.lock"):
+        return _ensure_sbk_charts_locked(
+            version, repo_url, cache, ssl_verify
+        )
+
+
+def _ensure_sbk_charts_locked(
+    version: str, repo_url: str, cache: Path, ssl_verify: bool | str,
+) -> ChartsInstall:
     venv_dir = cache / "venv"
     marker = cache / ".ok"
 
@@ -563,9 +793,17 @@ def ensure_sbk_charts(
         )
         marker.unlink(missing_ok=True)
 
-    log.info("creating venv for sbk-charts %s at %s", version, venv_dir)
+    stage = cache.with_name(f".{cache.name}.install-{os.getpid()}")
+    if stage.exists():
+        shutil.rmtree(stage)
+    stage.mkdir(parents=True)
+    stage_venv = stage / "venv"
+    install = ChartsInstall(
+        venv_dir=stage_venv, source=DependencySource.DOWNLOADED
+    )
+    log.info("creating venv for sbk-charts %s at %s", version, stage_venv)
     builder = venv.EnvBuilder(with_pip=True, clear=True)
-    builder.create(venv_dir)
+    builder.create(stage_venv)
 
     # Install from the GitHub tag (release source tarball)
     # pip wants 'git+<url>.git@<ref>' for VCS installs
@@ -595,6 +833,10 @@ def ensure_sbk_charts(
         # Also set environment variables for git
         pip_env["GIT_SSL_NO_VERIFY"] = "1"
         log.warning("SSL verification DISABLED for pip (ssl.verify=false in sbk-config.env)")
+    elif isinstance(ssl_verify, str):
+        pip_env["PIP_CERT"] = ssl_verify
+        pip_env["GIT_SSL_CAINFO"] = ssl_verify
+        log.info("using custom CA bundle for pip/git: %s", ssl_verify)
     else:
         log.debug("SSL verification enabled for pip (ssl.verify=true in sbk-config.env)")
     
@@ -610,11 +852,11 @@ def ensure_sbk_charts(
 
     if not install.cli.exists():
         # some versions expose differently named entry points
-        bindir = venv_dir / ("Scripts" if os.name == "nt" else "bin")
+        bindir = stage_venv / ("Scripts" if os.name == "nt" else "bin")
         candidates = list(bindir.glob("sbk-charts*")) + list(bindir.glob("sb-charts*"))
         if candidates:
             install = ChartsInstall(
-                venv_dir=venv_dir,
+                venv_dir=stage_venv,
                 source=DependencySource.DOWNLOADED,
                 _cli=candidates[0],
             )
@@ -627,13 +869,24 @@ def ensure_sbk_charts(
                 f"sbk-charts installed but no CLI script found under {bindir}"
             )
 
-    marker.touch()
+    relative_cli = install.cli.relative_to(stage)
+    relative_python = install.python.relative_to(stage)
+    final_cli = cache / relative_cli
+    final_python = cache / relative_python
+    _write_metadata(
+        stage / "metadata.json", dependency="sbk-charts", version=version,
+        source_url=repo_url, executable=str(final_cli), spec=spec,
+    )
+    (stage / ".ok").touch()
+    if cache.exists():
+        shutil.rmtree(cache)
+    stage.replace(cache)
     log.info("sbk-charts %s installed successfully", version)
     return ChartsInstall(
-        venv_dir=venv_dir,
+        venv_dir=cache / "venv",
         source=DependencySource.DOWNLOADED,
-        _cli=install.cli,
-        _python=install.python,
+        _cli=final_cli,
+        _python=final_python,
     )
 
 
@@ -759,7 +1012,10 @@ def _jdk_url(version: str) -> str:
     return ADOPTIUM_BINARY_URL.format(version=version, os=os_name, arch=arch)
 
 
-def ensure_jdk(version: str = DEFAULT_JDK_VERSION, jdk_folder: Path | None = None, ssl_verify: bool = True) -> JdkInstall:
+def ensure_jdk(
+    version: str = DEFAULT_JDK_VERSION, jdk_folder: Path | None = None,
+    ssl_verify: bool | str = False,
+) -> JdkInstall:
     """Ensure a JDK of the given major version is available.
 
     Resolution order (exactly as specified):
@@ -864,16 +1120,32 @@ def ensure_jdk(version: str = DEFAULT_JDK_VERSION, jdk_folder: Path | None = Non
 
     # 5. Download JDK to specified folder or cache (fifth priority)
     log.info("No JDK %s found in SBK_JAVA_HOME, JAVA_HOME, PATH, or cache; downloading Temurin JDK %s to %s", required_major, version, cache)
-    cache.mkdir(parents=True, exist_ok=True)
+    cache.parent.mkdir(parents=True, exist_ok=True)
+    with _cache_lock(cache.parent / f".{cache.name}.lock"):
+        # Another process may have completed the install while this process
+        # waited for the lock.
+        if marker.exists() and home_file.exists():
+            cached_home = Path(home_file.read_text().strip())
+            if _check_java_home(cached_home):
+                os.environ["SBK_JAVA_HOME"] = str(cached_home.resolve())
+                return JdkInstall(home=cached_home)
+        return _install_jdk_locked(version, cache, ssl_verify)
+
+
+def _install_jdk_locked(
+    version: str, cache: Path, ssl_verify: bool | str,
+) -> JdkInstall:
+    """Download, validate, and atomically publish one managed JDK."""
+    stage = cache.with_name(f".{cache.name}.install-{os.getpid()}")
+    if stage.exists():
+        shutil.rmtree(stage)
+    stage.mkdir(parents=True)
 
     url = _jdk_url(version)
-    archive = cache / f"jdk-{version}.tar.gz"
-    if not archive.exists():
-        _download(url, archive, ssl_verify=ssl_verify)
+    archive = stage / f"jdk-{version}.tar.gz"
+    checksum = _download(url, archive, ssl_verify=ssl_verify)
 
-    extract_dir = cache / "extracted"
-    if extract_dir.exists():
-        shutil.rmtree(extract_dir)
+    extract_dir = stage / "extracted"
     extract_dir.mkdir(parents=True, exist_ok=True)
     top = _extract(archive, extract_dir)
 
@@ -890,14 +1162,24 @@ def ensure_jdk(version: str = DEFAULT_JDK_VERSION, jdk_folder: Path | None = Non
             f"extracted JDK does not contain bin/java under {extract_dir}"
         )
 
-    home_file.write_text(str(home.resolve()))
-    marker.touch()
+    relative_home = home.relative_to(stage)
+    final_home = cache / relative_home
+    (stage / ".home").write_text(str(final_home.resolve()))
+    _write_metadata(
+        stage / "metadata.json", dependency="jdk", version=version,
+        source_url=url, sha256=checksum,
+        executable=str(final_home / "bin" / "java"),
+    )
     try:
         archive.unlink()
     except OSError as e:
         log.debug("could not remove archive %s: %s", archive, e)
     
     # Set SBK_JAVA_HOME to point to this JDK (not JAVA_HOME)
-    os.environ["SBK_JAVA_HOME"] = str(home.resolve())
-    log.info("JDK %s downloaded and ready at %s (SBK_JAVA_HOME set for current and future builds)", version, home)
-    return JdkInstall(home=home)
+    (stage / ".ok").touch()
+    if cache.exists():
+        shutil.rmtree(cache)
+    stage.replace(cache)
+    os.environ["SBK_JAVA_HOME"] = str(final_home.resolve())
+    log.info("JDK %s downloaded and ready at %s (SBK_JAVA_HOME set)", version, final_home)
+    return JdkInstall(home=final_home)

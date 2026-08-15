@@ -37,15 +37,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - AGENTS.md documentation for AI coding assistants
 - CONTRIBUTING.md for contributors and AI agents
 - CHANGELOG.md for version history tracking
+- `deps doctor`, read-only `deps status`, `config init`, `--resolve-only`, and
+  JSON dependency summaries
+- CLI/environment overrides, direct sbk-charts executable selection, version
+  policies, custom CA bundles, and a fast local end-to-end smoke example
+- Linux/macOS Python 3.9/3.12 CI and archive/cache security tests
+- Opt-in, workdir-confined file benchmark cleanup and disk-space reporting
 
 ### Fixed
 - SBK logo missing in Excel reports by adding Pillow>=12.0 and openpyxl-image-loader>=1.0 dependencies
 - JDK resolution logic to prioritize SBK_JAVA_HOME over JAVA_HOME to avoid version conflicts
 - macOS logging issues with --forward-logs flag for real-time log forwarding
+- Cache precedence, strict TLS boolean parsing, conda/local version reporting,
+  archive traversal/link extraction, corrupt cache recovery, and concurrent
+  installer races
 
 ### Changed
 - Updated documentation to clarify JDK resolution priority order
 - Enhanced README.md with AI agent documentation section
+- Local SBK is validated before JDK/network work, and sbk-charts resolution is
+  delayed until usable CSV input exists
+- Managed installations are staged, validated, recorded in metadata, and
+  atomically published; the `.ok` marker is written last
+- TLS verification remains disabled by default as configured by the project
 
 ## [0.1.0] - 2025-12-XX
 

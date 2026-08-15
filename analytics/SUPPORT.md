@@ -30,6 +30,12 @@ If you're new to sbk-analytics, start with:
 - sbk-charts must contain `sbk-charts` at its root or `bin/sbk-charts`
 - Ensure the commands are executable; invalid explicit local folders never
   fall back to downloaded packages
+- Run `sbk-analytics deps doctor -p sbk-config.env -vv` for executable,
+  version, JDK, and sbk-charts startup checks
+- Use `sbk-analytics deps status -p sbk-config.env --json` for a read-only
+  view that never downloads or modifies dependencies
+- If a checkout layout is unusual, configure the exact command with
+  `sbk-charts.local.executable` or `--sbk-charts-executable`
 
 ### Runtime Issues
 

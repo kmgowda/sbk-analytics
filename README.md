@@ -26,6 +26,31 @@ From those it:
 
 If **all** SBK instances fail, `sbk-charts` is **not** executed.
 
+## Local packages and dependency diagnostics
+
+Use already-built packages without any SBK or sbk-charts download:
+
+```bash
+sbk-analytics config init --output sbk-config.local.env
+# Edit the two local folder paths, then validate everything:
+sbk-analytics deps doctor -p sbk-config.local.env
+sbk-analytics -p sbk-config.local.env -c examples/file-rocksdb-write-60s.yml
+```
+
+For one-off runs, CLI paths are more convenient:
+
+```bash
+sbk-analytics --sbk-local /root/projects/SBK \
+  --sbk-charts-local /root/projects/sbk-charts \
+  -c examples/file-rocksdb-write-60s.yml
+```
+
+The resolver prints `LOCAL`, `MANAGED_CACHE`, `DOWNLOADED`, or `CONDA` plus
+the exact executable selected. An explicitly selected invalid local folder is
+an error and never silently falls back to the network. `sbk-charts` is resolved
+only after a benchmark produces usable CSV input; use `deps doctor` to check it
+before a long run.
+
 ## Quick Start
 
 ### For macOS/Linux (Recommended with Conda)
@@ -136,8 +161,7 @@ orchestrates need a working runtime on the host:
 | `git`     | any        | Used by `pip` when installing a configured remote sbk-charts tag. Not needed for a ready-to-run local sbk-charts checkout. |
 | Internet access | conditional | Needed for dependencies that are neither configured locally nor already cached. |
 
-If your network intercepts TLS (corporate proxy with a custom root CA),
-set `ssl.verify=false` in your `sbk-config.env` file:
+TLS verification defaults to `false`, as shown in the bundled configuration:
 
 ```ini
 # sbk-config.env
@@ -149,9 +173,9 @@ This disables SSL verification for:
 - SBK/JDK downloads via requests
 - pip git-based installations of sbk-charts
 
-**Warning:** This is less secure and should only be used in trusted networks or
-development environments. For production environments, ensure your system
-has the correct CA certificates installed.
+For stricter environments, set `ssl.verify=true`. A private trust root can be
+selected with `ssl.ca.bundle=/path/to/company-ca.pem`. Invalid boolean values
+are rejected instead of being treated as false.
 
 ## Build / install
 
@@ -794,11 +818,17 @@ written/read, not on a wall-clock deadline.
 
 | Flag | Meaning |
 | --- | --- |
-| `-c`, `--config`     | path to the input YML (required) |
+| `-c`, `--config`     | path to the input YML (required for a benchmark run) |
 | `-p`, `--properties` | path to the SBK config `.env` file (optional; defaults to bundled `<project>/sbk-config.env`) |
 | `-w`, `--work-dir`   | working dir for generated YAMLs / CSVs / logs / Excel report. Precedence: this flag > the YAML's `workdir:` > `/tmp/sbk-analytics`. |
 | `-v`, `--verbose`    | repeat for more verbose logging (`-v` info, `-vv` debug) |
 | `--forward-logs`    | force real-time SBK log forwarding (useful on macOS terminals) |
+| `--sbk-local` | local SBK distribution or built checkout |
+| `--sbk-charts-local` | local sbk-charts checkout/environment |
+| `--sbk-charts-executable` | exact local sbk-charts command path |
+| `--downloads-folder` | managed package cache; highest cache precedence |
+| `--resolve-only` | resolve/validate dependencies without running SBK |
+| `--json` | emit a machine-readable dependency/run summary |
 | `-h`, `--help`       | show help and exit |
 
 ### Modes
@@ -841,13 +871,26 @@ or absolute) and that location is honoured verbatim.
 | 2 | all SBK instances failed AND no `use_files` were provided; `sbk-charts` was skipped |
 | 3 | `sbk-charts` ran but did not produce the expected xlsx |
 | 4 | failed to append the system sheet |
+| 5 | configuration or dependency resolution failed |
 | other | `sbk-charts` exit code |
 
 ## Caching
 
-Release artifacts are cached under `~/.cache/sbk-analytics/` (override with the
-`SBK_ANALYTICS_CACHE` environment variable) **OR** in project-local folders
-(`./.sbk/` for SBK/sbk-charts, `./.jdk/` for JDK) as configured in `sbk-config.env`.
+The cache precedence is `--downloads-folder`, an explicitly configured
+`downloads.folder`, `SBK_ANALYTICS_DOWNLOADS_FOLDER` (or the legacy
+`SBK_ANALYTICS_CACHE`), then `~/.cache/sbk-analytics`. The bundled file sets
+`downloads.folder=./.sbk`, preserving the project-local default. Cache installs
+are locked per version, completion is marked last, and `metadata.json` records
+the requested version, source, executable, install time, and available SHA-256.
+
+Local path precedence is CLI, environment (`SBK_LOCAL_FOLDER`,
+`SBK_CHARTS_LOCAL_FOLDER`, `SBK_CHARTS_LOCAL_EXECUTABLE`), properties file,
+then managed resolution.
+
+Set top-level YAML `cleanup: on-success` to remove file-driver benchmark data
+after a successful report. For safety, only paths inside `workdir` are removed;
+external paths and non-file drivers are always preserved. The default is
+`cleanup: never`.
 Set `GITHUB_TOKEN` to avoid unauthenticated rate limits when first downloading.
 
 ### Default Cache Structure (project-local)

@@ -49,8 +49,7 @@ include-package-data = true
 include = ["analytics*"]
 
 [tool.setuptools.package-data]
-analytics = ["banner.txt", "README.md", "AGENTS.md", "ARCHITECTURE.md", "CONTRIBUTING.md", "DEVELOPMENT.md", "SUPPORT.md", "CHANGELOG.md", "CODEOWNERS"]
+analytics = ["banner.txt", "default-sbk-config.env", "README.md", "AGENTS.md", "ARCHITECTURE.md", "CONTRIBUTING.md", "DEVELOPMENT.md", "SUPPORT.md", "CHANGELOG.md", "CODEOWNERS"]
 
 [tool.setuptools.dynamic]
-readme = {file = "README.md"}
 version = {attr = "analytics.__version__"}
