@@ -4,7 +4,9 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
+from analytics.cli import _bundled_versions_file
 from analytics.policy import (
     APPLICATION,
     ARTIFACTS,
@@ -53,6 +55,16 @@ class PolicyTests(unittest.TestCase):
             project_metadata,
         )
         self.assertIn(APPLICATION.repository_url, project_metadata)
+
+    def test_launcher_source_root_preserves_checkout_configuration(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory)
+            config = source / "sbk-config.env"
+            config.write_text("sbk.version=local\n")
+            with mock.patch.dict(
+                os.environ, {"SBK_ANALYTICS_SOURCE_ROOT": str(source)}
+            ):
+                self.assertEqual(_bundled_versions_file(), config)
 
     def test_expected_artifact_executables_are_centralized(self):
         self.assertEqual(SBK_ARTIFACT.executables, ("sbk-yal", "sbk-gem-yal"))
@@ -107,36 +119,52 @@ class PolicyTests(unittest.TestCase):
                 config.ssl_verify,
                 RUNTIME_POLICY.dependencies.default_ssl_verify,
             )
+            self.assertRegex(config.sbk_charts_sha256, r"^[0-9a-f]{64}$")
         self.assertEqual(root_config.sbk, bundled_config.sbk)
         self.assertEqual(root_config.sbk_charts, bundled_config.sbk_charts)
+        self.assertEqual(
+            root_config.sbk_charts_sha256,
+            bundled_config.sbk_charts_sha256,
+        )
 
     def test_bootstrap_policy_matches_packaging_metadata(self):
         bootstrap = self._bootstrap_policy()
-        minimum = (
-            f"{bootstrap['SBK_ANALYTICS_MIN_PYTHON_MAJOR']}."
-            f"{bootstrap['SBK_ANALYTICS_MIN_PYTHON_MINOR']}"
-        )
         self.assertIn(
-            f'requires-python = ">={minimum}"',
+            'requires-python = ">=3.9"',
             (ROOT / "pyproject.toml").read_text(),
         )
-        self.assertIn(
-            f"python={bootstrap['SBK_ANALYTICS_CONDA_PYTHON']}",
-            (ROOT / "environment.yml").read_text(),
+        self.assertEqual(
+            (ROOT / ".python-version").read_text().strip(),
+            bootstrap["SBK_ANALYTICS_PYTHON_VERSION"],
         )
-        self.assertEqual(bootstrap["SBK_ANALYTICS_VENV_FOLDER"], ".venv")
-        self.assertEqual(bootstrap["SBK_ANALYTICS_CONDA_FOLDER"], ".conda")
+        self.assertRegex(bootstrap["SBK_ANALYTICS_UV_VERSION"], r"^\d+\.\d+\.\d+$")
+        checksum_keys = [key for key in bootstrap if key.endswith("_SHA256")]
+        self.assertEqual(len(checksum_keys), 6)
+        for key in checksum_keys:
+            self.assertRegex(bootstrap[key], r"^[0-9a-f]{64}$")
         for launcher in ("sbk-analytics.sh", "sbk-analytics.ps1"):
             launcher_text = (ROOT / launcher).read_text()
             self.assertIn("sbk-bootstrap.env", launcher_text)
-            for key in bootstrap:
+            for key in (
+                "SBK_ANALYTICS_PYTHON_VERSION",
+                "SBK_ANALYTICS_UV_VERSION",
+                "SBK_ANALYTICS_RUNTIME_FOLDER",
+                "SBK_ANALYTICS_BOOTSTRAP_MARKER",
+            ):
                 self.assertIn(key, launcher_text)
+        launcher_text = (ROOT / "sbk-analytics.sh").read_text() + (
+            ROOT / "sbk-analytics.ps1"
+        ).read_text()
+        for key in checksum_keys:
+            self.assertIn(key, launcher_text)
         manifest = (ROOT / "MANIFEST.in").read_text()
         for filename in (
             "sbk-bootstrap.env",
             "sbk-analytics",
             "sbk-analytics.sh",
             "sbk-analytics.ps1",
+            ".python-version",
+            "uv.lock",
         ):
             self.assertIn(f"include {filename}", manifest)
 

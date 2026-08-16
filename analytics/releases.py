@@ -32,7 +32,7 @@ from datetime import datetime, timezone
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 
 import requests
 
@@ -770,6 +770,7 @@ def _ensure_sbk_locked(
 def ensure_sbk_charts(
     version: str,
     repo_url: str = SBK_CHARTS_ARTIFACT.repository_url,
+    source_sha256: str | None = None,
     downloads_folder: Path | None = None,
     ssl_verify: bool | str = DEPENDENCY_POLICY.default_ssl_verify,
     local_folder: Path | None = None,
@@ -777,7 +778,7 @@ def ensure_sbk_charts(
     version_policy: str = DEPENDENCY_POLICY.default_version_policy,
     preflight: bool = False,
 ) -> ChartsInstall:
-    """Resolve local sbk-charts first, otherwise use conda/cache/download."""
+    """Resolve local sbk-charts first, otherwise use its isolated cache."""
     # Local selection must precede conda detection so an explicit path is
     # always authoritative and never silently replaced by another package.
     if local_folder is not None or local_executable is not None:
@@ -791,87 +792,6 @@ def ensure_sbk_charts(
             preflight=preflight,
         )
 
-    # Check if we're in a conda environment - if so, install directly
-    if "CONDA_PREFIX" in os.environ:
-        log.info("Detected conda environment, installing sbk-charts directly")
-        
-        # Check if sbk-charts is already installed
-        already_installed = False
-        installed_version = None
-        try:
-            import importlib.metadata
-            try:
-                installed_version = importlib.metadata.version(
-                    SBK_CHARTS_ARTIFACT.distribution_name
-                )
-                already_installed = True
-                log.info("sbk-charts already installed in conda environment")
-            except importlib.metadata.PackageNotFoundError:
-                pass
-        except ImportError:
-            # Python < 3.8, use pkg_resources
-            try:
-                import pkg_resources
-                pkg_resources.get_distribution(
-                    SBK_CHARTS_ARTIFACT.distribution_name
-                )
-                already_installed = True
-                log.info("sbk-charts already installed in conda environment")
-            except pkg_resources.DistributionNotFound:
-                pass
-        
-        if already_installed and installed_version != version:
-            message = (
-                f"conda sbk-charts version mismatch: configured {version!r}, "
-                f"installed {installed_version!r}"
-            )
-            if version_policy == DEPENDENCY_POLICY.exact_version_policy:
-                raise DependencyResolutionError(message)
-            if version_policy == DEPENDENCY_POLICY.warn_version_policy:
-                log.warning(message)
-        if already_installed:
-            return ChartsInstall(
-                venv_dir=Path(sys.prefix), source=DependencySource.CONDA,
-                detected_version=installed_version,
-            )
-        
-        # Install sbk-charts in the current conda environment
-        pip_url = repo_url.rstrip("/")
-        if not pip_url.endswith(".git"):
-            pip_url = pip_url + ".git"
-        spec = f"git+{pip_url}@{version}"
-        
-        # Build pip command with optional SSL verification control
-        pip_env = os.environ.copy()
-        pip_args = [
-            sys.executable,
-            "-m",
-            "pip",
-            "install",
-        ]
-        
-        if not ssl_verify:
-            pip_args.extend(_pip_trusted_host_args())
-            # Also set environment variables for git
-            pip_env["GIT_SSL_NO_VERIFY"] = "1"
-            log.warning("SSL verification DISABLED for pip (ssl.verify=false in sbk-config.env)")
-        elif isinstance(ssl_verify, str):
-            pip_env["PIP_CERT"] = ssl_verify
-            pip_env["GIT_SSL_CAINFO"] = ssl_verify
-            log.info("using custom CA bundle for pip/git: %s", ssl_verify)
-        else:
-            log.debug("SSL verification enabled for pip (ssl.verify=true in sbk-config.env)")
-        
-        # Install sbk-charts
-        cmd = pip_args + [spec]
-        log.info("installing sbk-charts in conda environment: %s", spec)
-        _run_pip(cmd, pip_env)
-        
-        # Return a ChartsInstall pointing to the conda environment
-        return ChartsInstall(
-            venv_dir=Path(sys.prefix), source=DependencySource.CONDA
-        )
-    
     # Use downloads_folder for caching if provided, otherwise use cache
     if downloads_folder is None:
         cache = _cache_root() / SBK_CHARTS_ARTIFACT.cache_namespace / version
@@ -882,12 +802,16 @@ def ensure_sbk_charts(
     cache.parent.mkdir(parents=True, exist_ok=True)
     with _cache_lock(cache.parent / f".{cache.name}.lock"):
         return _ensure_sbk_charts_locked(
-            version, repo_url, cache, ssl_verify
+            version, repo_url, cache, ssl_verify, source_sha256
         )
 
 
 def _ensure_sbk_charts_locked(
-    version: str, repo_url: str, cache: Path, ssl_verify: bool | str,
+    version: str,
+    repo_url: str,
+    cache: Path,
+    ssl_verify: bool | str,
+    source_sha256: str | None,
 ) -> ChartsInstall:
     venv_dir = cache / "venv"
     marker = cache / CACHE_POLICY.completion_marker
@@ -896,10 +820,26 @@ def _ensure_sbk_charts_locked(
         venv_dir=venv_dir, source=DependencySource.MANAGED_CACHE
     )
     if marker.exists() and install.cli.exists() and install.python.exists():
-        log.info(
-            "sbk-charts %s already installed at %s (cache hit)", version, venv_dir
+        metadata_path = cache / CACHE_POLICY.metadata_filename
+        cached_digest = None
+        try:
+            cached_digest = json.loads(metadata_path.read_text()).get(
+                "source_sha256"
+            )
+        except (OSError, ValueError, TypeError):
+            pass
+        if source_sha256 is None or cached_digest == source_sha256:
+            log.info(
+                "sbk-charts %s already installed at %s (cache hit)",
+                version,
+                venv_dir,
+            )
+            return install
+        log.warning(
+            "sbk-charts %s cache digest differs from configuration; "
+            "re-installing",
+            version,
         )
-        return install
     if marker.exists():
         log.warning(
             "sbk-charts %s cache marker exists but venv is incomplete; re-installing",
@@ -919,12 +859,29 @@ def _ensure_sbk_charts_locked(
     builder = venv.EnvBuilder(with_pip=True, clear=True)
     builder.create(stage_venv)
 
-    # Install from the GitHub tag (release source tarball)
-    # pip wants 'git+<url>.git@<ref>' for VCS installs
-    pip_url = repo_url.rstrip("/")
-    if not pip_url.endswith(".git"):
-        pip_url = pip_url + ".git"
-    spec = f"git+{pip_url}@{version}"
+    # Prefer the immutable, checksum-verified GitHub source archive. Custom
+    # configurations without a digest retain the legacy git-tag fallback.
+    source_archive = stage / f"{SBK_CHARTS_ARTIFACT.key}-{version}.tar.gz"
+    source_url = (
+        f"{repo_url.rstrip('/')}/archive/refs/tags/{quote(version, safe='')}.tar.gz"
+    )
+    if source_sha256 is not None:
+        checksum = _download(source_url, source_archive, ssl_verify=ssl_verify)
+        if checksum.lower() != source_sha256.lower():
+            raise DependencyResolutionError(
+                "sbk-charts source checksum mismatch: "
+                f"expected {source_sha256}, got {checksum}"
+            )
+        spec = str(source_archive)
+    else:
+        pip_url = repo_url.rstrip("/")
+        if not pip_url.endswith(".git"):
+            pip_url = pip_url + ".git"
+        spec = f"git+{pip_url}@{version}"
+        source_url = spec
+        log.warning(
+            "sbk-charts.sha256 is not configured; using the legacy git install"
+        )
 
     # Build pip command with optional SSL verification control
     pip_env = os.environ.copy()
@@ -956,6 +913,8 @@ def _ensure_sbk_charts_locked(
     cmd = pip_args + [spec]
     log.info("installing sbk-charts: %s", spec)
     _run_pip(cmd, pip_env)
+    if source_sha256 is not None:
+        source_archive.unlink(missing_ok=True)
 
     if not install.cli.exists():
         # some versions expose differently named entry points
@@ -983,7 +942,8 @@ def _ensure_sbk_charts_locked(
     _write_metadata(
         stage / CACHE_POLICY.metadata_filename,
         dependency=SBK_CHARTS_ARTIFACT.key, version=version,
-        source_url=repo_url, executable=str(final_cli), spec=spec,
+        source_url=source_url, executable=str(final_cli),
+        source_sha256=source_sha256, spec=spec,
     )
     (stage / CACHE_POLICY.completion_marker).touch()
     if cache.exists():

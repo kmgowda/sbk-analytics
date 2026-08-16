@@ -236,6 +236,65 @@ class LocalChartsResolutionTests(unittest.TestCase):
             self.assertTrue((cache / "metadata.json").is_file())
             self.assertFalse(list(cache.parent.glob(".4.26.7.1.install-*")))
 
+    def test_verified_source_archive_avoids_git(self):
+        with tempfile.TemporaryDirectory() as directory:
+            downloads = Path(directory)
+            digest = "a" * 64
+
+            class FakeVenvBuilder:
+                def __init__(self, **_kwargs):
+                    pass
+
+                def create(self, venv_dir):
+                    _executable(Path(venv_dir) / "bin" / "python")
+                    _executable(Path(venv_dir) / "bin" / "sbk-charts")
+
+            def fake_download(url, archive, **_kwargs):
+                self.assertIn("/archive/refs/tags/4.26.7.1.tar.gz", url)
+                archive.write_bytes(b"verified source")
+                return digest
+
+            with mock.patch(
+                "analytics.releases.venv.EnvBuilder", FakeVenvBuilder
+            ), mock.patch(
+                "analytics.releases._download", side_effect=fake_download
+            ), mock.patch("analytics.releases.subprocess.run") as run:
+                install = ensure_sbk_charts(
+                    "4.26.7.1",
+                    downloads_folder=downloads,
+                    source_sha256=digest,
+                )
+
+            self.assertEqual(install.source, DependencySource.DOWNLOADED)
+            install_command = run.call_args_list[-1].args[0]
+            self.assertFalse(any(str(value).startswith("git+") for value in install_command))
+            metadata = (downloads / "sbk-charts" / "4.26.7.1" / "metadata.json")
+            self.assertIn(digest, metadata.read_text())
+
+    def test_source_archive_digest_mismatch_is_rejected_before_pip(self):
+        with tempfile.TemporaryDirectory() as directory:
+            downloads = Path(directory)
+
+            class FakeVenvBuilder:
+                def __init__(self, **_kwargs):
+                    pass
+
+                def create(self, venv_dir):
+                    _executable(Path(venv_dir) / "bin" / "python")
+
+            with mock.patch(
+                "analytics.releases.venv.EnvBuilder", FakeVenvBuilder
+            ), mock.patch(
+                "analytics.releases._download", return_value="b" * 64
+            ), mock.patch("analytics.releases.subprocess.run") as run:
+                with self.assertRaisesRegex(RuntimeError, "checksum mismatch"):
+                    ensure_sbk_charts(
+                        "4.26.7.1",
+                        downloads_folder=downloads,
+                        source_sha256="a" * 64,
+                    )
+            run.assert_not_called()
+
 
 class ResolutionOutputTests(unittest.TestCase):
     def test_local_sources_are_printed_with_exact_paths(self):

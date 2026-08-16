@@ -86,36 +86,38 @@ powershell -ExecutionPolicy Bypass -File .\sbk-analytics.ps1 --version
 ```
 
 The unified application dispatches to `sbk-analytics.sh` on Linux/macOS and
-`sbk-analytics.ps1` on Windows-compatible POSIX shells. Both native launchers
-follow this order:
+`sbk-analytics.ps1` on Windows-compatible POSIX shells. The native launchers do
+not require system Python, venv, or Conda. On the first run they:
 
-1. Reuse a compatible active `VIRTUAL_ENV`, then an active `CONDA_PREFIX`.
-2. Reuse the launcher-managed `.venv`, then `.conda` environment.
-3. With Python 3.9 or newer, create or repair `.venv` and install this checkout.
-4. If venv creation or installation fails, use Conda to create `.conda` with
-   Python 3.10 and install this checkout.
+1. Detect the operating system and architecture.
+2. Download the pinned standalone `uv` executable and verify its checked-in
+   SHA-256 digest, unless a verified copy is already cached.
+3. Let uv install the exact Python version from `.python-version` into private
+   application state.
+4. Create a staged environment and install `uv.lock` with `--locked` and
+   `--no-editable`.
+5. Health-check the environment, write metadata last, and publish it under its
+   source/lock fingerprint.
 
-The environment is bootstrapped again only when the project dependency files
-or launcher/bootstrap policy change. Shared launcher defaults such as minimum
-Python, fallback Conda Python, environment folders, and marker name live in
-`sbk-bootstrap.env`. Installer output and launcher status go to stderr, so
-the launchers keep `--json` stdout machine-readable. Bash uses `exec` for the
-final process; PowerShell waits for Python and returns its exit code.
+Later runs validate and execute the saved environment without invoking uv or
+the network. Concurrent launchers share per-environment locks; interrupted or
+corrupt staging directories are never reused. Active `VIRTUAL_ENV` and
+`CONDA_PREFIX` environments are deliberately not modified.
 
-Set `SBK_ANALYTICS_PYTHON=/path/to/python` to prefer a particular interpreter,
-or `SBK_ANALYTICS_ENV_HOME=/path/to/folder` to store the managed `.venv` and
-`.conda` outside the checkout. Environment creation can still fail when package
-repositories are unreachable or the selected location is not writable.
+The default runtime state is `${XDG_STATE_HOME:-~/.local/state}/sbk-analytics`
+on Linux, `~/Library/Application Support/sbk-analytics` on macOS, and
+`%LOCALAPPDATA%\sbk-analytics` on Windows. Set
+`SBK_ANALYTICS_ENV_HOME=/path/to/folder` to override it. Set
+`SBK_ANALYTICS_BOOTSTRAP_OFFLINE=1` to prohibit downloads while repairing an
+environment; a healthy saved environment is always reusable offline.
 
-`SBK_ANALYTICS_PYTHON` accepts one executable path or command name, not a
-command plus arguments. On Windows, use a path such as
-`C:\Python312\python.exe`; do not set it to `py -3`. The PowerShell launcher
-already discovers the Windows `py` launcher and supplies `-3` automatically.
-
-The bootstrap fingerprint includes the absolute checkout path and the selected
-environment's Python identity and version information. Moving the checkout or
-replacing/upgrading its environment interpreter therefore causes one
-intentional editable reinstall on the next launch.
+Exact Python, uv, platform checksums, runtime folder, and marker policy live in
+`sbk-bootstrap.env`. `uv.lock` makes application dependencies reproducible.
+Installer/status output goes to stderr, preserving the single-document
+`--json` stdout contract. The application runs Python with safe-path mode and
+clears `PYTHONPATH`/`PYTHONHOME`, so the mutable checkout cannot shadow the
+installed package. The launcher still supplies the current checkout root to the
+CLI so its editable `sbk-config.env` remains the default configuration.
 
 Runtime policy and artifact metadata are centralized in
 `analytics/policy.py`. This is the canonical source for dependency identities,
@@ -124,7 +126,7 @@ grace periods, benchmark watchdog timing, SSH behavior, configuration defaults,
 and application exit codes. Release version pins remain in `sbk-config.env` so
 operators can update them without changing Python code.
 
-### For macOS/Linux (Recommended with Conda)
+### Optional manual development environment (Conda)
 ```bash
 conda env create -f environment.yml
 conda activate sbk-analytics
@@ -132,7 +134,7 @@ pip install -e .
 sbk-analytics -c examples/file-rocksdb-write-60s.yml
 ```
 
-### For Windows/Standard Python
+### Optional manual development environment (standard Python)
 ```bash
 python3 -m venv .venv
 . .venv/bin/activate  # Windows: .venv\Scripts\activate
@@ -227,10 +229,10 @@ orchestrates need a working runtime on the host:
 
 | Tool | Required version | Notes |
 | --- | --- | --- |
-| Python    | ≥ 3.9      | Tested with 3.10 / 3.12. |
+| Python    | not required | The launcher downloads and saves the pinned managed Python on first use. Python ≥3.9 is needed only for manual development installs. |
 | JDK       | ≥ matching SBK build (e.g. SBK 10.0 needs **JDK 25**) | Automatically resolved and cached by default. The SBK release archive ships `.class` files compiled with a specific JDK. |
-| `git`     | any        | Used by `pip` when installing a configured remote sbk-charts tag. Not needed for a ready-to-run local sbk-charts checkout. |
-| Internet access | conditional | Needed for dependencies that are neither configured locally nor already cached. |
+| `curl` or `wget` | first Linux/macOS bootstrap only | Downloads the verified standalone runtime manager. Windows uses PowerShell `Invoke-WebRequest`. |
+| Internet access | first run / cache miss | Not needed after the runtime, JDK, SBK, and sbk-charts caches are populated. |
 
 ### Security compatibility defaults
 
@@ -247,10 +249,13 @@ ssl.verify=false
 This disables SSL verification for:
 - GitHub API calls (release metadata)
 - SBK/JDK downloads via requests
-- pip git-based installations of sbk-charts
+- pip dependency downloads for sbk-charts and its legacy no-digest Git fallback
 
-When TLS verification is disabled, dependency resolution also supplies the centralized
-trusted-host list to pip. Remote SBK-GEM cleanup and system-information probes
+The stage-zero uv bootstrap is separate from this compatibility setting: it
+always requires HTTPS and verifies the pinned archive SHA-256 before execution.
+
+When TLS verification is disabled, dependency resolution also supplies the
+centralized trusted-host list to pip. Remote SBK-GEM cleanup and system-information probes
 likewise disable SSH host-key checking and use the operating system's null
 known-hosts file. Use those SSH features only with dedicated, trusted benchmark
 nodes unless the centralized SSH policy is hardened for your environment.
@@ -261,7 +266,7 @@ are rejected instead of being treated as false.
 
 ## Build / install
 
-### Option 1: Conda Installation (Recommended for macOS/Linux)
+### Option 1: Manual Conda development installation
 
 Conda is recommended for macOS and Linux as it handles platform-specific dependencies (like PyTorch) better than pip.
 
@@ -295,11 +300,10 @@ The `environment.yml` file includes:
 
 #### Conda Environment Behavior
 
-When using conda, sbk-analytics automatically detects the conda environment and:
-- Installs sbk-charts directly in the conda environment (not a separate venv)
-- Uses conda's PyTorch package for better platform compatibility
-- Respects SSL verification settings from `sbk-config.env`
-- Checks for existing installations before attempting to install
+Manual Conda environments remain supported for development, but the native
+application never modifies an active Conda environment. Managed sbk-charts is
+always installed into its own versioned cache environment, preventing charts
+dependencies from changing sbk-analytics itself.
 
 #### Updating Conda Environment
 
@@ -311,7 +315,7 @@ conda env update -f environment.yml --prune
 pip install -e .
 ```
 
-### Option 2: Virtual Environment Installation
+### Option 2: Manual virtual-environment development installation
 
 For users who prefer standard Python virtual environments.
 
@@ -425,36 +429,32 @@ If you encounter SSL certificate errors:
 - This is useful for corporate proxies with self-signed certificates
 - See the SSL verification section below for details
 
-### Environment Detection
+### Environment Isolation
 
-sbk-analytics automatically detects whether you're using conda or venv and adjusts its behavior accordingly:
+The self-contained launcher always uses its own fingerprinted application
+environment. It does not select or modify an active Conda or venv environment.
 
-#### Conda Environment Detection
-- **Detection**: Checks for `CONDA_PREFIX` environment variable
-- **Behavior**: Installs sbk-charts directly in the conda environment
-- **Benefits**: Uses conda's PyTorch package for better platform compatibility
-- **Cache**: No separate venv for sbk-charts; uses conda environment (no caching)
-- **Folder Structure** (default project-local):
+#### Managed application runtime
+- **Identity**: exact Python + uv version + platform + source/lock fingerprint
+- **Behavior**: non-editable locked installation outside the checkout
+- **Safety**: staged publication, health marker written last, and lock-based
+  concurrent installation
+- **Reuse**: no network or runtime-manager invocation after a healthy first run
+- **Folder Structure** (default per-user runtime state):
   ```
-  ./.sbk/
-  ├── <sbk.version>/         # SBK installation
-  │   ├── .ok              # Installation marker
-  │   ├── .home            # Path to extracted SBK home
-  │   └── extracted/       # Extracted SBK distribution
-  └── sbk-charts/          # sbk-charts metadata (no venv in conda mode)
-  
-  ./.jdk/
-  └── <jdk.version>/        # JDK installation
-      ├── .ok              # Installation marker
-      ├── .home            # Path to JDK home
-      └── extracted/       # Extracted JDK distribution
+  <runtime-state>/
+  ├── tools/uv/<uv-version>/<platform>/
+  ├── python/<python-version>/
+  ├── app/<source-lock-fingerprint>/
+  ├── cache/uv/
+  └── locks/
   ```
 
-#### Venv Environment Detection
-- **Detection**: Assumes venv when `CONDA_PREFIX` is not set
-- **Behavior**: Creates isolated venv for sbk-charts under project folder
-- **Benefits**: Complete isolation from system Python
-- **Cache**: Caches sbk-charts venv for faster subsequent runs
+#### Managed sbk-charts runtime
+- **Behavior**: always creates an isolated venv under the dependency cache
+- **Source**: the shipped configuration downloads a tag archive and verifies
+  `sbk-charts.sha256`, avoiding a system Git requirement
+- **Cache**: version and source digest are validated before reuse
 - **Folder Structure** (default project-local):
   ```
   ./.sbk/
@@ -463,7 +463,7 @@ sbk-analytics automatically detects whether you're using conda or venv and adjus
   │   ├── .home            # Path to extracted SBK home
   │   └── extracted/       # Extracted SBK distribution
   └── sbk-charts/
-      └── <sbk-charts.version>/ # sbk-charts cache with full venv
+    └── <sbk-charts.version>/ # isolated sbk-charts environment
           ├── .ok              # Installation marker
           └── venv/            # Isolated Python environment
               ├── bin/
@@ -476,11 +476,12 @@ sbk-analytics automatically detects whether you're using conda or venv and adjus
       └── extracted/       # Extracted JDK distribution
   ```
 
-#### Manual Override
+#### Bootstrap overrides
 
-If you need to force a specific behavior, you can:
-- **Force venv mode in conda**: Unset `CONDA_PREFIX` temporarily
-- **Force conda mode in venv**: Set `CONDA_PREFIX` to your environment path
+- `SBK_ANALYTICS_ENV_HOME`: relocate all managed runtime state
+- `SBK_ANALYTICS_BOOTSTRAP_OFFLINE=1`: prohibit bootstrap downloads
+- `SBK_ANALYTICS_UV_EXECUTABLE`: development/test override for a trusted uv
+  executable; normal users should use the pinned verified artifact
 
 ## macOS Logging Issues
 
@@ -534,7 +535,7 @@ Progress updates every 2 seconds so you can monitor download activity.
 
 ## Build / install
 
-### Option 1: Conda Installation (Recommended for macOS/Linux)
+### Option 1: Manual Conda development installation
 
 Conda is recommended for macOS and Linux as it handles platform-specific dependencies (like PyTorch) better than pip:
 
@@ -555,7 +556,7 @@ The `environment.yml` file includes:
 - sbk-charts (installed from GitHub)
 - All other required dependencies
 
-### Option 2: Virtual Environment Installation
+### Option 2: Manual virtual-environment development installation
 
 Clone the repository (or unpack the source tree), then create a virtual
 environment and install in editable mode:
@@ -602,9 +603,9 @@ What this does, step by step:
      `./.jdk/<jdk.version>/extracted/` (or cache if configured differently). Cached on subsequent runs.
    - Downloads the SBK release archive from GitHub and extracts it to
      `./.sbk/<sbk.version>/extracted/` (or cache if configured differently). Cached on subsequent runs.
-   - Installs `sbk-charts` of the configured tag (in conda environment or
-     isolated venv at `./.sbk/sbk-charts/<sbk-charts.version>/venv/`).
-     Cached on subsequent runs (venv mode only).
+   - Downloads the configured sbk-charts tag archive, verifies
+     `sbk-charts.sha256`, and installs it into the isolated environment at
+     `./.sbk/sbk-charts/<sbk-charts.version>/venv/`. It is cached on all hosts.
 3. **Generate per-instance YAMLs.** One YAML per `classes:` entry under
    `<work-dir>/yml/`, each forced to write CSV via `CSVLogger` to a unique
    `<work-dir>/csv/sbk-<instance>.csv`.
@@ -622,14 +623,11 @@ What this does, step by step:
 ### Full end-to-end example
 
 ```bash
-# 1. Activate the venv created during "Build / install"
-. .venv/bin/activate
-
-# 2. Run a 120 s single-writer benchmark on `file` and `rocksdb`
+# 1. Run a 120 s single-writer benchmark on `file` and `rocksdb`
 #    JDK is automatically resolved and cached
-sbk-analytics -c examples/file-rocksdb-write.yml -w /tmp/sbk-bench/work -v
+./sbk-analytics -c examples/file-rocksdb-write.yml -w /tmp/sbk-bench/work -v
 
-# 3. Open the result
+# 2. Open the result
 ls /tmp/sbk-bench/sbk-analytics.xlsx
 ```
 
@@ -661,7 +659,8 @@ sbk.jdk.folder=./.jdk
 ssl.verify=true
 
 sbk-charts.url=https://github.com/kmgowda/sbk-charts
-sbk-charts.version=4.26.6.2
+sbk-charts.version=4.26.7.1
+sbk-charts.sha256=cdff5b8f94662b36d6d9c897d16b17565945cd5e6692672d9dc6d8d9d4a92b97
 # sbk-charts.local.folder=/root/projects/sbk-charts
 ```
 
@@ -712,6 +711,7 @@ Recognised keys (case-insensitive; dots / underscores / dashes interchangeable):
 | `ssl.verify`     | no (defaults to `false`) | Enable SSL verification for downloads. Set to `true` outside trusted benchmark networks. |
 | `sbk-charts.url` | no (defaults to `https://github.com/kmgowda/sbk-charts`) | Same format as `sbk.url`. |
 | `sbk-charts.version` | yes | Tag on the sbk-charts repository. |
+| `sbk-charts.sha256` | recommended for managed resolution | SHA-256 of the GitHub tag archive. When set, the archive is verified and system Git is not required. |
 | `sbk-charts.local.folder` | no | Ready-to-run sbk-charts checkout or environment. Takes priority over conda, cache, and URL. |
 
 ### Using local SBK and sbk-charts
@@ -1015,7 +1015,7 @@ By default, sbk-analytics uses project-local folders:
 │   ├── .home                  # Path to extracted SBK home
 │   └── extracted/             # Extracted SBK distribution
 └── sbk-charts/
-    └── <sbk-charts.version>/ # sbk-charts cache (venv mode only)
+    └── <sbk-charts.version>/ # isolated sbk-charts cache
         ├── .ok                # Installation marker
         └── venv/              # Isolated Python environment
 
@@ -1040,14 +1040,15 @@ When `SBK_ANALYTICS_CACHE` is set or folders are explicitly set to non-default v
 │   ├── .ok                        # Installation marker
 │   ├── .home                      # Path to extracted SBK home
 │   └── extracted/                 # Extracted SBK distribution
-└── sbk-charts/<sbk-charts.version>/  # sbk-charts cache (venv mode only)
+└── sbk-charts/<sbk-charts.version>/  # isolated sbk-charts cache
     ├── .ok                        # Installation marker
     └── venv/                      # Isolated Python environment
         ├── bin/
         └── lib/
 ```
 
-**Note**: In conda environments, sbk-charts is installed directly in the conda environment and is not cached separately.
+**Note**: sbk-charts is always isolated from the application environment,
+including when sbk-analytics was started from a manually managed Conda shell.
 
 The original SBK tarball and JDK archive are removed after extraction. Re-runs of the same
 versions hit the cache and skip the download + install entirely.

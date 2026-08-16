@@ -15,11 +15,9 @@ cd sbk-analytics
 # Or on Windows PowerShell
 .\sbk-analytics.ps1 --version
 
-# Create environment
-conda env create -f environment.yml  # or use venv
-conda activate sbk-analytics
-
-# Install in development mode
+# Optional manual editable environment for development only
+python3 -m venv .venv
+. .venv/bin/activate
 pip install -e .
 
 # Test installation
@@ -48,6 +46,8 @@ analytics/              # Main package
 
 - `sbk-config.env` - SBK versions, URLs, cache folders
 - `sbk-bootstrap.env` - shared Bash/PowerShell bootstrap policy
+- `.python-version` - exact launcher-managed Python version
+- `uv.lock` - reproducible cross-platform application dependency lock
 - `sbk-analytics` - canonical application and platform dispatcher
 - `sbk-analytics.sh` - Linux/macOS environment bootstrap and CLI launcher
 - `sbk-analytics.ps1` - Windows environment bootstrap and CLI launcher
@@ -65,8 +65,9 @@ configuration defaults, and exit codes. Keep release version pins in
 `sbk-config.env`, and keep constants used by only one algorithm next to that
 algorithm. Add or update `tests/test_policy.py` whenever policy metadata or an
 ordering constraint changes. Pre-Python values shared by the native launchers
-belong in `sbk-bootstrap.env`; keep its minimum/fallback Python versions aligned
-with `pyproject.toml` and `environment.yml`.
+belong in `sbk-bootstrap.env`; keep its exact Python aligned with
+`.python-version`, regenerate `uv.lock` after dependency changes, and update
+all six uv artifact checksums when changing the pinned uv version.
 
 ## Common Tasks
 
@@ -113,7 +114,10 @@ sbk-analytics -c examples/config.yml
 ## Key Design Decisions
 
 - **JDK Resolution**: SBK_JAVA_HOME (not JAVA_HOME) to avoid conflicts
-- **Environment Detection**: Auto-detects conda vs venv
+- **Runtime Bootstrap**: Verified uv plus exact managed Python; no host Python,
+  venv, or Conda prerequisite
+- **Environment Isolation**: Never modify active environments; always isolate
+  sbk-charts from sbk-analytics
 - **Caching**: External dependencies cached locally
 - **macOS Handling**: Special subprocess handling for logging
 
@@ -201,7 +205,8 @@ For AI agents needing to generate YAML workload configurations, see the **YAML C
 
 - `SBK_JAVA_HOME` - JDK for SBK (set by sbk-analytics)
 - `JAVA_HOME` - User's JAVA_HOME (not modified)
-- `CONDA_PREFIX` - Conda environment detection
+- `SBK_ANALYTICS_ENV_HOME` - managed runtime root override
+- `SBK_ANALYTICS_BOOTSTRAP_OFFLINE` - disable bootstrap downloads
 - `PYTHONUNBUFFERED` - Unbuffered Python output
 
 ## Getting Help

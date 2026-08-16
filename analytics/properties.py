@@ -30,9 +30,11 @@ Recognised keys (case-insensitive; dots / underscores / dashes equivalent):
     sbk-charts.url         -> GitHub repo URL for sbk-charts
                               (e.g. https://github.com/kmgowda/sbk-charts)
     sbk-charts.version     -> sbk-charts release tag on that repo
+    sbk-charts.sha256      -> Optional SHA-256 for its managed tag archive;
+                              verifies the source and removes the Git requirement
     sbk-charts.local.folder
                            -> Optional ready-to-run local sbk-charts checkout
-                              or environment; bypasses conda/cache/download
+                              or environment; bypasses cache/download
     sbk-charts.local.executable
                            -> Optional direct path to a local sbk-charts command
     sbk.version.policy     -> local version handling: warn | exact | ignore
@@ -50,6 +52,7 @@ Relative paths are resolved against the properties file's directory.
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlparse
@@ -112,6 +115,7 @@ def _resolve_folder(folder: str, properties_file: Path) -> Path:
 class Versions:
     sbk: str               # SBK release tag, e.g. "10.0"
     sbk_charts: str        # sbk-charts release tag, e.g. "4.26.6.2"
+    sbk_charts_sha256: str | None  # optional managed source archive digest
     sbk_url: str           # canonical SBK repo URL
     sbk_charts_url: str    # canonical sbk-charts repo URL
     sbk_jdk: str           # required JDK major version, e.g. "25"
@@ -196,6 +200,15 @@ def parse_properties(path: str | Path) -> Versions:
         "sbk.charts.local.executable", "sbk_charts_local_executable",
         "sbkcharts.local.executable",
     )
+    sbk_charts_sha256 = _get_optional(
+        "sbk.charts.sha256", "sbk_charts_sha256", "sbkcharts.sha256",
+    )
+    if sbk_charts_sha256 is not None:
+        sbk_charts_sha256 = sbk_charts_sha256.strip().lower()
+        if not re.fullmatch(r"[0-9a-f]{64}", sbk_charts_sha256):
+            raise ValueError(
+                "sbk-charts.sha256 must contain exactly 64 hexadecimal characters"
+            )
     jdk_folder_raw = _get(
         "sbk.jdk.folder", "sbk_jdk_folder", "jdk.folder", "jdk_folder",
         default=CACHE_POLICY.default_jdk_folder,
@@ -236,6 +249,7 @@ def parse_properties(path: str | Path) -> Versions:
             "sbk.charts.version", "sbk_charts_version", "sbkcharts.version",
             default="",
         ),
+        sbk_charts_sha256=sbk_charts_sha256,
         sbk_url=_normalise_repo_url(sbk_url_raw),
         sbk_charts_url=_normalise_repo_url(sbk_charts_url_raw),
         sbk_jdk=sbk_jdk,

@@ -19,15 +19,16 @@ If you're new to sbk-analytics, start with:
   newer because Windows does not directly execute extensionless POSIX scripts
 - If Windows execution policy blocks the script, run
   `powershell -ExecutionPolicy Bypass -File .\sbk-analytics.ps1 <arguments>`
-- Install Python 3.9 or newer; if venv creation is unavailable, install Conda
-- Confirm package repositories are reachable on the first bootstrap
-- Confirm the checkout, or `SBK_ANALYTICS_ENV_HOME`, is writable
-- Use `SBK_ANALYTICS_PYTHON=/path/to/python` to prefer a known interpreter
-- `SBK_ANALYTICS_PYTHON` must be one executable path or command name, without
-  arguments; on Windows do not set it to `py -3`, because that fallback is
-  discovered automatically
-- Moving the checkout or changing the environment's Python interpreter causes
-  one expected reinstall because both are part of the bootstrap fingerprint
+- No host Python, venv, or Conda is required. Linux/macOS needs `curl` or
+  `wget` for the first uv download; Windows uses `Invoke-WebRequest`
+- Confirm GitHub and Python package repositories are reachable on first use
+- Confirm the per-user state directory, or `SBK_ANALYTICS_ENV_HOME`, is writable
+- Set `SBK_ANALYTICS_BOOTSTRAP_OFFLINE=1` only after the runtime is cached; a
+  healthy saved environment is automatically reused without invoking uv
+- A checksum error is never bypassed. Check proxy/content rewriting and the
+  platform SHA-256 values in `sbk-bootstrap.env`
+- Source or lock changes create a new versioned environment. Corrupt or
+  interrupted staging directories are repaired without reusing partial state
 
 **Problem**: `pip install -e .` fails
 - Ensure you're using Python 3.9+
@@ -37,6 +38,7 @@ If you're new to sbk-analytics, start with:
 **Problem**: sbk-charts installation fails
 - Check network connectivity
 - Verify SSL settings in `sbk-config.env`
+- Verify `sbk-charts.sha256` matches the configured version's tag archive
 - Try with `ssl.verify=false` in sbk-config.env
 
 **Problem**: a configured local SBK or sbk-charts folder is rejected
@@ -135,7 +137,7 @@ sbk-analytics -c config.yml -vv
 
 When reporting issues, include:
 - Operating system and version
-- Python version: `python --version`
+- Managed runtime metadata from `<runtime-state>/app/<fingerprint>/metadata.json`
 - sbk-analytics version: `sbk-analytics --version`
 - Configuration files (sanitized)
 - Error messages and logs
@@ -146,7 +148,8 @@ When reporting issues, include:
 - **JDK Compatibility**: SBK compiled with specific Java versions
 - **macOS Logging**: Requires special handling with `--forward-logs`
 - **Windows Support**: Limited testing on Windows
-- **Network Dependencies**: Requires internet for initial downloads
+- **Network Dependencies**: Requires internet for uncached first-run artifacts;
+  healthy saved environments and populated dependency caches run offline
 
 ## Performance Tips
 

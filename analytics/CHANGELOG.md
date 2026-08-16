@@ -32,10 +32,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- Self-bootstrapping Bash and PowerShell launchers for Linux, macOS, and Windows
-  with active environment reuse, managed venv creation, Conda fallback,
-  source/dependency/interpreter change detection, argument forwarding, and
-  exit-code preservation
+- Fully self-contained Bash and PowerShell launchers for Linux, macOS, and
+  Windows using pinned, checksum-verified uv artifacts and exact uv-managed
+  Python, with argument forwarding and exit-code preservation
+- Cross-platform `uv.lock`, persistent per-user application state, atomic
+  fingerprinted environments, concurrent bootstrap locking, offline reuse,
+  corruption repair, and interrupted-install recovery tests
+- Optional `sbk-charts.sha256`; the shipped configuration verifies the tag
+  archive and installs it without requiring system Git
 - Unified extensionless `sbk-analytics` application that selects the native
   bootstrap launcher on Linux, macOS, and Windows-compatible POSIX shells
 - Managed child-process trees for `sbk-yal`, `sbk-gem-yal`, and `sbk-charts`,
@@ -74,6 +78,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   installer races
 
 ### Changed
+- Active venv/Conda environments are no longer modified by the native launcher;
+  sbk-analytics and sbk-charts always use separate managed environments
+- Production bootstrap installs sbk-analytics non-editably and runs Python in
+  safe-path mode with `PYTHONPATH` and `PYTHONHOME` cleared
 - Separated the Temurin repository identity from its parameterized JDK download
   URL template and documented the compatibility/security implications of the
   disabled TLS and SSH verification defaults

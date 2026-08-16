@@ -5,6 +5,22 @@ on:
   pull_request:
 
 jobs:
+  standalone-bootstrap:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+      - name: Bootstrap without a prepared Python environment
+        shell: bash
+        env:
+          SBK_ANALYTICS_ENV_HOME: ${{ runner.temp }}/sbk-analytics-runtime
+        run: |
+          ./sbk-analytics --version
+          SBK_ANALYTICS_BOOTSTRAP_OFFLINE=1 ./sbk-analytics --version
+
   unit:
     strategy:
       fail-fast: false
