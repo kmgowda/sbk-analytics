@@ -35,9 +35,11 @@ import threading
 import time
 from typing import Any, Iterator
 
+from .policy import RUNTIME_POLICY
+
 log = logging.getLogger(__name__)
 
-TERMINATE_GRACE_S = 3.0
+PROCESS_POLICY = RUNTIME_POLICY.processes
 _ACTIVE: set["ManagedProcess"] = set()
 _ACTIVE_LOCK = threading.RLock()
 
@@ -157,11 +159,16 @@ class ManagedProcess:
                 pass
         if guard is not None:
             try:
-                guard.wait(timeout=TERMINATE_GRACE_S + 1)
+                guard.wait(
+                    timeout=(
+                        PROCESS_POLICY.termination_grace_s
+                        + PROCESS_POLICY.guard_exit_padding_s
+                    )
+                )
             except subprocess.TimeoutExpired:
                 guard.terminate()
                 try:
-                    guard.wait(timeout=1)
+                    guard.wait(timeout=PROCESS_POLICY.guard_force_wait_s)
                 except subprocess.TimeoutExpired:
                     guard.kill()
                     guard.wait()
@@ -193,7 +200,7 @@ def managed_popen(args, **kwargs: Any) -> ManagedProcess:
                 "analytics._process_guard",
                 str(read_fd),
                 str(process.pid),
-                str(TERMINATE_GRACE_S),
+                str(PROCESS_POLICY.termination_grace_s),
             ],
             pass_fds=(read_fd,),
             stdin=subprocess.DEVNULL,
@@ -222,7 +229,10 @@ def managed_popen(args, **kwargs: Any) -> ManagedProcess:
     return managed
 
 
-def terminate_process(process: ManagedProcess, grace_s: float = TERMINATE_GRACE_S) -> int | None:
+def terminate_process(
+    process: ManagedProcess,
+    grace_s: float = PROCESS_POLICY.termination_grace_s,
+) -> int | None:
     """Terminate one workload tree, escalating to a force-kill after grace."""
     if process.poll() is not None:
         return process.returncode
@@ -239,7 +249,9 @@ def terminate_process(process: ManagedProcess, grace_s: float = TERMINATE_GRACE_
             return process.poll()
 
 
-def terminate_all(grace_s: float = TERMINATE_GRACE_S) -> None:
+def terminate_all(
+    grace_s: float = PROCESS_POLICY.termination_grace_s,
+) -> None:
     """Best-effort termination of every workload still owned by this process."""
     with _ACTIVE_LOCK:
         active = list(_ACTIVE)
@@ -381,7 +393,7 @@ def _start_windows_guard(target_pid: int) -> subprocess.Popen | None:
                 "--windows",
                 str(os.getpid()),
                 str(target_pid),
-                str(TERMINATE_GRACE_S),
+                str(PROCESS_POLICY.termination_grace_s),
             ],
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,

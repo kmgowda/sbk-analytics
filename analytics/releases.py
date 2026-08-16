@@ -37,8 +37,27 @@ from urllib.parse import urlparse
 import requests
 
 from .errors import CacheError, DependencyResolutionError, LocalPackageError
+from .policy import (
+    APPLICATION,
+    JDK_ARTIFACT,
+    RUNTIME_POLICY,
+    SBK_ARTIFACT,
+    SBK_CHARTS_ARTIFACT,
+)
 
 log = logging.getLogger(__name__)
+CACHE_POLICY = RUNTIME_POLICY.cache
+DEPENDENCY_POLICY = RUNTIME_POLICY.dependencies
+NETWORK_POLICY = RUNTIME_POLICY.network
+
+
+def _pip_trusted_host_args() -> list[str]:
+    """Return pip CLI arguments for the centrally approved insecure hosts."""
+    return [
+        item
+        for host in NETWORK_POLICY.pip_trusted_hosts
+        for item in ("--trusted-host", host)
+    ]
 
 
 def _run_pip(cmd: list[str], pip_env: dict[str, str]) -> None:
@@ -71,7 +90,7 @@ def cache_root() -> Path:
     )
     if root:
         return Path(root)
-    return Path.home() / ".cache" / "sbk-analytics"
+    return Path.home() / ".cache" / APPLICATION.name
 
 
 def _cache_root() -> Path:
@@ -98,13 +117,13 @@ class SbkInstall:
 
     @property
     def sbk_yal(self) -> Path:
-        return self._sbk_yal or self.home / "bin" / "sbk-yal"
+        return self._sbk_yal or self.home / "bin" / SBK_ARTIFACT.primary_executable
 
     @property
     def sbk_gem_yal(self) -> Path | None:
         if self._sbk_gem_yal is not None:
             return self._sbk_gem_yal
-        default = self.home / "bin" / "sbk-gem-yal"
+        default = self.home / "bin" / SBK_ARTIFACT.additional_executables[0]
         return default if default.is_file() else None
 
 
@@ -114,9 +133,7 @@ class JdkInstall:
 
     @property
     def java(self) -> Path:
-        if os.name == "nt":
-            return self.home / "bin" / "java.exe"
-        return self.home / "bin" / "java"
+        return _jdk_executable(self.home)
 
 
 @dataclass
@@ -132,8 +149,11 @@ class ChartsInstall:
         if self._cli is not None:
             return self._cli
         if os.name == "nt":
-            return self.venv_dir / "Scripts" / "sbk-charts.exe"
-        return self.venv_dir / "bin" / "sbk-charts"
+            return (
+                self.venv_dir / "Scripts" /
+                f"{SBK_CHARTS_ARTIFACT.primary_executable}.exe"
+            )
+        return self.venv_dir / "bin" / SBK_CHARTS_ARTIFACT.primary_executable
 
     @property
     def python(self) -> Path:
@@ -145,6 +165,13 @@ class ChartsInstall:
 
 
 # ---------- helpers ----------
+
+
+def _jdk_executable(home: Path) -> Path:
+    executable = JDK_ARTIFACT.primary_executable
+    if os.name == "nt":
+        executable += ".exe"
+    return home / "bin" / executable
 
 
 def _local_directory(folder: Path, dependency: str) -> Path:
@@ -178,7 +205,8 @@ def _require_executable(path: Path, dependency: str) -> Path:
 def _command_version(command: Path, args: list[str], pattern: str) -> str | None:
     try:
         result = subprocess.run(
-            [str(command), *args], capture_output=True, text=True, timeout=20
+            [str(command), *args], capture_output=True, text=True,
+            timeout=DEPENDENCY_POLICY.command_version_timeout_s,
         )
     except (OSError, subprocess.TimeoutExpired):
         return None
@@ -191,12 +219,14 @@ def _command_version(command: Path, args: list[str], pattern: str) -> str | None
 def _charts_version(cli: Path, *, require_ready: bool = False) -> str | None:
     try:
         result = subprocess.run(
-            [str(cli), "-h"], capture_output=True, text=True, timeout=60
+            [str(cli), "-h"], capture_output=True, text=True,
+            timeout=DEPENDENCY_POLICY.charts_readiness_timeout_s,
         )
     except subprocess.TimeoutExpired as exc:
         if require_ready:
             raise LocalPackageError(
-                f"sbk-charts readiness check timed out after 60s: {cli}"
+                "sbk-charts readiness check timed out after "
+                f"{DEPENDENCY_POLICY.charts_readiness_timeout_s:g}s: {cli}"
             ) from exc
         result = None
     if result is not None:
@@ -220,13 +250,17 @@ def _charts_version(cli: Path, *, require_ready: bool = False) -> str | None:
         return None
     return _command_version(
         python,
-        ["-c", "import importlib.metadata as m; print(m.version('sbk-charts'))"],
+        [
+            "-c",
+            "import importlib.metadata as m; "
+            f"print(m.version('{SBK_CHARTS_ARTIFACT.distribution_name}'))",
+        ],
         r"(\d+(?:\.\d+)+)",
     )
 
 
 def _check_version(name: str, detected: str | None, expected: str, policy: str) -> None:
-    if policy == "ignore":
+    if policy == DEPENDENCY_POLICY.ignore_version_policy:
         return
     if detected == expected:
         return
@@ -234,14 +268,14 @@ def _check_version(name: str, detected: str | None, expected: str, policy: str) 
         f"{name} version mismatch: configured {expected!r}, "
         f"detected {detected or 'unknown'!r}"
     )
-    if policy == "exact":
+    if policy == DEPENDENCY_POLICY.exact_version_policy:
         raise LocalPackageError(message)
     log.warning("%s (policy=warn)", message)
 
 
 def resolve_local_sbk(
     folder: Path, *, require_gem: bool = False, expected_version: str = "",
-    version_policy: str = "warn",
+    version_policy: str = DEPENDENCY_POLICY.default_version_policy,
 ) -> SbkInstall:
     """Resolve a ready-to-run SBK distribution or built source checkout.
 
@@ -253,15 +287,18 @@ def resolve_local_sbk(
     root = _local_directory(folder, "SBK")
     homes = (root, root / "build" / "install" / "sbk")
     for home in homes:
-        sbk_yal = home / "bin" / "sbk-yal"
+        sbk_yal = home / "bin" / SBK_ARTIFACT.primary_executable
         if not sbk_yal.is_file():
             continue
-        sbk_gem_yal = home / "bin" / "sbk-gem-yal"
+        sbk_gem_yal = home / "bin" / SBK_ARTIFACT.additional_executables[0]
         resolved_gem = None
         if sbk_gem_yal.is_file() and os.access(sbk_gem_yal, os.X_OK):
             resolved_gem = sbk_gem_yal
         elif require_gem:
-            _require_executable(sbk_gem_yal, "SBK sbk-gem-yal")
+            _require_executable(
+                sbk_gem_yal,
+                f"SBK {SBK_ARTIFACT.additional_executables[0]}",
+            )
         detected = _command_version(
             sbk_yal, ["-help"], r"SBK(?:-YAL)?\s+Version:\s*([^\s]+)"
         )
@@ -270,11 +307,16 @@ def resolve_local_sbk(
         return SbkInstall(
             home=home,
             source=DependencySource.LOCAL,
-            _sbk_yal=_require_executable(sbk_yal, "SBK sbk-yal"),
+            _sbk_yal=_require_executable(
+                sbk_yal, f"SBK {SBK_ARTIFACT.primary_executable}"
+            ),
             _sbk_gem_yal=resolved_gem,
             detected_version=detected,
         )
-    checked = ", ".join(str(home / "bin" / "sbk-yal") for home in homes)
+    checked = ", ".join(
+        str(home / "bin" / SBK_ARTIFACT.primary_executable)
+        for home in homes
+    )
     raise LocalPackageError(
         "SBK local folder is not a ready-to-run distribution or built "
         f"checkout: {root}; checked: {checked}"
@@ -283,32 +325,42 @@ def resolve_local_sbk(
 
 def resolve_local_sbk_charts(
     folder: Path | None = None, *, executable: Path | None = None,
-    expected_version: str = "", version_policy: str = "warn",
+    expected_version: str = "",
+    version_policy: str = DEPENDENCY_POLICY.default_version_policy,
     preflight: bool = False,
 ) -> ChartsInstall:
     """Resolve a ready-to-run local sbk-charts checkout or environment."""
     if executable is not None:
         cli = executable.expanduser().resolve(strict=True)
-        _require_executable(cli, "sbk-charts")
+        _require_executable(cli, SBK_CHARTS_ARTIFACT.display_name)
         root = cli.parent
         candidates = (cli,)
     elif folder is not None:
-        root = _local_directory(folder, "sbk-charts")
+        root = _local_directory(folder, SBK_CHARTS_ARTIFACT.display_name)
         if os.name == "nt":
-            candidates = (root / "sbk-charts.exe", root / "Scripts" / "sbk-charts.exe")
+            executable = f"{SBK_CHARTS_ARTIFACT.primary_executable}.exe"
+            candidates = (root / executable, root / "Scripts" / executable)
         else:
-            candidates = (root / "sbk-charts", root / "bin" / "sbk-charts")
+            executable = SBK_CHARTS_ARTIFACT.primary_executable
+            candidates = (root / executable, root / "bin" / executable)
     else:
         raise LocalPackageError("sbk-charts local folder or executable is required")
     for cli in candidates:
         if cli.is_file():
             detected = _charts_version(cli, require_ready=preflight)
             if expected_version:
-                _check_version("sbk-charts", detected, expected_version, version_policy)
+                _check_version(
+                    SBK_CHARTS_ARTIFACT.display_name,
+                    detected,
+                    expected_version,
+                    version_policy,
+                )
             return ChartsInstall(
                 venv_dir=root,
                 source=DependencySource.LOCAL,
-                _cli=_require_executable(cli, "sbk-charts"),
+                _cli=_require_executable(
+                    cli, SBK_CHARTS_ARTIFACT.display_name
+                ),
                 _python=Path(sys.executable),
                 detected_version=detected,
             )
@@ -319,12 +371,16 @@ def resolve_local_sbk_charts(
     )
 
 
-def _gh_release(repo: str, tag: str, ssl_verify: bool | str = False) -> dict:
+def _gh_release(
+    repo: str,
+    tag: str,
+    ssl_verify: bool | str = DEPENDENCY_POLICY.default_ssl_verify,
+) -> dict:
     """Fetch release metadata from GitHub for a given tag."""
-    url = f"https://api.github.com/repos/{repo}/releases/tags/{tag}"
+    url = NETWORK_POLICY.github_api_url.format(repo=repo, tag=tag)
     headers = {
         "Accept": "application/vnd.github+json",
-        "X-GitHub-Api-Version": "2022-11-28",
+        "X-GitHub-Api-Version": NETWORK_POLICY.github_api_version,
     }
     token = os.environ.get("GITHUB_TOKEN")
     if token:
@@ -339,7 +395,12 @@ def _gh_release(repo: str, tag: str, ssl_verify: bool | str = False) -> dict:
         log.debug("SSL verification enabled (ssl.verify=true in sbk-config.env)")
     
     log.info("fetching GitHub release metadata: %s@%s", repo, tag)
-    r = requests.get(url, headers=headers, timeout=30, verify=ssl_verify)
+    r = requests.get(
+        url,
+        headers=headers,
+        timeout=NETWORK_POLICY.github_metadata_timeout_s,
+        verify=ssl_verify,
+    )
     if r.status_code == 404:
         raise RuntimeError(f"GitHub release not found: {repo}@{tag}")
     r.raise_for_status()
@@ -347,8 +408,9 @@ def _gh_release(repo: str, tag: str, ssl_verify: bool | str = False) -> dict:
 
 
 def _download(
-    url: str, dest: Path, *, max_attempts: int = 6,
-    ssl_verify: bool | str = False,
+    url: str, dest: Path, *,
+    max_attempts: int = NETWORK_POLICY.artifact_download_attempts,
+    ssl_verify: bool | str = DEPENDENCY_POLICY.default_ssl_verify,
 ) -> str:
     """Download `url` to `dest`, resuming via HTTP Range if .part already exists."""
     dest.parent.mkdir(parents=True, exist_ok=True)
@@ -363,7 +425,13 @@ def _download(
             url, dest, attempt, max_attempts, offset, ssl_verify,
         )
         try:
-            with requests.get(url, stream=True, timeout=120, headers=headers, verify=ssl_verify) as r:
+            with requests.get(
+                url,
+                stream=True,
+                timeout=NETWORK_POLICY.artifact_download_timeout_s,
+                headers=headers,
+                verify=ssl_verify,
+            ) as r:
                 if offset and r.status_code == 200:
                     # server ignored Range; restart from scratch
                     tmp.unlink(missing_ok=True)
@@ -382,14 +450,19 @@ def _download(
                     last_progress_time = time.time()
                     last_progress_size = downloaded
                     
-                    for chunk in r.iter_content(chunk_size=1024 * 1024):
+                    for chunk in r.iter_content(
+                        chunk_size=NETWORK_POLICY.download_chunk_bytes
+                    ):
                         if chunk:
                             f.write(chunk)
                             downloaded += len(chunk)
                             
                             # Show progress every 2 seconds
                             current_time = time.time()
-                            if current_time - last_progress_time >= 2.0:
+                            if (
+                                current_time - last_progress_time
+                                >= NETWORK_POLICY.download_progress_interval_s
+                            ):
                                 if total_size > 0:
                                     percent = (downloaded / total_size) * 100
                                     mb_downloaded = downloaded / (1024 * 1024)
@@ -424,7 +497,12 @@ def _download(
             tmp.replace(dest)
             digest = hashlib.sha256()
             with dest.open("rb") as downloaded_file:
-                for block in iter(lambda: downloaded_file.read(1024 * 1024), b""):
+                for block in iter(
+                    lambda: downloaded_file.read(
+                        NETWORK_POLICY.download_chunk_bytes
+                    ),
+                    b"",
+                ):
                     digest.update(block)
             return digest.hexdigest()
         except (requests.exceptions.SSLError,
@@ -432,7 +510,7 @@ def _download(
                 requests.exceptions.ConnectionError,
                 requests.exceptions.ReadTimeout) as e:
             last_err = e
-            wait = min(2 ** attempt, 30)
+            wait = min(2 ** attempt, NETWORK_POLICY.download_retry_cap_s)
             log.warning(
                 "download interrupted (%s); retrying in %ds (got %d bytes so far)",
                 e.__class__.__name__, wait, tmp.stat().st_size if tmp.exists() else 0,
@@ -521,12 +599,12 @@ def _extract(archive: Path, dest: Path) -> Path:
 
 def ensure_sbk(
     version: str,
-    repo: str = "kmgowda/SBK",
+    repo: str = SBK_ARTIFACT.repository_slug or "",
     downloads_folder: Path | None = None,
-    ssl_verify: bool | str = False,
+    ssl_verify: bool | str = DEPENDENCY_POLICY.default_ssl_verify,
     local_folder: Path | None = None,
     require_gem: bool = False,
-    version_policy: str = "warn",
+    version_policy: str = DEPENDENCY_POLICY.default_version_policy,
 ) -> SbkInstall:
     """Resolve local SBK first, otherwise use/download the pinned release."""
     if local_folder is not None:
@@ -538,7 +616,7 @@ def ensure_sbk(
 
     # Use specified folder if provided, otherwise use cache
     if downloads_folder is None:
-        cache = _cache_root() / "sbk" / version
+        cache = _cache_root() / SBK_ARTIFACT.cache_namespace / version
     else:
         cache = downloads_folder / version
         cache.mkdir(parents=True, exist_ok=True)
@@ -554,15 +632,20 @@ def _ensure_sbk_locked(
     version: str, repo: str, cache: Path, ssl_verify: bool | str,
     require_gem: bool,
 ) -> SbkInstall:
-    marker = cache / ".ok"
-    home_file = cache / ".home"
+    marker = cache / CACHE_POLICY.completion_marker
+    home_file = cache / CACHE_POLICY.home_pointer
 
     if marker.exists() and home_file.exists():
         home = Path(home_file.read_text().strip())
         # Validate that the extracted distribution still has the binaries.
-        has_yal = (home / "bin" / "sbk-yal").exists()
+        has_yal = (
+            home / "bin" / SBK_ARTIFACT.primary_executable
+        ).exists()
         has_required_gem = (
-            not require_gem or (home / "bin" / "sbk-gem-yal").exists()
+            not require_gem
+            or (
+                home / "bin" / SBK_ARTIFACT.additional_executables[0]
+            ).exists()
         )
         if has_yal and has_required_gem:
             log.info("SBK %s already installed at %s (cache hit)", version, home)
@@ -629,9 +712,9 @@ def _ensure_sbk_locked(
 
     # Find the directory that actually contains bin/sbk-yal
     home = top
-    if not (home / "bin" / "sbk-yal").exists():
+    if not (home / "bin" / SBK_ARTIFACT.primary_executable).exists():
         for sub in home.rglob("bin"):
-            if (sub / "sbk-yal").exists():
+            if (sub / SBK_ARTIFACT.primary_executable).exists():
                 home = sub.parent
                 break
 
@@ -644,21 +727,27 @@ def _ensure_sbk_locked(
             except OSError:
                 pass
 
-    _require_executable(home / "bin" / "sbk-yal", "downloaded SBK sbk-yal")
+    _require_executable(
+        home / "bin" / SBK_ARTIFACT.primary_executable,
+        f"downloaded SBK {SBK_ARTIFACT.primary_executable}",
+    )
     if require_gem:
         _require_executable(
-            home / "bin" / "sbk-gem-yal",
-            "downloaded SBK sbk-gem-yal",
+            home / "bin" / SBK_ARTIFACT.additional_executables[0],
+            f"downloaded SBK {SBK_ARTIFACT.additional_executables[0]}",
         )
 
     relative_home = home.relative_to(stage)
     final_home = cache / relative_home
-    (stage / ".home").write_text(str(final_home.resolve()))
+    (stage / CACHE_POLICY.home_pointer).write_text(str(final_home.resolve()))
     _write_metadata(
-        stage / "metadata.json", dependency="sbk", version=version,
+        stage / CACHE_POLICY.metadata_filename,
+        dependency=SBK_ARTIFACT.key, version=version,
         source_url=url, asset=asset["name"], sha256=checksum,
-        executables={"sbk-yal": str(final_home / "bin" / "sbk-yal"),
-                     "sbk-gem-yal": str(final_home / "bin" / "sbk-gem-yal")},
+        executables={
+            executable: str(final_home / "bin" / executable)
+            for executable in SBK_ARTIFACT.executables
+        },
     )
     # Free disk: the ~1+ GB archive is no longer needed once extracted.
     try:
@@ -667,7 +756,7 @@ def _ensure_sbk_locked(
         log.debug("could not remove archive %s: %s", archive, e)
     # Completion is written inside the staging directory and the entire
     # installation is then atomically published under the version path.
-    (stage / ".ok").touch()
+    (stage / CACHE_POLICY.completion_marker).touch()
     if cache.exists():
         shutil.rmtree(cache)
     stage.replace(cache)
@@ -680,12 +769,12 @@ def _ensure_sbk_locked(
 
 def ensure_sbk_charts(
     version: str,
-    repo_url: str = "https://github.com/kmgowda/sbk-charts",
+    repo_url: str = SBK_CHARTS_ARTIFACT.repository_url,
     downloads_folder: Path | None = None,
-    ssl_verify: bool | str = False,
+    ssl_verify: bool | str = DEPENDENCY_POLICY.default_ssl_verify,
     local_folder: Path | None = None,
     local_executable: Path | None = None,
-    version_policy: str = "warn",
+    version_policy: str = DEPENDENCY_POLICY.default_version_policy,
     preflight: bool = False,
 ) -> ChartsInstall:
     """Resolve local sbk-charts first, otherwise use conda/cache/download."""
@@ -712,7 +801,9 @@ def ensure_sbk_charts(
         try:
             import importlib.metadata
             try:
-                installed_version = importlib.metadata.version("sbk-charts")
+                installed_version = importlib.metadata.version(
+                    SBK_CHARTS_ARTIFACT.distribution_name
+                )
                 already_installed = True
                 log.info("sbk-charts already installed in conda environment")
             except importlib.metadata.PackageNotFoundError:
@@ -721,7 +812,9 @@ def ensure_sbk_charts(
             # Python < 3.8, use pkg_resources
             try:
                 import pkg_resources
-                pkg_resources.get_distribution("sbk-charts")
+                pkg_resources.get_distribution(
+                    SBK_CHARTS_ARTIFACT.distribution_name
+                )
                 already_installed = True
                 log.info("sbk-charts already installed in conda environment")
             except pkg_resources.DistributionNotFound:
@@ -732,9 +825,9 @@ def ensure_sbk_charts(
                 f"conda sbk-charts version mismatch: configured {version!r}, "
                 f"installed {installed_version!r}"
             )
-            if version_policy == "exact":
+            if version_policy == DEPENDENCY_POLICY.exact_version_policy:
                 raise DependencyResolutionError(message)
-            if version_policy == "warn":
+            if version_policy == DEPENDENCY_POLICY.warn_version_policy:
                 log.warning(message)
         if already_installed:
             return ChartsInstall(
@@ -758,13 +851,7 @@ def ensure_sbk_charts(
         ]
         
         if not ssl_verify:
-            pip_args.extend([
-                "--trusted-host", "github.com",
-                "--trusted-host", "pypi.org",
-                "--trusted-host", "files.pythonhosted.org",
-                "--trusted-host", "pypi.python.org",
-                "--trusted-host", "raw.githubusercontent.com",
-            ])
+            pip_args.extend(_pip_trusted_host_args())
             # Also set environment variables for git
             pip_env["GIT_SSL_NO_VERIFY"] = "1"
             log.warning("SSL verification DISABLED for pip (ssl.verify=false in sbk-config.env)")
@@ -787,9 +874,9 @@ def ensure_sbk_charts(
     
     # Use downloads_folder for caching if provided, otherwise use cache
     if downloads_folder is None:
-        cache = _cache_root() / "sbk-charts" / version
+        cache = _cache_root() / SBK_CHARTS_ARTIFACT.cache_namespace / version
     else:
-        cache = downloads_folder / "sbk-charts" / version
+        cache = downloads_folder / SBK_CHARTS_ARTIFACT.cache_namespace / version
         cache.mkdir(parents=True, exist_ok=True)
     
     cache.parent.mkdir(parents=True, exist_ok=True)
@@ -803,7 +890,7 @@ def _ensure_sbk_charts_locked(
     version: str, repo_url: str, cache: Path, ssl_verify: bool | str,
 ) -> ChartsInstall:
     venv_dir = cache / "venv"
-    marker = cache / ".ok"
+    marker = cache / CACHE_POLICY.completion_marker
 
     install = ChartsInstall(
         venv_dir=venv_dir, source=DependencySource.MANAGED_CACHE
@@ -849,13 +936,7 @@ def _ensure_sbk_charts_locked(
     ]
     
     if not ssl_verify:
-        pip_args.extend([
-            "--trusted-host", "github.com",
-            "--trusted-host", "pypi.org",
-            "--trusted-host", "files.pythonhosted.org",
-            "--trusted-host", "pypi.python.org",
-            "--trusted-host", "raw.githubusercontent.com",
-        ])
+        pip_args.extend(_pip_trusted_host_args())
         # Also set environment variables for git
         pip_env["GIT_SSL_NO_VERIFY"] = "1"
         log.warning("SSL verification DISABLED for pip (ssl.verify=false in sbk-config.env)")
@@ -900,10 +981,11 @@ def _ensure_sbk_charts_locked(
     final_cli = cache / relative_cli
     final_python = cache / relative_python
     _write_metadata(
-        stage / "metadata.json", dependency="sbk-charts", version=version,
+        stage / CACHE_POLICY.metadata_filename,
+        dependency=SBK_CHARTS_ARTIFACT.key, version=version,
         source_url=repo_url, executable=str(final_cli), spec=spec,
     )
-    (stage / ".ok").touch()
+    (stage / CACHE_POLICY.completion_marker).touch()
     if cache.exists():
         shutil.rmtree(cache)
     stage.replace(cache)
@@ -918,13 +1000,6 @@ def _ensure_sbk_charts_locked(
 
 # ---------- JDK (Adoptium / Temurin) ----------
 
-DEFAULT_JDK_VERSION = "25"
-ADOPTIUM_BINARY_URL = (
-    "https://api.adoptium.net/v3/binary/latest/{version}/ga/"
-    "{os}/{arch}/jdk/hotspot/normal/eclipse"
-)
-
-
 _JDK_VERSION_RE = re.compile(r'(?:openjdk|java)\s+version\s+"([^"]+)"')
 
 
@@ -938,7 +1013,8 @@ def _java_major_version(java_path: Path) -> int | None:
     try:
         proc = subprocess.run(
             [str(java_path), "-version"],
-            capture_output=True, text=True, timeout=10,
+            capture_output=True, text=True,
+            timeout=DEPENDENCY_POLICY.java_version_timeout_s,
         )
     except (OSError, subprocess.TimeoutExpired) as e:
         log.debug("java -version failed for %s: %s", java_path, e)
@@ -990,7 +1066,7 @@ def _candidate_jdk_homes() -> list[Path]:
 
     # 3. java on PATH -> derive home as the parent of <home>/bin/java.
     from shutil import which
-    java = which("java")
+    java = which(JDK_ARTIFACT.primary_executable)
     if java:
         jp = Path(java)
         if jp.parent.name == "bin":
@@ -1007,9 +1083,7 @@ def find_existing_jdk(required_major: int) -> Path | None:
     then ``java`` on ``PATH``.
     """
     for home in _candidate_jdk_homes():
-        java = home / "bin" / "java"
-        if os.name == "nt":
-            java = home / "bin" / "java.exe"
+        java = _jdk_executable(home)
         if not java.exists():
             log.debug("skipping JDK candidate %s: no bin/java", home)
             continue
@@ -1035,12 +1109,18 @@ def _jdk_url(version: str) -> str:
         "darwin": "mac",
         "win32": "windows",
     }.get(sys.platform, sys.platform)
-    return ADOPTIUM_BINARY_URL.format(version=version, os=os_name, arch=arch)
+    template = JDK_ARTIFACT.download_url_template
+    if template is None:
+        raise RuntimeError("JDK artifact download URL template is not configured")
+    return template.format(
+        version=version, os=os_name, arch=arch
+    )
 
 
 def ensure_jdk(
-    version: str = DEFAULT_JDK_VERSION, jdk_folder: Path | None = None,
-    ssl_verify: bool | str = False,
+    version: str = DEPENDENCY_POLICY.default_jdk_version,
+    jdk_folder: Path | None = None,
+    ssl_verify: bool | str = DEPENDENCY_POLICY.default_ssl_verify,
 ) -> JdkInstall:
     """Ensure a JDK of the given major version is available.
 
@@ -1062,22 +1142,20 @@ def ensure_jdk(
 
     # Use specified folder if provided, otherwise use cache
     if jdk_folder is None:
-        cache = _cache_root() / "jdk" / version
+        cache = _cache_root() / JDK_ARTIFACT.cache_namespace / version
     else:
         cache = jdk_folder / version
         cache.mkdir(parents=True, exist_ok=True)
     
-    marker = cache / ".ok"
-    home_file = cache / ".home"
+    marker = cache / CACHE_POLICY.completion_marker
+    home_file = cache / CACHE_POLICY.home_pointer
 
     # Helper function to check if a Java installation matches the required version
     def _check_java_home(java_home: Path) -> bool:
         """Check if java_home contains a JDK matching the required version."""
         if not java_home:
             return False
-        java_path = java_home / "bin" / "java"
-        if os.name == "nt":
-            java_path = java_home / "bin" / "java.exe"
+        java_path = _jdk_executable(java_home)
         if not java_path.exists():
             log.debug("Java home %s does not contain bin/java", java_home)
             return False
@@ -1109,7 +1187,7 @@ def ensure_jdk(
 
     # 3. Check java on PATH (third priority)
     from shutil import which
-    java_exe = which("java")
+    java_exe = which(JDK_ARTIFACT.primary_executable)
     if java_exe:
         log.info("Checking java on PATH: %s", java_exe)
         java_path = Path(java_exe)
@@ -1177,24 +1255,26 @@ def _install_jdk_locked(
 
     # locate the actual JDK home (folder containing bin/java)
     home = top
-    if not (home / "bin" / "java").exists():
+    if not _jdk_executable(home).exists():
         for sub in home.rglob("bin"):
-            if (sub / "java").exists():
+            candidate = sub / _jdk_executable(home).name
+            if candidate.exists():
                 home = sub.parent
                 break
 
-    if not (home / "bin" / "java").exists():
+    if not _jdk_executable(home).exists():
         raise RuntimeError(
             f"extracted JDK does not contain bin/java under {extract_dir}"
         )
 
     relative_home = home.relative_to(stage)
     final_home = cache / relative_home
-    (stage / ".home").write_text(str(final_home.resolve()))
+    (stage / CACHE_POLICY.home_pointer).write_text(str(final_home.resolve()))
     _write_metadata(
-        stage / "metadata.json", dependency="jdk", version=version,
+        stage / CACHE_POLICY.metadata_filename,
+        dependency=JDK_ARTIFACT.key, version=version,
         source_url=url, sha256=checksum,
-        executable=str(final_home / "bin" / "java"),
+        executable=str(_jdk_executable(final_home)),
     )
     try:
         archive.unlink()
@@ -1202,7 +1282,7 @@ def _install_jdk_locked(
         log.debug("could not remove archive %s: %s", archive, e)
     
     # Set SBK_JAVA_HOME to point to this JDK (not JAVA_HOME)
-    (stage / ".ok").touch()
+    (stage / CACHE_POLICY.completion_marker).touch()
     if cache.exists():
         shutil.rmtree(cache)
     stage.replace(cache)

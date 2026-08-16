@@ -16,16 +16,91 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Continue"
 $CliArgs = [string[]] @($args)
 
-$MinimumPythonMajor = 3
-$MinimumPythonMinor = 9
 $SourceRoot = $PSScriptRoot
+$BootstrapPolicyPath = Join-Path $SourceRoot "sbk-bootstrap.env"
+function Stop-BootstrapPolicy {
+    param(
+        [string] $Name,
+        [string] $Reason
+    )
+    [Console]::Error.WriteLine(
+        "[sbk-analytics] ERROR: invalid bootstrap policy ${Name}: $Reason"
+    )
+    exit 1
+}
+if (-not (Test-Path -LiteralPath $BootstrapPolicyPath -PathType Leaf)) {
+    [Console]::Error.WriteLine(
+        "[sbk-analytics] ERROR: bootstrap policy is missing: $BootstrapPolicyPath"
+    )
+    exit 1
+}
+$BootstrapPolicy = @{}
+foreach ($line in Get-Content -LiteralPath $BootstrapPolicyPath) {
+    $trimmed = $line.Trim()
+    if (-not $trimmed -or $trimmed.StartsWith("#")) {
+        continue
+    }
+    $parts = $trimmed.Split("=", 2)
+    if ($parts.Count -ne 2) {
+        Stop-BootstrapPolicy "line" "expected KEY=VALUE, got '$line'"
+    }
+    $BootstrapPolicy[$parts[0].Trim()] = $parts[1].Trim()
+}
+function Get-BootstrapPolicyValue {
+    param([string] $Name)
+    if (-not $BootstrapPolicy.ContainsKey($Name)) {
+        Stop-BootstrapPolicy $Name "required key is missing"
+    }
+    $value = [string] $BootstrapPolicy[$Name]
+    if ([string]::IsNullOrWhiteSpace($value)) {
+        Stop-BootstrapPolicy $Name "value must not be empty"
+    }
+    return $value
+}
+function Assert-BootstrapPolicyInteger {
+    param([string] $Name, [string] $Value)
+    if ($Value -notmatch '^\d+$') {
+        Stop-BootstrapPolicy $Name "expected a non-negative integer"
+    }
+}
+function Assert-BootstrapPolicyVersion {
+    param([string] $Name, [string] $Value)
+    if ($Value -notmatch '^\d+(\.\d+)+$') {
+        Stop-BootstrapPolicy $Name "expected a dotted numeric version"
+    }
+}
+function Assert-BootstrapPolicyLeafName {
+    param([string] $Name, [string] $Value)
+    if ($Value -eq "." -or $Value -eq ".." -or $Value -match '[\\/]') {
+        Stop-BootstrapPolicy $Name `
+            "expected a non-empty filename without path separators"
+    }
+}
+$MinimumPythonMajorText = Get-BootstrapPolicyValue `
+    "SBK_ANALYTICS_MIN_PYTHON_MAJOR"
+$MinimumPythonMinorText = Get-BootstrapPolicyValue `
+    "SBK_ANALYTICS_MIN_PYTHON_MINOR"
+$CondaPythonVersion = Get-BootstrapPolicyValue "SBK_ANALYTICS_CONDA_PYTHON"
+$ManagedVenvFolder = Get-BootstrapPolicyValue "SBK_ANALYTICS_VENV_FOLDER"
+$ManagedCondaFolder = Get-BootstrapPolicyValue "SBK_ANALYTICS_CONDA_FOLDER"
+$BootstrapMarker = Get-BootstrapPolicyValue "SBK_ANALYTICS_BOOTSTRAP_MARKER"
+Assert-BootstrapPolicyInteger "SBK_ANALYTICS_MIN_PYTHON_MAJOR" `
+    $MinimumPythonMajorText
+Assert-BootstrapPolicyInteger "SBK_ANALYTICS_MIN_PYTHON_MINOR" `
+    $MinimumPythonMinorText
+Assert-BootstrapPolicyVersion "SBK_ANALYTICS_CONDA_PYTHON" $CondaPythonVersion
+Assert-BootstrapPolicyLeafName "SBK_ANALYTICS_VENV_FOLDER" $ManagedVenvFolder
+Assert-BootstrapPolicyLeafName "SBK_ANALYTICS_CONDA_FOLDER" $ManagedCondaFolder
+Assert-BootstrapPolicyLeafName "SBK_ANALYTICS_BOOTSTRAP_MARKER" $BootstrapMarker
+$MinimumPythonMajor = [int] $MinimumPythonMajorText
+$MinimumPythonMinor = [int] $MinimumPythonMinorText
 $EnvironmentHome = if ($env:SBK_ANALYTICS_ENV_HOME) {
     [IO.Path]::GetFullPath($env:SBK_ANALYTICS_ENV_HOME)
 } else {
     $SourceRoot
 }
-$ManagedVenv = Join-Path $EnvironmentHome ".venv"
-$ManagedConda = Join-Path $EnvironmentHome ".conda"
+$ManagedVenv = Join-Path $EnvironmentHome $ManagedVenvFolder
+$ManagedConda = Join-Path $EnvironmentHome $ManagedCondaFolder
 
 function Write-LauncherLog {
     param([string] $Message)
@@ -134,6 +209,7 @@ function Get-EnvironmentFingerprint {
             "pyproject.toml",
             "requirements.txt",
             "environment.yml",
+            "sbk-bootstrap.env",
             "sbk-analytics",
             "sbk-analytics.ps1"
         )) {
@@ -158,7 +234,7 @@ function Test-EnvironmentReady {
         [string] $Python,
         [string] $EnvironmentRoot
     )
-    $marker = Join-Path $EnvironmentRoot ".sbk-analytics-bootstrap"
+    $marker = Join-Path $EnvironmentRoot $BootstrapMarker
     $fingerprint = Get-EnvironmentFingerprint $Python
     if (-not $fingerprint -or -not (Test-Path -LiteralPath $marker -PathType Leaf)) {
         return $false
@@ -208,7 +284,7 @@ function Initialize-Environment {
         return $false
     }
     try {
-        Set-Content -LiteralPath (Join-Path $EnvironmentRoot ".sbk-analytics-bootstrap") `
+        Set-Content -LiteralPath (Join-Path $EnvironmentRoot $BootstrapMarker) `
             -Value $fingerprint -Encoding ASCII -ErrorAction Stop
     } catch {
         Write-LauncherLog "could not record environment state: $($_.Exception.Message)"
@@ -295,7 +371,8 @@ function New-ManagedConda {
     $python = Join-Path $ManagedConda "python.exe"
     if (-not (Test-SupportedPython $python)) {
         Write-LauncherLog "creating fallback Conda environment: $ManagedConda"
-        & $conda create --yes --prefix $ManagedConda python=3.10 pip |
+        & $conda create --yes --prefix $ManagedConda `
+            "python=$CondaPythonVersion" pip |
             ForEach-Object { [Console]::Error.WriteLine($_) }
         $condaExitCode = $LASTEXITCODE
         if ($condaExitCode -ne 0) {
@@ -337,6 +414,9 @@ if ($systemPython) {
 [void] (New-ManagedConda)
 
 if (-not $systemPython -and -not (Resolve-Executable "conda")) {
-    Stop-Launcher "Python 3.9 or newer is required, and Conda is not available to provide it"
+    Stop-Launcher (
+        "Python $MinimumPythonMajor.$MinimumPythonMinor or newer is required, " +
+        "and Conda is not available to provide it"
+    )
 }
 Stop-Launcher "could not create a working venv or Conda environment; check the installation errors above"

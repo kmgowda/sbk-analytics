@@ -69,10 +69,10 @@ from typing import Any
 
 import yaml
 
+from .policy import RUNTIME_POLICY
 
-VALID_MODES = ("serial", "parallel")
-VALID_AI = ("huggingface", "ollama", "lmstudio", "noai")
-VALID_CLEANUP = ("never", "on-success")
+
+CONFIGURATION_POLICY = RUNTIME_POLICY.configuration
 
 
 @dataclass
@@ -88,17 +88,14 @@ class Instance:
         return _has_value(self.params.get("nodes"))
 
 
-DEFAULT_WORKDIR = "/tmp/sbk-analytics"
-
-
 @dataclass
 class OrchestratorConfig:
-    mode: str = "serial"
-    workdir: str = DEFAULT_WORKDIR
+    mode: str = CONFIGURATION_POLICY.default_mode
+    workdir: str = CONFIGURATION_POLICY.default_workdir
     sbk_params: dict[str, Any] = field(default_factory=dict)
     instances: list[Instance] = field(default_factory=list)
-    output: str = "sbk-analytics.xlsx"
-    ai_model: str = "noai"
+    output: str = CONFIGURATION_POLICY.default_output
+    ai_model: str = CONFIGURATION_POLICY.default_ai_model
     ai_params: dict[str, Any] = field(default_factory=dict)
     chat: bool = False
     # Additional CSV files supplied by the user (already-available benchmark
@@ -107,7 +104,7 @@ class OrchestratorConfig:
     use_files: list[str] = field(default_factory=list)
     # Deliberately narrow: on-success cleanup handles only class=file data
     # selected by file/fname, and cli.py enforces workdir containment.
-    cleanup: str = "never"
+    cleanup: str = CONFIGURATION_POLICY.default_cleanup
 
     @property
     def uses_gem(self) -> bool:
@@ -133,9 +130,9 @@ def _parse_bool(value: Any, field_name: str) -> bool:
         return bool(value)
     if isinstance(value, str):
         normalised = value.strip().lower()
-        if normalised in ("true", "yes", "on", "1"):
+        if normalised in CONFIGURATION_POLICY.true_tokens:
             return True
-        if normalised in ("false", "no", "off", "0"):
+        if normalised in CONFIGURATION_POLICY.false_tokens:
             return False
     raise ValueError(
         f"'{field_name}' must be a boolean "
@@ -156,16 +153,28 @@ def load_config(path: str | Path) -> OrchestratorConfig:
     if not isinstance(raw, dict):
         raise ValueError(f"{p}: expected top-level mapping, got {type(raw).__name__}")
 
-    mode = str(_first(raw, "mode", default="serial")).strip().lower() or "serial"
-    if mode not in VALID_MODES:
-        raise ValueError(f"mode must be one of {VALID_MODES}, got {mode!r}")
+    mode = str(
+        _first(raw, "mode", default=CONFIGURATION_POLICY.default_mode)
+    ).strip().lower() or CONFIGURATION_POLICY.default_mode
+    if mode not in CONFIGURATION_POLICY.valid_modes:
+        raise ValueError(
+            f"mode must be one of {CONFIGURATION_POLICY.valid_modes}, got {mode!r}"
+        )
 
     workdir = str(
-        _first(raw, "workdir", "work_dir", "work-dir", default=DEFAULT_WORKDIR)
-    ).strip() or DEFAULT_WORKDIR
-    cleanup = str(_first(raw, "cleanup", default="never")).strip().lower()
-    if cleanup not in VALID_CLEANUP:
-        raise ValueError(f"cleanup must be one of {VALID_CLEANUP}, got {cleanup!r}")
+        _first(
+            raw, "workdir", "work_dir", "work-dir",
+            default=CONFIGURATION_POLICY.default_workdir,
+        )
+    ).strip() or CONFIGURATION_POLICY.default_workdir
+    cleanup = str(
+        _first(raw, "cleanup", default=CONFIGURATION_POLICY.default_cleanup)
+    ).strip().lower()
+    if cleanup not in CONFIGURATION_POLICY.valid_cleanup:
+        raise ValueError(
+            f"cleanup must be one of {CONFIGURATION_POLICY.valid_cleanup}, "
+            f"got {cleanup!r}"
+        )
 
     sbk_params = _first(raw, "sbk", "sbk_params", "sbk-params", default={}) or {}
     if not isinstance(sbk_params, dict):
@@ -257,14 +266,20 @@ def _parse_sbk_charts_group(
 
     output = str(
         _first(group, "output", "ofile", "output_excel", "excel",
-               default="sbk-analytics.xlsx")
+               default=CONFIGURATION_POLICY.default_output)
     )
 
     ai_model = str(
-        _first(group, "ai_model", "ai-model", "ai", default="noai")
+        _first(
+            group, "ai_model", "ai-model", "ai",
+            default=CONFIGURATION_POLICY.default_ai_model,
+        )
     ).strip().lower()
-    if ai_model not in VALID_AI:
-        raise ValueError(f"sbk-charts.ai_model must be one of {VALID_AI}, got {ai_model!r}")
+    if ai_model not in CONFIGURATION_POLICY.valid_ai_models:
+        raise ValueError(
+            "sbk-charts.ai_model must be one of "
+            f"{CONFIGURATION_POLICY.valid_ai_models}, got {ai_model!r}"
+        )
 
     ai_params = _first(group, "ai_params", "ai-params", "ai_model_params", default={}) or {}
     if not isinstance(ai_params, dict):

@@ -4,6 +4,10 @@ include requirements.txt
 include pyproject.toml
 include environment.yml
 include sbk-config.env
+include sbk-bootstrap.env
+include sbk-analytics
+include sbk-analytics.sh
+include sbk-analytics.ps1
 recursive-include analytics *.py
 recursive-include analytics *.txt
 recursive-include analytics *.md

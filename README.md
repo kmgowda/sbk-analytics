@@ -96,7 +96,9 @@ follow this order:
    Python 3.10 and install this checkout.
 
 The environment is bootstrapped again only when the project dependency files
-or launcher change. Installer output and launcher status go to stderr, so
+or launcher/bootstrap policy change. Shared launcher defaults such as minimum
+Python, fallback Conda Python, environment folders, and marker name live in
+`sbk-bootstrap.env`. Installer output and launcher status go to stderr, so
 the launchers keep `--json` stdout machine-readable. Bash uses `exec` for the
 final process; PowerShell waits for Python and returns its exit code.
 
@@ -114,6 +116,13 @@ The bootstrap fingerprint includes the absolute checkout path and the selected
 environment's Python identity and version information. Moving the checkout or
 replacing/upgrading its environment interpreter therefore causes one
 intentional editable reinstall on the next launch.
+
+Runtime policy and artifact metadata are centralized in
+`analytics/policy.py`. This is the canonical source for dependency identities,
+repository defaults, managed-cache filenames, network/retry limits, process
+grace periods, benchmark watchdog timing, SSH behavior, configuration defaults,
+and application exit codes. Release version pins remain in `sbk-config.env` so
+operators can update them without changing Python code.
 
 ### For macOS/Linux (Recommended with Conda)
 ```bash
@@ -223,7 +232,12 @@ orchestrates need a working runtime on the host:
 | `git`     | any        | Used by `pip` when installing a configured remote sbk-charts tag. Not needed for a ready-to-run local sbk-charts checkout. |
 | Internet access | conditional | Needed for dependencies that are neither configured locally nor already cached. |
 
-TLS verification defaults to `false`, as shown in the bundled configuration:
+### Security compatibility defaults
+
+TLS verification defaults to `false`, as shown in the bundled configuration.
+This compatibility default is intended for isolated benchmark labs and private
+artifact infrastructure; it trusts the configured network and must not be
+treated as a secure Internet-facing default:
 
 ```ini
 # sbk-config.env
@@ -234,6 +248,12 @@ This disables SSL verification for:
 - GitHub API calls (release metadata)
 - SBK/JDK downloads via requests
 - pip git-based installations of sbk-charts
+
+When TLS verification is disabled, dependency resolution also supplies the centralized
+trusted-host list to pip. Remote SBK-GEM cleanup and system-information probes
+likewise disable SSH host-key checking and use the operating system's null
+known-hosts file. Use those SSH features only with dedicated, trusted benchmark
+nodes unless the centralized SSH policy is hardened for your environment.
 
 For stricter environments, set `ssl.verify=true`. A private trust root can be
 selected with `ssl.ca.bundle=/path/to/company-ca.pem`. Invalid boolean values
@@ -689,7 +709,7 @@ Recognised keys (case-insensitive; dots / underscores / dashes interchangeable):
 | `downloads.folder` | no (defaults to `./.sbk`) | Shared local folder for downloaded SBK and sbk-charts installations. Use `./.sbk` for a project-local cache. |
 | `sbk.jdk.version`| no (defaults to `25`) | Required JDK major version. |
 | `sbk.jdk.folder`| no (defaults to `./.jdk`) | Local folder for JDK installation. Use `./.jdk` for project-local cache. |
-| `ssl.verify`     | no (defaults to `true`) | Enable SSL verification for downloads. |
+| `ssl.verify`     | no (defaults to `false`) | Enable SSL verification for downloads. Set to `true` outside trusted benchmark networks. |
 | `sbk-charts.url` | no (defaults to `https://github.com/kmgowda/sbk-charts`) | Same format as `sbk.url`. |
 | `sbk-charts.version` | yes | Tag on the sbk-charts repository. |
 | `sbk-charts.local.folder` | no | Ready-to-run sbk-charts checkout or environment. Takes priority over conda, cache, and URL. |
@@ -1067,6 +1087,7 @@ into those folders.
 ```
 sbk-analytics/
 ├── sbk-config.env            # bundled SBK / sbk-charts release pins
+├── sbk-bootstrap.env         # shared Bash/PowerShell bootstrap policy
 ├── sbk-analytics             # unified cross-platform application
 ├── sbk-analytics.sh          # self-bootstrapping Linux/macOS launcher
 ├── sbk-analytics.ps1         # self-bootstrapping Windows launcher
@@ -1078,6 +1099,7 @@ sbk-analytics/
 │   └── file-rocksdb-write.yml      # 120s file + rocksdb single-writer example
 └── analytics/
     ├── cli.py                # argument parsing + orchestration
+    ├── policy.py             # runtime policy + artifact metadata
     ├── properties.py         # sbk-config.env parser
     ├── config.py             # input YAML parser (sbk, classes, sbk-charts)
     ├── releases.py           # GitHub release download + cached install

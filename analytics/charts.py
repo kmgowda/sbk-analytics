@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from .config import OrchestratorConfig
+from .policy import SBK_CHARTS_ARTIFACT
 from .processes import managed_popen, terminate_process
 from .releases import ChartsInstall
 
@@ -43,11 +44,11 @@ def _prepare_cwd(work_dir: Path) -> Path:
     work around this by running sbk-charts in a dedicated cwd containing a
     stub banner file.
     """
-    cwd = work_dir / "sbk-charts-cwd"
+    cwd = work_dir / f"{SBK_CHARTS_ARTIFACT.cache_namespace}-cwd"
     (cwd / "src" / "main").mkdir(parents=True, exist_ok=True)
     banner = cwd / "src" / "main" / "banner.txt"
     if not banner.exists():
-        banner.write_text("sbk-charts\n")
+        banner.write_text(f"{SBK_CHARTS_ARTIFACT.display_name}\n")
     return cwd
 
 

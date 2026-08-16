@@ -21,6 +21,7 @@ from pathlib import Path
 
 import yaml
 
+from .policy import RUNTIME_POLICY, SBK_ARTIFACT
 from .processes import (
     ManagedProcess,
     managed_popen,
@@ -29,12 +30,15 @@ from .processes import (
 )
 
 log = logging.getLogger(__name__)
+BENCHMARK_POLICY = RUNTIME_POLICY.benchmarks
+SSH_POLICY = RUNTIME_POLICY.ssh
 
 PARALLEL_WARNING = (
     "WARNING: parallel mode is experimental. Multiple SBK instances will run "
     "concurrently against potentially shared storage backends, which may distort "
     "benchmark results. Per-instance stdout/stderr is captured to log files; only "
-    "a progress heartbeat is printed every 5 seconds."
+    "a progress heartbeat is printed every "
+    f"{BENCHMARK_POLICY.heartbeat_interval_s:g} seconds."
 )
 
 
@@ -68,8 +72,11 @@ def _kill_grace_for(yml_path: Path) -> tuple[int, int]:
     """Return ``(remote_grace, local_grace)`` for the YAML's mode."""
     _, is_gem = _read_yml(yml_path)
     if is_gem:
-        return int(REMOTE_KILL_GRACE_S), int(LOCAL_KILL_GRACE_S)
-    return 0, int(LOCAL_KILL_GRACE_S)
+        return (
+            int(BENCHMARK_POLICY.remote_kill_grace_s),
+            int(BENCHMARK_POLICY.local_kill_grace_s),
+        )
+    return 0, int(BENCHMARK_POLICY.local_kill_grace_s)
 
 
 def _print_sbk_banner(
@@ -87,20 +94,26 @@ def _print_sbk_banner(
     log_path: Path | None = None,
 ) -> None:
     """Print a human-readable banner with the full SBK invocation details."""
-    binary = "sbk-gem-yal" if is_gem else "sbk-yal"
+    binary = (
+        SBK_ARTIFACT.additional_executables[0]
+        if is_gem else SBK_ARTIFACT.primary_executable
+    )
     params, _ = _read_yml(yml_path)
     if expected_seconds is None:
         timeout_desc = "no timeout (records-bounded / open-ended)"
     elif is_gem:
         timeout_desc = (
-            f"remote kill at +{int(REMOTE_KILL_GRACE_S)}s, "
-            f"local kill at +{int(LOCAL_KILL_GRACE_S)}s "
-            f"(deadline {expected_seconds + int(LOCAL_KILL_GRACE_S)}s)"
+            f"remote kill at +{int(BENCHMARK_POLICY.remote_kill_grace_s)}s, "
+            f"local kill at +{int(BENCHMARK_POLICY.local_kill_grace_s)}s "
+            "(deadline "
+            f"{expected_seconds + int(BENCHMARK_POLICY.local_kill_grace_s)}s)"
         )
     else:
         timeout_desc = (
-            f"kill at seconds + {int(LOCAL_KILL_GRACE_S)}s "
-            f"(deadline {expected_seconds + int(LOCAL_KILL_GRACE_S)}s)"
+            "kill at seconds + "
+            f"{int(BENCHMARK_POLICY.local_kill_grace_s)}s "
+            "(deadline "
+            f"{expected_seconds + int(BENCHMARK_POLICY.local_kill_grace_s)}s)"
         )
 
     mode_tag = "serial" if serial else "parallel"
@@ -178,18 +191,10 @@ def _expected_seconds(yml_path: Path) -> int | None:
 
 # ---- Kill grace ----------------------------------------------------------
 #
-# Both sbk-yal and sbk-gem-yal use the same total ``seconds + 15`` window
-# before sbk-analytics force-kills the local SBK process. For sbk-gem-yal we
-# additionally fire an SSH ``pkill`` against every node 5 seconds earlier
-# (``seconds + 10``) so the remote sbk clients are killed first; the local
-# sbk-gem-yal then has 5 seconds to notice and shut down cleanly before we
-# kill it too.
-
-# When to kill remote sbk clients spawned by sbk-gem-yal (gem mode only).
-REMOTE_KILL_GRACE_S = 10.0
-# When to kill the local sbk-yal / sbk-gem-yal process (both modes).
-LOCAL_KILL_GRACE_S = 15.0
-
+# Both executables use the benchmark policy's local grace window before
+# sbk-analytics force-kills the local process. GEM additionally runs remote
+# cleanup at the earlier remote grace deadline, leaving the configured gap
+# for the local wrapper to notice and shut down cleanly.
 
 # ---- Remote SBK kill (sbk-gem-yal only) ---------------------------------
 
@@ -201,7 +206,7 @@ def _remote_kill_pattern() -> str:
     remote sbk clients. Restricted to Java processes whose command line
     mentions ``io.sbk.main.`` so we don't kill unrelated programs.
     """
-    return "io.sbk.main"
+    return BENCHMARK_POLICY.remote_process_pattern
 
 
 def _kill_remote_sbk_clients(yml_path: Path) -> None:
@@ -236,9 +241,9 @@ def _kill_remote_sbk_clients(yml_path: Path) -> None:
     user = str(params.get("gemuser", "")).strip()
     password = str(params.get("gempass", "")).strip()
     try:
-        port = int(params.get("gemport", 22))
+        port = int(params.get("gemport", SSH_POLICY.default_port))
     except (TypeError, ValueError):
-        port = 22
+        port = SSH_POLICY.default_port
 
     have_sshpass = bool(password) and _which("sshpass") is not None
     if password and not have_sshpass:
@@ -262,7 +267,7 @@ def _kill_remote_sbk_clients(yml_path: Path) -> None:
         t.start()
         threads.append(t)
     for t in threads:
-        t.join(timeout=15)
+        t.join(timeout=BENCHMARK_POLICY.remote_kill_join_timeout_s)
 
 
 def _which(name: str) -> str | None:
@@ -272,15 +277,17 @@ def _which(name: str) -> str | None:
 
 def _ssh_pkill_one(node: str, user: str, password: str, port: int,
                    have_sshpass: bool) -> None:
-    remote_cmd = f"pkill -9 -f {_remote_kill_pattern()} || true"
+    remote_cmd = (
+        f"pkill -{BENCHMARK_POLICY.remote_kill_signal} "
+        f"-f {_remote_kill_pattern()} || true"
+    )
     target = f"{user}@{node}" if user else node
     ssh_args = [
         "ssh",
         "-p", str(port),
-        "-o", "StrictHostKeyChecking=no",
-        "-o", "UserKnownHostsFile=/dev/null",
+        *SSH_POLICY.host_key_arguments,
         "-o", "BatchMode=" + ("no" if password else "yes"),
-        "-o", "ConnectTimeout=5",
+        "-o", f"ConnectTimeout={SSH_POLICY.connect_timeout_s}",
         target,
         remote_cmd,
     ]
@@ -296,7 +303,7 @@ def _ssh_pkill_one(node: str, user: str, password: str, port: int,
             env=env,
             capture_output=True,
             text=True,
-            timeout=10,
+            timeout=SSH_POLICY.remote_kill_command_timeout_s,
         )
         if proc.returncode == 0:
             log.info("remote sbk kill: %s OK", node)
@@ -316,17 +323,18 @@ def _hung_jvm_watchdog(
     *,
     expected_seconds: int | None,
     is_gem: bool,
-    poll_interval_s: float = 0.5,
+    poll_interval_s: float = BENCHMARK_POLICY.watchdog_poll_interval_s,
 ) -> int:
     """Wait for ``proc`` to exit, force-killing it after the benchmark window.
 
     Timing (with ``seconds`` taken from the YAML):
 
-    - At ``seconds + 10`` (gem mode only): SSH into every ``nodes:`` entry
+    - At ``seconds + remote_kill_grace_s`` (gem mode only): SSH into every
+      ``nodes:`` entry
       and ``pkill -9 -f io.sbk.main`` so the remote sbk clients are killed
       first. Done once, in a background thread (so it does not delay the
       local kill).
-    - At ``seconds + 15`` (both modes): SIGTERM then SIGKILL the local
+    - At ``seconds + local_kill_grace_s`` (both modes): terminate the local
       ``sbk-yal`` / ``sbk-gem-yal`` process. For gem mode we wait briefly
       for the remote-kill thread to finish first so the killed-remote logs
       are sequenced correctly with the local kill log.
@@ -338,12 +346,12 @@ def _hung_jvm_watchdog(
     """
     start = time.monotonic()
     remote_deadline = (
-        start + expected_seconds + REMOTE_KILL_GRACE_S
+        start + expected_seconds + BENCHMARK_POLICY.remote_kill_grace_s
         if (expected_seconds is not None and is_gem)
         else None
     )
     local_deadline = (
-        start + expected_seconds + LOCAL_KILL_GRACE_S
+        start + expected_seconds + BENCHMARK_POLICY.local_kill_grace_s
         if expected_seconds is not None
         else None
     )
@@ -359,7 +367,7 @@ def _hung_jvm_watchdog(
 
         now = time.monotonic()
 
-        # Stage 1: gem-mode remote kill at seconds + 10.
+        # Stage 1: GEM remote kill at the configured remote deadline.
         if (
             remote_deadline is not None
             and remote_kill_thread is None
@@ -368,7 +376,7 @@ def _hung_jvm_watchdog(
             log.warning(
                 "sbk-gem-yal: %ds + %ds grace reached; killing remote sbk "
                 "clients on all nodes",
-                expected_seconds, int(REMOTE_KILL_GRACE_S),
+                expected_seconds, int(BENCHMARK_POLICY.remote_kill_grace_s),
             )
             remote_kill_thread = threading.Thread(
                 target=_kill_remote_sbk_clients,
@@ -377,12 +385,14 @@ def _hung_jvm_watchdog(
             )
             remote_kill_thread.start()
 
-        # Stage 2: local kill at seconds + 15.
+        # Stage 2: local kill at the configured local deadline.
         if local_deadline is not None and now >= local_deadline:
             # For gem mode, wait briefly for the remote-kill thread so the
             # remote SBKs are gone *before* we kill the local sbk-gem-yal.
             if remote_kill_thread is not None:
-                remote_kill_thread.join(timeout=5)
+                remote_kill_thread.join(
+                    timeout=BENCHMARK_POLICY.remote_before_local_join_s
+                )
             try:
                 size = csv_path.stat().st_size if csv_path.exists() else 0
             except OSError:
@@ -390,12 +400,19 @@ def _hung_jvm_watchdog(
             log.warning(
                 "%s instance did not complete within %ds + %ds; killing "
                 "local process (csv=%d bytes)",
-                "sbk-gem-yal" if is_gem else "sbk-yal",
-                expected_seconds, int(LOCAL_KILL_GRACE_S), size,
+                (
+                    SBK_ARTIFACT.additional_executables[0]
+                    if is_gem else SBK_ARTIFACT.primary_executable
+                ),
+                expected_seconds,
+                int(BENCHMARK_POLICY.local_kill_grace_s),
+                size,
             )
             proc.terminate()
             try:
-                return proc.wait(timeout=2)
+                return proc.wait(
+                    timeout=BENCHMARK_POLICY.local_terminate_wait_s
+                )
             except subprocess.TimeoutExpired:
                 proc.kill()
                 return proc.wait()
@@ -493,7 +510,9 @@ def _run_serial(
             raise
         finally:
             if use_forwarding:
-                forward_thread.join(timeout=1)
+                forward_thread.join(
+                    timeout=BENCHMARK_POLICY.log_forward_join_s
+                )
         dur = time.monotonic() - start
         results.append(
             RunResult(
@@ -565,12 +584,12 @@ def _run_parallel(
             # not keep one log file open for every parallel benchmark.
             f.close()
         remote_dl = (
-            start + seconds + REMOTE_KILL_GRACE_S
+            start + seconds + BENCHMARK_POLICY.remote_kill_grace_s
             if (seconds is not None and is_gem)
             else None
         )
         local_dl = (
-            start + seconds + LOCAL_KILL_GRACE_S
+            start + seconds + BENCHMARK_POLICY.local_kill_grace_s
             if seconds is not None
             else None
         )
@@ -582,10 +601,9 @@ def _run_parallel(
     # heartbeat loop
     pending = {i for i in range(len(procs))}
     last_print = 0.0
-    HEARTBEAT = 5.0
     try:
         while pending:
-            time.sleep(0.5)
+            time.sleep(BENCHMARK_POLICY.watchdog_poll_interval_s)
             now = time.monotonic()
             for i in list(pending):
                 (class_name, yml_path, csv_path, _, p, p_start,
@@ -594,7 +612,7 @@ def _run_parallel(
                     pending.discard(i)
                     continue
 
-                # Stage 1: gem-mode remote kill at seconds + 10.
+                # Stage 1: GEM remote kill at the configured remote deadline.
                 if (
                     remote_dl is not None
                     and i not in remote_kill_threads
@@ -603,7 +621,9 @@ def _run_parallel(
                     log.warning(
                         "[parallel] class=%s sbk-gem-yal: %ds + %ds grace "
                         "reached; killing remote sbk clients",
-                        class_name, seconds, int(REMOTE_KILL_GRACE_S),
+                        class_name,
+                        seconds,
+                        int(BENCHMARK_POLICY.remote_kill_grace_s),
                     )
                     t = threading.Thread(
                         target=_kill_remote_sbk_clients, args=(yml_path,),
@@ -612,27 +632,40 @@ def _run_parallel(
                     t.start()
                     remote_kill_threads[i] = t
 
-                # Stage 2: local kill at seconds + 15.
+                # Stage 2: local kill at the configured local deadline.
                 if local_dl is not None and now >= local_dl:
                     t = remote_kill_threads.get(i)
                     if t is not None:
-                        t.join(timeout=5)
+                        t.join(
+                            timeout=BENCHMARK_POLICY.remote_before_local_join_s
+                        )
                     size = csv_path.stat().st_size if csv_path.exists() else 0
                     log.warning(
                         "[parallel] class=%s (%s) did not complete within "
                         "%ds + %ds; killing local process (csv=%d bytes)",
                         class_name,
-                        "sbk-gem-yal" if is_gem else "sbk-yal",
-                        seconds, int(LOCAL_KILL_GRACE_S), size,
+                        (
+                            SBK_ARTIFACT.additional_executables[0]
+                            if is_gem else SBK_ARTIFACT.primary_executable
+                        ),
+                        seconds,
+                        int(BENCHMARK_POLICY.local_kill_grace_s),
+                        size,
                     )
                     p.terminate()
                     try:
-                        p.wait(timeout=2)
+                        p.wait(
+                            timeout=BENCHMARK_POLICY.local_terminate_wait_s
+                        )
                     except subprocess.TimeoutExpired:
                         p.kill()
                         p.wait()
                     pending.discard(i)
-            if pending and (now - last_print) >= HEARTBEAT:
+            if (
+                pending
+                and (now - last_print)
+                >= BENCHMARK_POLICY.heartbeat_interval_s
+            ):
                 running = [procs[i][0] for i in pending]
                 elapsed = [
                     f"{procs[i][0]}={now - procs[i][5]:.0f}s" for i in pending

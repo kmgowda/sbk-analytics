@@ -54,6 +54,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Opt-in, workdir-confined file benchmark cleanup and disk-space reporting
 
 ### Fixed
+- Made SSH null-device handling and the default benchmark work directory
+  platform-aware, and added clear validation errors for malformed native
+  launcher policy values
 - Catchable signals now preserve the one-document `--json` contract and their
   `128 + signal` exit code; pip installer and parallel progress output are
   explicitly routed to stderr
@@ -71,6 +74,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   installer races
 
 ### Changed
+- Separated the Temurin repository identity from its parameterized JDK download
+  URL template and documented the compatibility/security implications of the
+  disabled TLS and SSH verification defaults
+- Centralized application/dependency metadata, cache layout, network behavior,
+  process/benchmark/SSH timing, configuration defaults, and exit codes in
+  immutable typed runtime policy objects
+- Centralized shared Bash/PowerShell environment names, interpreter versions,
+  and bootstrap marker metadata in `sbk-bootstrap.env`
 - Updated documentation to clarify JDK resolution priority order
 - Enhanced README.md with AI agent documentation section
 - Local SBK is validated before JDK/network work, and sbk-charts resolution is
