@@ -319,16 +319,18 @@ bootstrap_application() {
     CURRENT_STAGE="$APP_ROOT/.$fingerprint.install-$$"
     rm -rf "$CURRENT_STAGE"
     mkdir -p "$APP_ROOT" "$MANAGED_UV_CACHE" "$MANAGED_PYTHON_ROOT"
-    offline=()
-    [[ "${SBK_ANALYTICS_BOOTSTRAP_OFFLINE:-0}" == "1" ]] && offline=(--offline)
+    # macOS still ships Bash 3.2, where expanding an empty array under `set -u`
+    # raises an unbound-variable error. Keep this optional argument scalar.
+    offline=
+    [[ "${SBK_ANALYTICS_BOOTSTRAP_OFFLINE:-0}" == "1" ]] && offline=--offline
     log "preparing isolated Python $PYTHON_VERSION runtime"
     UV_CACHE_DIR="$MANAGED_UV_CACHE" UV_PYTHON_INSTALL_DIR="$MANAGED_PYTHON_ROOT" \
         "$uv_bin" python install --no-bin "$PYTHON_VERSION" \
-        "${offline[@]}" >&2 ||
+        ${offline:+"$offline"} >&2 ||
         fail "could not install managed Python $PYTHON_VERSION"
     UV_CACHE_DIR="$MANAGED_UV_CACHE" UV_PYTHON_INSTALL_DIR="$MANAGED_PYTHON_ROOT" \
         "$uv_bin" venv --managed-python --python "$PYTHON_VERSION" \
-        "$CURRENT_STAGE" "${offline[@]}" >&2 || fail "could not create application environment"
+        "$CURRENT_STAGE" ${offline:+"$offline"} >&2 || fail "could not create application environment"
     python_bin="$(app_python "$CURRENT_STAGE")"
     log "installing locked sbk-analytics environment"
     (
@@ -336,7 +338,7 @@ bootstrap_application() {
         VIRTUAL_ENV="$CURRENT_STAGE" UV_CACHE_DIR="$MANAGED_UV_CACHE" \
             UV_PYTHON_INSTALL_DIR="$MANAGED_PYTHON_ROOT" \
             "$uv_bin" sync --active --locked --no-editable --no-dev \
-            --python "$python_bin" "${offline[@]}" >&2
+            --python "$python_bin" ${offline:+"$offline"} >&2
     ) || fail "could not install the locked application environment"
     printf '%s\n' "$fingerprint" >"$CURRENT_STAGE/$BOOTSTRAP_MARKER"
     printf '{"schema":2,"fingerprint":"%s","python":"%s","platform":"%s","uv":"%s"}\n' \
