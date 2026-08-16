@@ -40,7 +40,8 @@ timing, SSH behavior, configuration defaults, and exit codes.
 Resolves and caches external dependencies:
 - JDK resolution with priority order (SBK_JAVA_HOME, JAVA_HOME, PATH, cached, download)
 - SBK resolution with priority order (explicit local folder, cached, download)
-- sbk-charts resolution with priority order (explicit local folder, conda, cached, install)
+- sbk-charts resolution with priority order (explicit local folder, verified
+  isolated cache, install)
 
 ### runner.py
 Executes SBK instances in serial or parallel mode. Handles subprocess management, log forwarding, and hung JVM detection.
@@ -58,7 +59,9 @@ Collects system information (CPU, RAM, OS, hardware) for Excel reports.
 
 - **Dependency Injection**: Configuration passed to functions
 - **Caching**: External dependencies cached locally
-- **Environment Detection**: Auto-detects conda vs venv
+- **Self-contained runtime**: verified uv, exact managed Python, and `uv.lock`
+- **Environment isolation**: active environments are untouched and sbk-charts
+  has a dedicated cached environment
 - **Error Handling**: Graceful degradation for missing dependencies
 
 ## Environment Variables
@@ -66,7 +69,8 @@ Collects system information (CPU, RAM, OS, hardware) for Excel reports.
 The package respects these environment variables:
 - `SBK_JAVA_HOME` - JDK for SBK execution (set by releases.py)
 - `JAVA_HOME` - User's JAVA_HOME (not modified by package)
-- `CONDA_PREFIX` - Conda environment detection
+- `SBK_ANALYTICS_ENV_HOME` - persistent managed runtime override
+- `SBK_ANALYTICS_BOOTSTRAP_OFFLINE` - disable bootstrap downloads
 - `PYTHONUNBUFFERED` - Unbuffered Python output
 
 ## Dependencies

@@ -6,101 +6,14 @@
 #
 #     http://www.apache.org/licenses/LICENSE-2.0
 #
-# Self-bootstrapping launcher for sbk-analytics on Windows.
-# Run with: powershell -ExecutionPolicy Bypass -File .\sbk-analytics.ps1 <arguments>
+# Self-contained launcher for sbk-analytics on Windows. It acquires a verified
+# uv binary and isolated Python runtime when neither Python nor Conda exists.
 
 Set-StrictMode -Version Latest
-# Windows PowerShell 5.1 promotes native stderr to NativeCommandError when this
-# is "Stop". Python, pip, Conda, and the analytics CLI legitimately use stderr,
-# so native exit codes are checked explicitly instead.
 $ErrorActionPreference = "Continue"
 $CliArgs = [string[]] @($args)
-
 $SourceRoot = $PSScriptRoot
-$BootstrapPolicyPath = Join-Path $SourceRoot "sbk-bootstrap.env"
-function Stop-BootstrapPolicy {
-    param(
-        [string] $Name,
-        [string] $Reason
-    )
-    [Console]::Error.WriteLine(
-        "[sbk-analytics] ERROR: invalid bootstrap policy ${Name}: $Reason"
-    )
-    exit 1
-}
-if (-not (Test-Path -LiteralPath $BootstrapPolicyPath -PathType Leaf)) {
-    [Console]::Error.WriteLine(
-        "[sbk-analytics] ERROR: bootstrap policy is missing: $BootstrapPolicyPath"
-    )
-    exit 1
-}
-$BootstrapPolicy = @{}
-foreach ($line in Get-Content -LiteralPath $BootstrapPolicyPath) {
-    $trimmed = $line.Trim()
-    if (-not $trimmed -or $trimmed.StartsWith("#")) {
-        continue
-    }
-    $parts = $trimmed.Split("=", 2)
-    if ($parts.Count -ne 2) {
-        Stop-BootstrapPolicy "line" "expected KEY=VALUE, got '$line'"
-    }
-    $BootstrapPolicy[$parts[0].Trim()] = $parts[1].Trim()
-}
-function Get-BootstrapPolicyValue {
-    param([string] $Name)
-    if (-not $BootstrapPolicy.ContainsKey($Name)) {
-        Stop-BootstrapPolicy $Name "required key is missing"
-    }
-    $value = [string] $BootstrapPolicy[$Name]
-    if ([string]::IsNullOrWhiteSpace($value)) {
-        Stop-BootstrapPolicy $Name "value must not be empty"
-    }
-    return $value
-}
-function Assert-BootstrapPolicyInteger {
-    param([string] $Name, [string] $Value)
-    if ($Value -notmatch '^\d+$') {
-        Stop-BootstrapPolicy $Name "expected a non-negative integer"
-    }
-}
-function Assert-BootstrapPolicyVersion {
-    param([string] $Name, [string] $Value)
-    if ($Value -notmatch '^\d+(\.\d+)+$') {
-        Stop-BootstrapPolicy $Name "expected a dotted numeric version"
-    }
-}
-function Assert-BootstrapPolicyLeafName {
-    param([string] $Name, [string] $Value)
-    if ($Value -eq "." -or $Value -eq ".." -or $Value -match '[\\/]') {
-        Stop-BootstrapPolicy $Name `
-            "expected a non-empty filename without path separators"
-    }
-}
-$MinimumPythonMajorText = Get-BootstrapPolicyValue `
-    "SBK_ANALYTICS_MIN_PYTHON_MAJOR"
-$MinimumPythonMinorText = Get-BootstrapPolicyValue `
-    "SBK_ANALYTICS_MIN_PYTHON_MINOR"
-$CondaPythonVersion = Get-BootstrapPolicyValue "SBK_ANALYTICS_CONDA_PYTHON"
-$ManagedVenvFolder = Get-BootstrapPolicyValue "SBK_ANALYTICS_VENV_FOLDER"
-$ManagedCondaFolder = Get-BootstrapPolicyValue "SBK_ANALYTICS_CONDA_FOLDER"
-$BootstrapMarker = Get-BootstrapPolicyValue "SBK_ANALYTICS_BOOTSTRAP_MARKER"
-Assert-BootstrapPolicyInteger "SBK_ANALYTICS_MIN_PYTHON_MAJOR" `
-    $MinimumPythonMajorText
-Assert-BootstrapPolicyInteger "SBK_ANALYTICS_MIN_PYTHON_MINOR" `
-    $MinimumPythonMinorText
-Assert-BootstrapPolicyVersion "SBK_ANALYTICS_CONDA_PYTHON" $CondaPythonVersion
-Assert-BootstrapPolicyLeafName "SBK_ANALYTICS_VENV_FOLDER" $ManagedVenvFolder
-Assert-BootstrapPolicyLeafName "SBK_ANALYTICS_CONDA_FOLDER" $ManagedCondaFolder
-Assert-BootstrapPolicyLeafName "SBK_ANALYTICS_BOOTSTRAP_MARKER" $BootstrapMarker
-$MinimumPythonMajor = [int] $MinimumPythonMajorText
-$MinimumPythonMinor = [int] $MinimumPythonMinorText
-$EnvironmentHome = if ($env:SBK_ANALYTICS_ENV_HOME) {
-    [IO.Path]::GetFullPath($env:SBK_ANALYTICS_ENV_HOME)
-} else {
-    $SourceRoot
-}
-$ManagedVenv = Join-Path $EnvironmentHome $ManagedVenvFolder
-$ManagedConda = Join-Path $EnvironmentHome $ManagedCondaFolder
+$PolicyPath = Join-Path $SourceRoot "sbk-bootstrap.env"
 
 function Write-LauncherLog {
     param([string] $Message)
@@ -113,310 +26,372 @@ function Stop-Launcher {
     exit 1
 }
 
-function Resolve-Executable {
+if (-not (Test-Path -LiteralPath $PolicyPath -PathType Leaf)) {
+    Stop-Launcher "bootstrap policy is missing: $PolicyPath"
+}
+
+$Policy = @{}
+foreach ($line in Get-Content -LiteralPath $PolicyPath) {
+    $trimmed = $line.Trim()
+    if (-not $trimmed -or $trimmed.StartsWith("#")) { continue }
+    $parts = $trimmed.Split("=", 2)
+    if ($parts.Count -ne 2) {
+        Stop-Launcher "invalid bootstrap policy line: $line"
+    }
+    $Policy[$parts[0].Trim()] = $parts[1].Trim()
+}
+
+function Get-PolicyValue {
     param([string] $Name)
-    if (-not $Name) {
-        return $null
+    if (-not $Policy.ContainsKey($Name)) {
+        Stop-Launcher "invalid bootstrap policy ${Name}: required key is missing"
     }
-    if (Test-Path -LiteralPath $Name -PathType Leaf) {
-        return [IO.Path]::GetFullPath($Name)
+    $value = [string] $Policy[$Name]
+    if ([string]::IsNullOrWhiteSpace($value)) {
+        Stop-Launcher "invalid bootstrap policy ${Name}: value must not be empty"
     }
-    $command = Get-Command $Name -ErrorAction SilentlyContinue |
-        Select-Object -First 1
-    if (-not $command) {
-        return $null
-    }
-    $pathProperty = $command.PSObject.Properties["Path"]
-    if ($pathProperty -and $pathProperty.Value) {
-        return $pathProperty.Value
-    }
-    $sourceProperty = $command.PSObject.Properties["Source"]
-    if ($sourceProperty -and $sourceProperty.Value) {
-        return $sourceProperty.Value
-    }
-    return $command.Name
+    return $value
 }
 
-function Test-SupportedPython {
-    param(
-        [string] $Python,
-        [string[]] $PrefixArguments = @()
-    )
-    if (-not $Python -or -not (Test-Path -LiteralPath $Python -PathType Leaf)) {
-        return $false
+function Assert-PolicyVersion {
+    param([string] $Name, [string] $Value)
+    if ($Value -notmatch '^\d+(\.\d+)+$') {
+        Stop-Launcher "invalid bootstrap policy ${Name}: expected a dotted numeric version"
     }
-    $arguments = @($PrefixArguments) + @(
-        "-c",
-        "import sys; raise SystemExit(sys.version_info < ($MinimumPythonMajor, $MinimumPythonMinor))"
-    )
-    & $Python @arguments *> $null
-    return $LASTEXITCODE -eq 0
 }
 
-function Find-SystemPython {
-    $candidates = @()
-    if ($env:SBK_ANALYTICS_PYTHON) {
-        $candidates += ,@($env:SBK_ANALYTICS_PYTHON, @())
+function Assert-PolicyLeafName {
+    param([string] $Name, [string] $Value)
+    if ($Value -eq "." -or $Value -eq ".." -or $Value -match '[\\/]') {
+        Stop-Launcher "invalid bootstrap policy ${Name}: expected a filename without path separators"
     }
-    $candidates += ,@("python", @())
-    $candidates += ,@("python3", @())
-    $candidates += ,@("py", @("-3"))
-
-    foreach ($candidate in $candidates) {
-        $executable = Resolve-Executable $candidate[0]
-        $prefix = [string[]] $candidate[1]
-        if (Test-SupportedPython $executable $prefix) {
-            return [PSCustomObject]@{
-                Executable = $executable
-                Prefix = $prefix
-            }
-        }
-    }
-    return $null
 }
 
-function Get-EnvironmentFingerprint {
-    param([string] $Python)
-    try {
-        $pythonItem = Get-Item -LiteralPath $Python -ErrorAction Stop
-    } catch {
-        return $null
+$PythonVersion = Get-PolicyValue "SBK_ANALYTICS_PYTHON_VERSION"
+$UvVersion = Get-PolicyValue "SBK_ANALYTICS_UV_VERSION"
+$RuntimeFolder = Get-PolicyValue "SBK_ANALYTICS_RUNTIME_FOLDER"
+$BootstrapMarker = Get-PolicyValue "SBK_ANALYTICS_BOOTSTRAP_MARKER"
+Assert-PolicyVersion "SBK_ANALYTICS_PYTHON_VERSION" $PythonVersion
+Assert-PolicyVersion "SBK_ANALYTICS_UV_VERSION" $UvVersion
+Assert-PolicyLeafName "SBK_ANALYTICS_RUNTIME_FOLDER" $RuntimeFolder
+Assert-PolicyLeafName "SBK_ANALYTICS_BOOTSTRAP_MARKER" $BootstrapMarker
+
+if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) {
+    Stop-Launcher "this launcher supports Windows only"
+}
+
+$architecture = [Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString()
+switch ($architecture) {
+    "X64" {
+        $UvTarget = "x86_64-pc-windows-msvc"
+        $UvArchiveSha256 = Get-PolicyValue "SBK_ANALYTICS_UV_WINDOWS_X86_64_SHA256"
+        $PlatformId = "windows-x86_64"
     }
-    $identity = @(
-        $pythonItem.FullName,
-        $pythonItem.VersionInfo.FileVersion,
-        $pythonItem.VersionInfo.ProductVersion,
-        $pythonItem.Length,
-        $pythonItem.LastWriteTimeUtc.Ticks
-    ) -join "`0"
-    $stream = New-Object IO.MemoryStream
+    "Arm64" {
+        $UvTarget = "aarch64-pc-windows-msvc"
+        $UvArchiveSha256 = Get-PolicyValue "SBK_ANALYTICS_UV_WINDOWS_AARCH64_SHA256"
+        $PlatformId = "windows-aarch64"
+    }
+    default { Stop-Launcher "unsupported processor architecture: $architecture" }
+}
+if ($UvArchiveSha256 -notmatch '^[0-9a-f]{64}$') {
+    Stop-Launcher "invalid bootstrap policy uv checksum: expected 64 lowercase hexadecimal characters"
+}
+
+$RuntimeHome = if ($env:SBK_ANALYTICS_ENV_HOME) {
+    [IO.Path]::GetFullPath($env:SBK_ANALYTICS_ENV_HOME)
+} else {
+    $defaultStateRoot = if ($env:LOCALAPPDATA) {
+        $env:LOCALAPPDATA
+    } else {
+        [Environment]::GetFolderPath("LocalApplicationData")
+    }
+    if ([string]::IsNullOrWhiteSpace($defaultStateRoot)) {
+        Stop-Launcher "LOCALAPPDATA or SBK_ANALYTICS_ENV_HOME is required"
+    }
+    Join-Path $defaultStateRoot $RuntimeFolder
+}
+$UvCache = Join-Path $RuntimeHome "cache\uv"
+$UvPythonRoot = Join-Path $RuntimeHome "python"
+$UvToolRoot = Join-Path $RuntimeHome "tools\uv\$UvVersion\$UvTarget"
+$UvBinary = Join-Path $UvToolRoot "uv.exe"
+$UvBinaryMarker = Join-Path $UvToolRoot "uv.sha256"
+$AppRoot = Join-Path $RuntimeHome "app"
+$LockRoot = Join-Path $RuntimeHome "locks"
+$UvReleaseBase = if ($env:SBK_ANALYTICS_UV_BASE_URL) {
+    $env:SBK_ANALYTICS_UV_BASE_URL.TrimEnd("/")
+} else {
+    "https://github.com/astral-sh/uv/releases/download"
+}
+
+function Get-FileSha256 {
+    param([string] $Path)
+    return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
+}
+
+function Get-SourceFingerprint {
     $sha256 = [Security.Cryptography.SHA256]::Create()
+    $stream = New-Object IO.MemoryStream
     try {
-        $rootBytes = [Text.Encoding]::UTF8.GetBytes($SourceRoot)
-        $stream.Write($rootBytes, 0, $rootBytes.Length)
-        $identityBytes = [Text.Encoding]::UTF8.GetBytes("`0python`0$identity")
-        $stream.Write($identityBytes, 0, $identityBytes.Length)
-        $pythonDirectory = Split-Path -Parent $pythonItem.FullName
-        if ((Split-Path -Leaf $pythonDirectory) -eq "Scripts") {
-            $venvConfiguration = Join-Path (Split-Path -Parent $pythonDirectory) `
-                "pyvenv.cfg"
-            if (Test-Path -LiteralPath $venvConfiguration -PathType Leaf) {
-                $configurationBytes = [IO.File]::ReadAllBytes($venvConfiguration)
-                $stream.Write($configurationBytes, 0, $configurationBytes.Length)
+        $header = "schema=2`npython=$PythonVersion`nuv=$UvVersion`nplatform=$PlatformId`n"
+        $headerBytes = [Text.Encoding]::UTF8.GetBytes($header)
+        $stream.Write($headerBytes, 0, $headerBytes.Length)
+        $files = @(
+            "pyproject.toml", "uv.lock", ".python-version", "sbk-bootstrap.env",
+            "sbk-analytics", "sbk-analytics.ps1"
+        ) | ForEach-Object { Join-Path $SourceRoot $_ }
+        $files += @(Get-ChildItem -LiteralPath (Join-Path $SourceRoot "analytics") `
+            -Recurse -File | Where-Object {
+                $_.Extension -eq ".py" -or $_.Extension -eq ".txt" -or
+                $_.Extension -eq ".env"
+            } | Select-Object -ExpandProperty FullName)
+        $sourcePrefix = $SourceRoot.TrimEnd([IO.Path]::DirectorySeparatorChar)
+        foreach ($path in ($files | Sort-Object)) {
+            if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+                Stop-Launcher "bootstrap input is missing: $path"
             }
+            $relative = $path.Substring($sourcePrefix.Length).TrimStart(
+                [IO.Path]::DirectorySeparatorChar
+            )
+            $record = "$relative $(Get-FileSha256 $path)`n"
+            $bytes = [Text.Encoding]::UTF8.GetBytes($record)
+            $stream.Write($bytes, 0, $bytes.Length)
         }
-        foreach ($name in @(
-            "pyproject.toml",
-            "requirements.txt",
-            "environment.yml",
-            "sbk-bootstrap.env",
-            "sbk-analytics",
-            "sbk-analytics.ps1"
-        )) {
-            $path = Join-Path $SourceRoot $name
-            if (Test-Path -LiteralPath $path -PathType Leaf) {
-                $nameBytes = [Text.Encoding]::UTF8.GetBytes($name)
-                $stream.Write($nameBytes, 0, $nameBytes.Length)
-                $fileBytes = [IO.File]::ReadAllBytes($path)
-                $stream.Write($fileBytes, 0, $fileBytes.Length)
-            }
-        }
-        $hash = $sha256.ComputeHash($stream.ToArray())
-        return ([BitConverter]::ToString($hash)).Replace("-", "").ToLowerInvariant()
+        return ([BitConverter]::ToString(
+            $sha256.ComputeHash($stream.ToArray())
+        )).Replace("-", "").ToLowerInvariant()
     } finally {
         $sha256.Dispose()
         $stream.Dispose()
     }
 }
 
-function Test-EnvironmentReady {
-    param(
-        [string] $Python,
-        [string] $EnvironmentRoot
-    )
-    $marker = Join-Path $EnvironmentRoot $BootstrapMarker
-    $fingerprint = Get-EnvironmentFingerprint $Python
-    if (-not $fingerprint -or -not (Test-Path -LiteralPath $marker -PathType Leaf)) {
+function Enter-BootstrapLock {
+    param([string] $Name)
+    New-Item -ItemType Directory -Force -Path $LockRoot | Out-Null
+    $lock = Join-Path $LockRoot "$Name.lock"
+    foreach ($attempt in 1..120) {
+        try {
+            New-Item -ItemType Directory -Path $lock -ErrorAction Stop | Out-Null
+            Set-Content -LiteralPath (Join-Path $lock "pid") -Value $PID `
+                -Encoding ASCII
+            return $lock
+        } catch {
+            $ownerFile = Join-Path $lock "pid"
+            $owner = if (Test-Path -LiteralPath $ownerFile -PathType Leaf) {
+                Get-Content -LiteralPath $ownerFile -First 1
+            } else { $null }
+            if ($owner -match '^\d+$' -and -not (
+                Get-Process -Id ([int] $owner) -ErrorAction SilentlyContinue
+            )) {
+                Remove-Item -LiteralPath $lock -Recurse -Force -ErrorAction SilentlyContinue
+                continue
+            }
+            if ($attempt -eq 1) { Write-LauncherLog "waiting for bootstrap lock: $lock" }
+            Start-Sleep -Seconds 1
+        }
+    }
+    Stop-Launcher "timed out waiting for bootstrap lock: $lock"
+}
+
+function Exit-BootstrapLock {
+    param([string] $Lock)
+    if ($Lock) {
+        Remove-Item -LiteralPath $Lock -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
+function Test-UvReady {
+    if (-not (Test-Path -LiteralPath $UvBinary -PathType Leaf) -or
+        -not (Test-Path -LiteralPath $UvBinaryMarker -PathType Leaf)) {
         return $false
     }
-    if ((Get-Content -LiteralPath $marker -Raw).Trim() -ne $fingerprint.Trim()) {
-        return $false
-    }
-    $code = @'
-import os
-import pathlib
-import sys
-
-import analytics
-import openpyxl
-import openpyxl_image_loader
-import PIL
-import psutil
-import requests
-import yaml
-
-source = pathlib.Path(sys.argv[1]).resolve()
-module = pathlib.Path(analytics.__file__).resolve()
-raise SystemExit(os.path.commonpath((str(source), str(module))) != str(source))
-'@
-    & $Python -c $code $SourceRoot *> $null
+    $expected = (Get-Content -LiteralPath $UvBinaryMarker -First 1).Trim()
+    if ((Get-FileSha256 $UvBinary) -ne $expected) { return $false }
+    & $UvBinary --version *> $null
     return $LASTEXITCODE -eq 0
 }
 
-function Initialize-Environment {
-    param(
-        [string] $Python,
-        [string] $EnvironmentRoot
-    )
-    if (Test-EnvironmentReady $Python $EnvironmentRoot) {
-        return $true
-    }
-    Write-LauncherLog "installing sbk-analytics and its Python dependencies into $EnvironmentRoot"
-    & $Python -m ensurepip --upgrade *> $null
-    & $Python -m pip install --disable-pip-version-check -e $SourceRoot |
-        ForEach-Object { [Console]::Error.WriteLine($_) }
-    $pipExitCode = $LASTEXITCODE
-    if ($pipExitCode -ne 0) {
-        return $false
-    }
-    $fingerprint = Get-EnvironmentFingerprint $Python
-    if (-not $fingerprint) {
-        return $false
-    }
-    try {
-        Set-Content -LiteralPath (Join-Path $EnvironmentRoot $BootstrapMarker) `
-            -Value $fingerprint -Encoding ASCII -ErrorAction Stop
-    } catch {
-        Write-LauncherLog "could not record environment state: $($_.Exception.Message)"
-        return $false
-    }
-    return $true
-}
-
-function Start-Analytics {
-    param(
-        [ValidateSet("venv", "conda")]
-        [string] $Kind,
-        [string] $EnvironmentRoot,
-        [string] $Python
-    )
-    if ($Kind -eq "conda") {
-        $env:CONDA_PREFIX = $EnvironmentRoot
-        Remove-Item Env:VIRTUAL_ENV -ErrorAction SilentlyContinue
-        $binaryDirectory = $EnvironmentRoot
-    } else {
-        $env:VIRTUAL_ENV = $EnvironmentRoot
-        Remove-Item Env:CONDA_PREFIX -ErrorAction SilentlyContinue
-        $binaryDirectory = Join-Path $EnvironmentRoot "Scripts"
-    }
-    $env:PATH = "$binaryDirectory;$env:PATH"
-    Write-LauncherLog "using $Kind environment: $EnvironmentRoot"
-    & $Python -m analytics @CliArgs
-    exit $LASTEXITCODE
-}
-
-function Use-ExistingEnvironment {
-    param(
-        [ValidateSet("venv", "conda")]
-        [string] $Kind,
-        [string] $EnvironmentRoot
-    )
-    if (-not $EnvironmentRoot) {
-        return $false
-    }
-    $python = if ($Kind -eq "conda") {
-        Join-Path $EnvironmentRoot "python.exe"
-    } else {
-        Join-Path $EnvironmentRoot "Scripts\python.exe"
-    }
-    if (-not (Test-SupportedPython $python)) {
-        return $false
-    }
-    if (Initialize-Environment $python $EnvironmentRoot) {
-        Start-Analytics $Kind $EnvironmentRoot $python
-    }
-    Write-LauncherLog "could not prepare the existing $Kind environment at $EnvironmentRoot"
-    return $false
-}
-
-function New-ManagedVenv {
-    param([PSCustomObject] $SystemPython)
-    New-Item -ItemType Directory -Force -Path $EnvironmentHome `
-        -ErrorAction Stop | Out-Null
-    Write-LauncherLog "creating Python virtual environment: $ManagedVenv"
-    $arguments = @($SystemPython.Prefix) + @("-m", "venv", $ManagedVenv)
-    & $SystemPython.Executable @arguments |
-        ForEach-Object { [Console]::Error.WriteLine($_) }
-    $venvExitCode = $LASTEXITCODE
-    if ($venvExitCode -ne 0) {
-        return $false
-    }
-    $python = Join-Path $ManagedVenv "Scripts\python.exe"
-    if (-not (Test-SupportedPython $python)) {
-        return $false
-    }
-    if (-not (Initialize-Environment $python $ManagedVenv)) {
-        return $false
-    }
-    Start-Analytics "venv" $ManagedVenv $python
-}
-
-function New-ManagedConda {
-    $conda = Resolve-Executable "conda"
-    if (-not $conda) {
-        return $false
-    }
-    New-Item -ItemType Directory -Force -Path $EnvironmentHome `
-        -ErrorAction Stop | Out-Null
-    $python = Join-Path $ManagedConda "python.exe"
-    if (-not (Test-SupportedPython $python)) {
-        Write-LauncherLog "creating fallback Conda environment: $ManagedConda"
-        & $conda create --yes --prefix $ManagedConda `
-            "python=$CondaPythonVersion" pip |
-            ForEach-Object { [Console]::Error.WriteLine($_) }
-        $condaExitCode = $LASTEXITCODE
-        if ($condaExitCode -ne 0) {
-            return $false
+function Get-Uv {
+    if ($env:SBK_ANALYTICS_UV_EXECUTABLE) {
+        $override = [IO.Path]::GetFullPath($env:SBK_ANALYTICS_UV_EXECUTABLE)
+        if (-not (Test-Path -LiteralPath $override -PathType Leaf)) {
+            Stop-Launcher "SBK_ANALYTICS_UV_EXECUTABLE does not exist: $override"
         }
+        return $override
     }
-    if (-not (Test-SupportedPython $python)) {
+    if (Test-UvReady) { return $UvBinary }
+    $lock = Enter-BootstrapLock "uv-$UvVersion-$UvTarget"
+    try {
+        if (Test-UvReady) { return $UvBinary }
+        $stage = "$UvToolRoot.install-$PID"
+        Remove-Item -LiteralPath $stage -Recurse -Force -ErrorAction SilentlyContinue
+        New-Item -ItemType Directory -Force -Path $stage | Out-Null
+        $archive = Join-Path $stage "uv.zip"
+        $url = "$UvReleaseBase/$UvVersion/uv-$UvTarget.zip"
+        $uri = [Uri] $url
+        if ($uri.Scheme -ne "https" -and
+            $env:SBK_ANALYTICS_BOOTSTRAP_ALLOW_INSECURE -ne "1") {
+            Stop-Launcher "bootstrap downloads require HTTPS: $url"
+        }
+        Write-LauncherLog "downloading verified uv $UvVersion for $PlatformId"
+        try {
+            Invoke-WebRequest -Uri $url -OutFile $archive -UseBasicParsing `
+                -ErrorAction Stop
+        } catch {
+            Stop-Launcher "could not download uv from ${url}: $($_.Exception.Message)"
+        }
+        if ((Get-FileSha256 $archive) -ne $UvArchiveSha256) {
+            Stop-Launcher "uv archive checksum mismatch for $PlatformId"
+        }
+        Expand-Archive -LiteralPath $archive -DestinationPath $stage -Force
+        $extracted = Get-ChildItem -LiteralPath $stage -Recurse -File `
+            -Filter "uv.exe" | Select-Object -First 1
+        if (-not $extracted) { Stop-Launcher "uv archive did not contain uv.exe" }
+        $publish = Join-Path $stage "publish"
+        New-Item -ItemType Directory -Force -Path $publish | Out-Null
+        $publishedUv = Join-Path $publish "uv.exe"
+        Copy-Item -LiteralPath $extracted.FullName -Destination $publishedUv
+        Set-Content -LiteralPath (Join-Path $publish "uv.sha256") `
+            -Value (Get-FileSha256 $publishedUv) `
+            -Encoding ASCII
+        & $publishedUv --version *> $null
+        if ($LASTEXITCODE -ne 0) {
+            Stop-Launcher "downloaded uv failed its health check"
+        }
+        New-Item -ItemType Directory -Force -Path (Split-Path -Parent $UvToolRoot) |
+            Out-Null
+        Remove-Item -LiteralPath $UvToolRoot -Recurse -Force `
+            -ErrorAction SilentlyContinue
+        Move-Item -LiteralPath $publish -Destination $UvToolRoot
+        Remove-Item -LiteralPath $stage -Recurse -Force
+    } finally {
+        Exit-BootstrapLock $lock
+    }
+    if (-not (Test-UvReady)) { Stop-Launcher "installed uv failed its health check" }
+    return $UvBinary
+}
+
+function Get-AppPython {
+    param([string] $EnvironmentRoot)
+    return Join-Path $EnvironmentRoot "Scripts\python.exe"
+}
+
+function Test-AppReady {
+    param([string] $EnvironmentRoot, [string] $Fingerprint)
+    $python = Get-AppPython $EnvironmentRoot
+    $marker = Join-Path $EnvironmentRoot $BootstrapMarker
+    if (-not (Test-Path -LiteralPath $python -PathType Leaf) -or
+        -not (Test-Path -LiteralPath $marker -PathType Leaf)) { return $false }
+    if ((Get-Content -LiteralPath $marker -First 1).Trim() -ne $Fingerprint) {
         return $false
     }
-    if (-not (Initialize-Environment $python $ManagedConda)) {
-        return $false
+    $code = @'
+import pathlib, sys
+import analytics, openpyxl, openpyxl_image_loader, PIL, psutil, requests, yaml
+root = pathlib.Path(sys.prefix).resolve()
+module = pathlib.Path(analytics.__file__).resolve()
+raise SystemExit(root not in module.parents)
+'@
+    $oldPythonPath = $env:PYTHONPATH
+    $oldPythonHome = $env:PYTHONHOME
+    Remove-Item Env:PYTHONPATH -ErrorAction SilentlyContinue
+    Remove-Item Env:PYTHONHOME -ErrorAction SilentlyContinue
+    & $python -P -c $code *> $null
+    if ($null -ne $oldPythonPath) { $env:PYTHONPATH = $oldPythonPath }
+    if ($null -ne $oldPythonHome) { $env:PYTHONHOME = $oldPythonHome }
+    return $LASTEXITCODE -eq 0
+}
+
+function Invoke-Uv {
+    param([string] $Uv, [string[]] $Arguments)
+    & $Uv @Arguments *>&1 | ForEach-Object { [Console]::Error.WriteLine($_) }
+    return $LASTEXITCODE -eq 0
+}
+
+function Initialize-Application {
+    param([string] $Uv, [string] $Fingerprint, [string] $EnvironmentRoot)
+    $lock = Enter-BootstrapLock "app-$Fingerprint"
+    $stage = Join-Path $AppRoot ".$Fingerprint.install-$PID"
+    try {
+        if (Test-AppReady $EnvironmentRoot $Fingerprint) { return }
+        Remove-Item -LiteralPath $stage -Recurse -Force -ErrorAction SilentlyContinue
+        New-Item -ItemType Directory -Force -Path $AppRoot, $UvCache, $UvPythonRoot |
+            Out-Null
+        $env:UV_CACHE_DIR = $UvCache
+        $env:UV_PYTHON_INSTALL_DIR = $UvPythonRoot
+        $offline = if ($env:SBK_ANALYTICS_BOOTSTRAP_OFFLINE -eq "1") {
+            @("--offline")
+        } else { @() }
+        Write-LauncherLog "preparing isolated Python $PythonVersion runtime"
+        if (-not (Invoke-Uv $Uv (@(
+            "python", "install", "--no-bin", $PythonVersion
+        ) + $offline))) {
+            Stop-Launcher "could not install managed Python $PythonVersion"
+        }
+        if (-not (Invoke-Uv $Uv (@(
+            "venv", "--managed-python", "--python", $PythonVersion, $stage
+        ) + $offline))) {
+            Stop-Launcher "could not create application environment"
+        }
+        $python = Get-AppPython $stage
+        Write-LauncherLog "installing locked sbk-analytics environment"
+        $oldVenv = $env:VIRTUAL_ENV
+        $env:VIRTUAL_ENV = $stage
+        Push-Location $SourceRoot
+        try {
+            if (-not (Invoke-Uv $Uv (@(
+                "sync", "--active", "--locked", "--no-editable", "--no-dev",
+                "--python", $python
+            ) + $offline))) {
+                Stop-Launcher "could not install the locked application environment"
+            }
+        } finally {
+            Pop-Location
+            if ($null -eq $oldVenv) {
+                Remove-Item Env:VIRTUAL_ENV -ErrorAction SilentlyContinue
+            } else { $env:VIRTUAL_ENV = $oldVenv }
+        }
+        Set-Content -LiteralPath (Join-Path $stage $BootstrapMarker) `
+            -Value $Fingerprint -Encoding ASCII
+        $metadata = [ordered]@{
+            schema = 2; fingerprint = $Fingerprint; python = $PythonVersion
+            platform = $PlatformId; uv = $UvVersion
+        } | ConvertTo-Json -Compress
+        Set-Content -LiteralPath (Join-Path $stage "metadata.json") `
+            -Value $metadata -Encoding UTF8
+        if (-not (Test-AppReady $stage $Fingerprint)) {
+            Stop-Launcher "new application environment failed its health check"
+        }
+        Remove-Item -LiteralPath $EnvironmentRoot -Recurse -Force `
+            -ErrorAction SilentlyContinue
+        Move-Item -LiteralPath $stage -Destination $EnvironmentRoot
+    } finally {
+        if (Test-Path -LiteralPath $stage) {
+            Remove-Item -LiteralPath $stage -Recurse -Force -ErrorAction SilentlyContinue
+        }
+        Exit-BootstrapLock $lock
     }
-    Start-Analytics "conda" $ManagedConda $python
 }
 
-if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) {
-    Stop-Launcher "this launcher supports Windows only"
+Remove-Item Env:VIRTUAL_ENV -ErrorAction SilentlyContinue
+Remove-Item Env:CONDA_PREFIX -ErrorAction SilentlyContinue
+Remove-Item Env:PYTHONPATH -ErrorAction SilentlyContinue
+Remove-Item Env:PYTHONHOME -ErrorAction SilentlyContinue
+$Fingerprint = Get-SourceFingerprint
+$AppEnvironment = Join-Path $AppRoot $Fingerprint
+if (-not (Test-AppReady $AppEnvironment $Fingerprint)) {
+    $Uv = Get-Uv
+    Initialize-Application $Uv $Fingerprint $AppEnvironment
 }
 
-# Prefer environments explicitly activated by the caller.
-if ($env:VIRTUAL_ENV) {
-    [void] (Use-ExistingEnvironment "venv" $env:VIRTUAL_ENV)
-}
-if ($env:CONDA_PREFIX) {
-    [void] (Use-ExistingEnvironment "conda" $env:CONDA_PREFIX)
-}
-
-# Reuse launcher-owned environments before creating anything new.
-[void] (Use-ExistingEnvironment "venv" $ManagedVenv)
-[void] (Use-ExistingEnvironment "conda" $ManagedConda)
-
-$systemPython = Find-SystemPython
-if ($systemPython) {
-    if (-not (New-ManagedVenv $systemPython)) {
-        Write-LauncherLog "venv setup failed; trying Conda fallback"
-    }
-}
-
-[void] (New-ManagedConda)
-
-if (-not $systemPython -and -not (Resolve-Executable "conda")) {
-    Stop-Launcher (
-        "Python $MinimumPythonMajor.$MinimumPythonMinor or newer is required, " +
-        "and Conda is not available to provide it"
-    )
-}
-Stop-Launcher "could not create a working venv or Conda environment; check the installation errors above"
+$Python = Get-AppPython $AppEnvironment
+$env:VIRTUAL_ENV = $AppEnvironment
+$env:SBK_ANALYTICS_SOURCE_ROOT = $SourceRoot
+Remove-Item Env:CONDA_PREFIX -ErrorAction SilentlyContinue
+Remove-Item Env:PYTHONPATH -ErrorAction SilentlyContinue
+Remove-Item Env:PYTHONHOME -ErrorAction SilentlyContinue
+$env:PATH = "$(Join-Path $AppEnvironment 'Scripts');$env:PATH"
+Write-LauncherLog "using managed application environment: $AppEnvironment"
+& $Python -P -m analytics @CliArgs
+exit $LASTEXITCODE

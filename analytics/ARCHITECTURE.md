@@ -7,10 +7,12 @@ This document provides a high-level architectural overview of sbk-analytics.
 The extensionless `sbk-analytics` application is the canonical launcher. It
 dispatches to `sbk-analytics.sh` on Linux/macOS or `sbk-analytics.ps1` from a
 Windows-compatible POSIX shell. Native PowerShell invokes the `.ps1` launcher
-directly. These bootstrap layers reuse an active compatible venv/Conda
-environment, reuse or create a launcher-managed environment, and install the
-checkout when dependency inputs change. Bash replaces itself with
-`python -m analytics`; PowerShell waits for Python and propagates its exit code.
+directly. These stage-zero layers need no system Python or Conda: they acquire
+a pinned uv binary with a checked-in platform SHA-256, install exact managed
+Python, and build a non-editable `uv.lock` environment in persistent per-user
+state. Fingerprinted environments are lock-coordinated, health-checked, and
+staged before publication. Bash replaces itself with safe-path Python;
+PowerShell waits for Python and propagates its exit code.
 
 `policy.py` is the dependency-free policy boundary used by the CLI,
 configuration parser, resolver, runner, process manager, charts adapter, and
@@ -184,9 +186,12 @@ cleanup; no local mechanism can initiate new remote cleanup after SIGKILL.
 - Auto-downloads as last resort
 
 ### 2. Environment Separation
-**Decision**: Set SBK_JAVA_HOME, not JAVA_HOME
+**Decision**: Isolate application, sbk-charts, and JDK/SBK runtimes
 
 **Rationale**:
+- Prevents active venv/Conda environments from being modified
+- Prevents sbk-charts dependency upgrades from changing sbk-analytics
+- Makes the exact application runtime reusable offline after first bootstrap
 - Avoids conflicts with user's JAVA_HOME
 - Allows SBK to use specific JDK version
 - Maintains user's environment integrity
@@ -199,6 +204,7 @@ cleanup; no local mechanism can initiate new remote cleanup after SIGKILL.
 - Improves performance
 - Enables offline operation after initial download
 - Simplifies version management
+- Verifies uv platform artifacts and the shipped sbk-charts source archive
 
 ### 4. Execution Modes
 **Decision**: Support both serial and parallel execution

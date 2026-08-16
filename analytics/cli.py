@@ -160,6 +160,11 @@ def _bundled_versions_file() -> Path:
 
     The file lives at the repository root (`<project>/sbk-config.env`).
     """
+    launcher_root = os.environ.get("SBK_ANALYTICS_SOURCE_ROOT")
+    if launcher_root:
+        launcher_file = Path(launcher_root) / "sbk-config.env"
+        if launcher_file.is_file():
+            return launcher_file
     source_tree_file = Path(__file__).resolve().parent.parent / "sbk-config.env"
     if source_tree_file.is_file():
         return source_tree_file
@@ -544,6 +549,7 @@ def _execute(args: argparse.Namespace, json_stream=None) -> int:
     if args.command == "deps" or args.resolve_only:
         charts = ensure_sbk_charts(
             versions.sbk_charts, repo_url=versions.sbk_charts_url,
+            source_sha256=versions.sbk_charts_sha256,
             downloads_folder=versions.downloads_folder, ssl_verify=verify,
             local_folder=versions.sbk_charts_local_folder,
             local_executable=versions.sbk_charts_local_executable,
@@ -648,6 +654,7 @@ def _execute(args: argparse.Namespace, json_stream=None) -> int:
     # 4. Resolve sbk-charts lazily, only after usable CSV input exists.
     charts = ensure_sbk_charts(
         versions.sbk_charts, repo_url=versions.sbk_charts_url,
+        source_sha256=versions.sbk_charts_sha256,
         downloads_folder=versions.downloads_folder, ssl_verify=verify,
         local_folder=versions.sbk_charts_local_folder,
         local_executable=versions.sbk_charts_local_executable,

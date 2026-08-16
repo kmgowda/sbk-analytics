@@ -124,7 +124,8 @@ known-host handling.
 - `resolve_local_sbk()`: Validate a local SBK distribution or built checkout
 - `resolve_local_sbk_charts()`: Validate a local sbk-charts checkout/environment
 - `ensure_sbk()`: Prefer local SBK, otherwise use/download the release cache
-- `ensure_sbk_charts()`: Prefer local sbk-charts, otherwise use conda/cache/install
+- `ensure_sbk_charts()`: Prefer local sbk-charts, otherwise use its isolated,
+  checksum-aware managed environment; never mutate the application runtime
 - `cache_root()`: environment cache selection and platform default
 
 Managed downloads use per-version locks, isolated staging directories,
@@ -329,7 +330,8 @@ pip install sbk-analytics
 ### External Dependencies
 - **JDK**: Temurin/OpenJDK (auto-downloaded)
 - **SBK**: Local ready-to-run checkout or auto-downloaded Storage Benchmark Kit
-- **sbk-charts**: Local ready-to-run checkout, conda package, or auto-installed package
+- **sbk-charts**: Local ready-to-run checkout or checksum-verified source
+  archive installed into a dedicated managed environment
 
 ### Caching
 All external dependencies are cached in:
@@ -355,7 +357,8 @@ selections never fall back to the network.
 ### Key Design Decisions
 
 1. **JDK Resolution**: SBK_JAVA_HOME is set (not JAVA_HOME) to avoid conflicts
-2. **Environment Detection**: Automatically detects conda vs venv
+2. **Environment Isolation**: Never modifies an active conda/venv and always
+   keeps sbk-charts separate from the application runtime
 3. **macOS Logging**: Special handling for Java output buffering
 4. **Caching**: External dependencies cached to avoid re-downloads
 5. **Error Handling**: Graceful degradation for missing dependencies
@@ -368,12 +371,12 @@ selections never fall back to the network.
 10. **Launcher bootstrap**: the extensionless `sbk-analytics` application
     dispatches to `sbk-analytics.sh` on Linux/macOS and
     `sbk-analytics.ps1` in Windows-compatible POSIX shells. Native PowerShell
-    invokes the `.ps1` launcher. The native launchers reuse active or managed
-    environments, prefer venv creation, fall back to Conda, forward all CLI
-    arguments, and preserve the Python CLI exit code. Their fingerprints
-    include the unified application, source path, and environment interpreter
-    identity/version, so moving the checkout or changing Python triggers an
-    editable reinstall
+    invokes the `.ps1` launcher. The native launchers acquire a pinned,
+    SHA-256-verified uv executable, let uv acquire exact Python, and publish a
+    non-editable `uv.lock` environment under per-user state. Active venv/Conda
+    environments must never be modified. Source/lock/platform fingerprints,
+    per-environment locks, health checks, and staged publication make first-run
+    interruption and concurrent launch safe. Healthy environments run offline
 11. **Central policy**: cross-cutting runtime defaults and managed-artifact
     identity/layout belong in `analytics/policy.py`; do not duplicate them in
     resolver, runner, process, CLI, or system-info modules. Pre-Python launcher
@@ -512,6 +515,11 @@ Excel Output
 - `SBK_ANALYTICS_DOWNLOADS_FOLDER`: Override the managed download cache when
   neither CLI nor properties selects one
 - `SBK_ANALYTICS_CACHE`: Legacy alias for the download cache
+- `SBK_ANALYTICS_ENV_HOME`: Override the persistent managed runtime root
+- `SBK_ANALYTICS_BOOTSTRAP_OFFLINE`: Disallow bootstrap downloads during repair
+- `SBK_ANALYTICS_UV_EXECUTABLE`: Trusted uv override for development/tests
+- `SBK_ANALYTICS_SOURCE_ROOT`: Internal launcher handoff preserving the cloned
+  repository's `sbk-config.env` while executing the installed package
 
 ### Exit Codes
 - `0`: Success

@@ -42,6 +42,13 @@ class PropertiesTests(unittest.TestCase):
         self.assertIsNone(versions.sbk_local_folder)
         self.assertIsNone(versions.sbk_charts_local_folder)
 
+    def test_charts_source_digest_is_validated(self):
+        digest = "a" * 64
+        versions, _ = self._parse(f"sbk-charts.sha256={digest.upper()}")
+        self.assertEqual(versions.sbk_charts_sha256, digest)
+        with self.assertRaisesRegex(ValueError, "64 hexadecimal"):
+            self._parse("sbk-charts.sha256=not-a-digest")
+
 
 if __name__ == "__main__":
     unittest.main()
