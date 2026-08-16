@@ -105,6 +105,12 @@ sbk-analytics/
 `sbk-charts.version.policy` (`warn`, `exact`, or `ignore`). Versions are
 conditionally required only when managed resolution is used.
 
+**Security defaults**: TLS verification and SSH host-key verification are
+disabled for compatibility with trusted benchmark labs. Keep the documented
+`ssl.verify=false` default unless the project requirement changes, clearly warn
+users about its trust assumptions, and use `os.devnull` for portable SSH null
+known-host handling.
+
 ### 4. Releases Module (`releases.py`)
 **Purpose**: Dependency resolution and caching
 

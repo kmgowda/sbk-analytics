@@ -13,9 +13,21 @@ Keep product-level defaults here instead of scattering them through resolver,
 runner, process, and configuration code. Algorithm-local constants should
 remain beside their algorithms; values shared across subsystem boundaries or
 representing an operational decision belong in this module.
+
+Security compatibility policy
+-----------------------------
+TLS certificate verification and SSH host-key verification intentionally
+default to disabled for compatibility with isolated benchmark labs and private
+artifact infrastructure. These defaults trust the configured network and
+remote hosts; production or other untrusted environments should enable TLS
+verification (and optionally configure a CA bundle). SSH policy should only be
+used with dedicated, trusted benchmark nodes unless host-key verification is
+enabled here.
 """
 from __future__ import annotations
 
+import os
+import tempfile
 from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Mapping
@@ -51,6 +63,7 @@ class ArtifactMetadata:
     primary_executable: str
     additional_executables: tuple[str, ...] = ()
     repository_slug: str | None = None
+    download_url_template: str | None = None
 
     @property
     def executables(self) -> tuple[str, ...]:
@@ -82,7 +95,8 @@ JDK_ARTIFACT = ArtifactMetadata(
     key="jdk",
     display_name="JDK",
     distribution_name="Temurin JDK",
-    repository_url=(
+    repository_url="https://github.com/adoptium/temurin-binaries",
+    download_url_template=(
         "https://api.adoptium.net/v3/binary/latest/{version}/ga/"
         "{os}/{arch}/jdk/hotspot/normal/eclipse"
     ),
@@ -165,7 +179,7 @@ class SshPolicy:
     default_port: int = 22
     connect_timeout_s: int = 5
     strict_host_key_checking: bool = False
-    known_hosts_file: str = "/dev/null"
+    known_hosts_file: str = os.devnull
     remote_kill_command_timeout_s: float = 10.0
     system_info_command_timeout_s: float = 30.0
 
@@ -202,7 +216,7 @@ class SystemInfoPolicy:
 class ConfigurationPolicy:
     default_mode: str = "serial"
     valid_modes: tuple[str, ...] = ("serial", "parallel")
-    default_workdir: str = f"/tmp/{APPLICATION.name}"
+    default_workdir: str = os.path.join(tempfile.gettempdir(), APPLICATION.name)
     default_output: str = f"{APPLICATION.name}.xlsx"
     default_ai_model: str = "noai"
     valid_ai_models: tuple[str, ...] = (

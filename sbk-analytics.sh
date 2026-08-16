@@ -22,6 +22,47 @@ fi
 # simple assignments shared with the PowerShell implementation.
 # shellcheck disable=SC1090
 . "$BOOTSTRAP_POLICY_FILE"
+
+bootstrap_policy_error() {
+    printf '[sbk-analytics] ERROR: invalid bootstrap policy %s: %s\n' \
+        "$1" "$2" >&2
+    exit 1
+}
+
+validate_policy_integer() {
+    local name="$1" value="$2"
+    case "$value" in
+        ''|*[!0-9]*) bootstrap_policy_error "$name" "expected a non-negative integer" ;;
+    esac
+}
+
+validate_policy_version() {
+    local name="$1" value="$2"
+    [[ "$value" =~ ^[0-9]+([.][0-9]+)+$ ]] ||
+        bootstrap_policy_error "$name" "expected a dotted numeric version"
+}
+
+validate_policy_leaf_name() {
+    local name="$1" value="$2"
+    if [[ -z "$value" || "$value" == "." || "$value" == ".." ||
+          "$value" == */* || "$value" == *\\* ]]; then
+        bootstrap_policy_error "$name" "expected a non-empty filename without path separators"
+    fi
+}
+
+validate_policy_integer "SBK_ANALYTICS_MIN_PYTHON_MAJOR" \
+    "${SBK_ANALYTICS_MIN_PYTHON_MAJOR-}"
+validate_policy_integer "SBK_ANALYTICS_MIN_PYTHON_MINOR" \
+    "${SBK_ANALYTICS_MIN_PYTHON_MINOR-}"
+validate_policy_version "SBK_ANALYTICS_CONDA_PYTHON" \
+    "${SBK_ANALYTICS_CONDA_PYTHON-}"
+validate_policy_leaf_name "SBK_ANALYTICS_VENV_FOLDER" \
+    "${SBK_ANALYTICS_VENV_FOLDER-}"
+validate_policy_leaf_name "SBK_ANALYTICS_CONDA_FOLDER" \
+    "${SBK_ANALYTICS_CONDA_FOLDER-}"
+validate_policy_leaf_name "SBK_ANALYTICS_BOOTSTRAP_MARKER" \
+    "${SBK_ANALYTICS_BOOTSTRAP_MARKER-}"
+
 readonly MIN_PYTHON_MAJOR="$SBK_ANALYTICS_MIN_PYTHON_MAJOR"
 readonly MIN_PYTHON_MINOR="$SBK_ANALYTICS_MIN_PYTHON_MINOR"
 readonly ENV_HOME="${SBK_ANALYTICS_ENV_HOME:-$SCRIPT_DIR}"

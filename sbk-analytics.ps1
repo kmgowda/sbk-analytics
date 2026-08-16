@@ -18,6 +18,16 @@ $CliArgs = [string[]] @($args)
 
 $SourceRoot = $PSScriptRoot
 $BootstrapPolicyPath = Join-Path $SourceRoot "sbk-bootstrap.env"
+function Stop-BootstrapPolicy {
+    param(
+        [string] $Name,
+        [string] $Reason
+    )
+    [Console]::Error.WriteLine(
+        "[sbk-analytics] ERROR: invalid bootstrap policy ${Name}: $Reason"
+    )
+    exit 1
+}
 if (-not (Test-Path -LiteralPath $BootstrapPolicyPath -PathType Leaf)) {
     [Console]::Error.WriteLine(
         "[sbk-analytics] ERROR: bootstrap policy is missing: $BootstrapPolicyPath"
@@ -32,25 +42,58 @@ foreach ($line in Get-Content -LiteralPath $BootstrapPolicyPath) {
     }
     $parts = $trimmed.Split("=", 2)
     if ($parts.Count -ne 2) {
-        throw "invalid bootstrap policy line: $line"
+        Stop-BootstrapPolicy "line" "expected KEY=VALUE, got '$line'"
     }
     $BootstrapPolicy[$parts[0].Trim()] = $parts[1].Trim()
 }
 function Get-BootstrapPolicyValue {
     param([string] $Name)
     if (-not $BootstrapPolicy.ContainsKey($Name)) {
-        throw "bootstrap policy is missing required key: $Name"
+        Stop-BootstrapPolicy $Name "required key is missing"
     }
-    return $BootstrapPolicy[$Name]
+    $value = [string] $BootstrapPolicy[$Name]
+    if ([string]::IsNullOrWhiteSpace($value)) {
+        Stop-BootstrapPolicy $Name "value must not be empty"
+    }
+    return $value
 }
-$MinimumPythonMajor = [int] (Get-BootstrapPolicyValue `
-    "SBK_ANALYTICS_MIN_PYTHON_MAJOR")
-$MinimumPythonMinor = [int] (Get-BootstrapPolicyValue `
-    "SBK_ANALYTICS_MIN_PYTHON_MINOR")
+function Assert-BootstrapPolicyInteger {
+    param([string] $Name, [string] $Value)
+    if ($Value -notmatch '^\d+$') {
+        Stop-BootstrapPolicy $Name "expected a non-negative integer"
+    }
+}
+function Assert-BootstrapPolicyVersion {
+    param([string] $Name, [string] $Value)
+    if ($Value -notmatch '^\d+(\.\d+)+$') {
+        Stop-BootstrapPolicy $Name "expected a dotted numeric version"
+    }
+}
+function Assert-BootstrapPolicyLeafName {
+    param([string] $Name, [string] $Value)
+    if ($Value -eq "." -or $Value -eq ".." -or $Value -match '[\\/]') {
+        Stop-BootstrapPolicy $Name `
+            "expected a non-empty filename without path separators"
+    }
+}
+$MinimumPythonMajorText = Get-BootstrapPolicyValue `
+    "SBK_ANALYTICS_MIN_PYTHON_MAJOR"
+$MinimumPythonMinorText = Get-BootstrapPolicyValue `
+    "SBK_ANALYTICS_MIN_PYTHON_MINOR"
 $CondaPythonVersion = Get-BootstrapPolicyValue "SBK_ANALYTICS_CONDA_PYTHON"
 $ManagedVenvFolder = Get-BootstrapPolicyValue "SBK_ANALYTICS_VENV_FOLDER"
 $ManagedCondaFolder = Get-BootstrapPolicyValue "SBK_ANALYTICS_CONDA_FOLDER"
 $BootstrapMarker = Get-BootstrapPolicyValue "SBK_ANALYTICS_BOOTSTRAP_MARKER"
+Assert-BootstrapPolicyInteger "SBK_ANALYTICS_MIN_PYTHON_MAJOR" `
+    $MinimumPythonMajorText
+Assert-BootstrapPolicyInteger "SBK_ANALYTICS_MIN_PYTHON_MINOR" `
+    $MinimumPythonMinorText
+Assert-BootstrapPolicyVersion "SBK_ANALYTICS_CONDA_PYTHON" $CondaPythonVersion
+Assert-BootstrapPolicyLeafName "SBK_ANALYTICS_VENV_FOLDER" $ManagedVenvFolder
+Assert-BootstrapPolicyLeafName "SBK_ANALYTICS_CONDA_FOLDER" $ManagedCondaFolder
+Assert-BootstrapPolicyLeafName "SBK_ANALYTICS_BOOTSTRAP_MARKER" $BootstrapMarker
+$MinimumPythonMajor = [int] $MinimumPythonMajorText
+$MinimumPythonMinor = [int] $MinimumPythonMinorText
 $EnvironmentHome = if ($env:SBK_ANALYTICS_ENV_HOME) {
     [IO.Path]::GetFullPath($env:SBK_ANALYTICS_ENV_HOME)
 } else {

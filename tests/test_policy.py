@@ -1,5 +1,7 @@
 import ast
 import dataclasses
+import os
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -56,6 +58,18 @@ class PolicyTests(unittest.TestCase):
         self.assertEqual(SBK_ARTIFACT.executables, ("sbk-yal", "sbk-gem-yal"))
         self.assertEqual(SBK_CHARTS_ARTIFACT.executables, ("sbk-charts",))
         self.assertEqual(JDK_ARTIFACT.executables, ("java",))
+        self.assertEqual(
+            JDK_ARTIFACT.repository_url,
+            "https://github.com/adoptium/temurin-binaries",
+        )
+        self.assertIn("{version}", JDK_ARTIFACT.download_url_template)
+
+    def test_platform_paths_come_from_the_host_runtime(self):
+        self.assertEqual(RUNTIME_POLICY.ssh.known_hosts_file, os.devnull)
+        self.assertEqual(
+            RUNTIME_POLICY.configuration.default_workdir,
+            os.path.join(tempfile.gettempdir(), APPLICATION.name),
+        )
 
     def test_runtime_ordering_constraints_are_valid(self):
         benchmark = RUNTIME_POLICY.benchmarks

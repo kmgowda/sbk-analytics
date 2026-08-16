@@ -1109,7 +1109,10 @@ def _jdk_url(version: str) -> str:
         "darwin": "mac",
         "win32": "windows",
     }.get(sys.platform, sys.platform)
-    return JDK_ARTIFACT.repository_url.format(
+    template = JDK_ARTIFACT.download_url_template
+    if template is None:
+        raise RuntimeError("JDK artifact download URL template is not configured")
+    return template.format(
         version=version, os=os_name, arch=arch
     )
 

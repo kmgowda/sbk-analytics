@@ -232,7 +232,12 @@ orchestrates need a working runtime on the host:
 | `git`     | any        | Used by `pip` when installing a configured remote sbk-charts tag. Not needed for a ready-to-run local sbk-charts checkout. |
 | Internet access | conditional | Needed for dependencies that are neither configured locally nor already cached. |
 
-TLS verification defaults to `false`, as shown in the bundled configuration:
+### Security compatibility defaults
+
+TLS verification defaults to `false`, as shown in the bundled configuration.
+This compatibility default is intended for isolated benchmark labs and private
+artifact infrastructure; it trusts the configured network and must not be
+treated as a secure Internet-facing default:
 
 ```ini
 # sbk-config.env
@@ -243,6 +248,12 @@ This disables SSL verification for:
 - GitHub API calls (release metadata)
 - SBK/JDK downloads via requests
 - pip git-based installations of sbk-charts
+
+When TLS verification is disabled, dependency resolution also supplies the centralized
+trusted-host list to pip. Remote SBK-GEM cleanup and system-information probes
+likewise disable SSH host-key checking and use the operating system's null
+known-hosts file. Use those SSH features only with dedicated, trusted benchmark
+nodes unless the centralized SSH policy is hardened for your environment.
 
 For stricter environments, set `ssl.verify=true`. A private trust root can be
 selected with `ssl.ca.bundle=/path/to/company-ca.pem`. Invalid boolean values
@@ -698,7 +709,7 @@ Recognised keys (case-insensitive; dots / underscores / dashes interchangeable):
 | `downloads.folder` | no (defaults to `./.sbk`) | Shared local folder for downloaded SBK and sbk-charts installations. Use `./.sbk` for a project-local cache. |
 | `sbk.jdk.version`| no (defaults to `25`) | Required JDK major version. |
 | `sbk.jdk.folder`| no (defaults to `./.jdk`) | Local folder for JDK installation. Use `./.jdk` for project-local cache. |
-| `ssl.verify`     | no (defaults to `true`) | Enable SSL verification for downloads. |
+| `ssl.verify`     | no (defaults to `false`) | Enable SSL verification for downloads. Set to `true` outside trusted benchmark networks. |
 | `sbk-charts.url` | no (defaults to `https://github.com/kmgowda/sbk-charts`) | Same format as `sbk.url`. |
 | `sbk-charts.version` | yes | Tag on the sbk-charts repository. |
 | `sbk-charts.local.folder` | no | Ready-to-run sbk-charts checkout or environment. Takes priority over conda, cache, and URL. |

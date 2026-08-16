@@ -203,9 +203,54 @@ chmod +x "$prefix/bin/python"
         self.assertEqual(result.returncode, 7)
         self.assertIn(f"using conda environment: {active}", result.stderr)
 
+    def test_invalid_bootstrap_policy_fails_with_clear_error(self):
+        launcher_root = self.root / "invalid-policy"
+        launcher_root.mkdir()
+        shutil.copy2(LAUNCHER, launcher_root / LAUNCHER.name)
+        policy = (ROOT / "sbk-bootstrap.env").read_text().replace(
+            "SBK_ANALYTICS_MIN_PYTHON_MINOR=9",
+            "SBK_ANALYTICS_MIN_PYTHON_MINOR=nine",
+        )
+        (launcher_root / "sbk-bootstrap.env").write_text(policy)
+        result = subprocess.run(
+            [self.bash, str(launcher_root / LAUNCHER.name), "--version"],
+            cwd=self.root,
+            env=self.env,
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("invalid bootstrap policy", result.stderr)
+        self.assertIn("SBK_ANALYTICS_MIN_PYTHON_MINOR", result.stderr)
+
 
 @unittest.skipUnless(os.name == "nt", "PowerShell launcher requires Windows")
 class WindowsLauncherTests(unittest.TestCase):
+    def test_invalid_bootstrap_policy_fails_with_clear_error(self):
+        with tempfile.TemporaryDirectory() as directory:
+            launcher_root = Path(directory)
+            launcher = launcher_root / WINDOWS_LAUNCHER.name
+            shutil.copy2(WINDOWS_LAUNCHER, launcher)
+            policy = (ROOT / "sbk-bootstrap.env").read_text().replace(
+                "SBK_ANALYTICS_CONDA_PYTHON=3.10",
+                "SBK_ANALYTICS_CONDA_PYTHON=latest",
+            )
+            (launcher_root / "sbk-bootstrap.env").write_text(policy)
+            result = subprocess.run(
+                [
+                    "powershell.exe", "-NoLogo", "-NoProfile",
+                    "-NonInteractive", "-ExecutionPolicy", "Bypass",
+                    "-File", str(launcher), "--version",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            self.assertEqual(result.returncode, 1)
+            self.assertIn("invalid bootstrap policy", result.stderr)
+            self.assertIn("SBK_ANALYTICS_CONDA_PYTHON", result.stderr)
+
     def test_real_bootstrap_reuse_json_and_exit_code(self):
         with tempfile.TemporaryDirectory() as directory:
             environment_home = Path(directory) / "environments"
