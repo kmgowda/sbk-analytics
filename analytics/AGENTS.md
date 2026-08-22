@@ -1030,7 +1030,7 @@ sbk-charts:
 
 ## Version History
 
-- **1.26.8.1**: Current release
+- **1.26.8.2**: Current main version
   - JDK resolution with priority order
   - Conda and venv support
   - macOS logging fixes
