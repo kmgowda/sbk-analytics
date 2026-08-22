@@ -354,7 +354,6 @@ bootstrap_application() {
     release_lock
 }
 
-CLI_ARGS=("$@")
 unset VIRTUAL_ENV CONDA_PREFIX PYTHONPATH PYTHONHOME 2>/dev/null || true
 FINGERPRINT="$(source_fingerprint)" || fail "could not fingerprint application sources"
 APP_ENV="$APP_ROOT/$FINGERPRINT"
@@ -372,4 +371,4 @@ unset PYTHONPATH PYTHONHOME 2>/dev/null || true
 export PATH="$APP_ENV/bin:$PATH"
 log "using managed application environment: $APP_ENV"
 trap - EXIT HUP INT TERM
-exec "$PYTHON" -P -m analytics "${CLI_ARGS[@]}"
+exec "$PYTHON" -P -m analytics "$@"
