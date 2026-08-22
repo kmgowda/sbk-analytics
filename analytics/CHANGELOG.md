@@ -5,31 +5,9 @@ All notable changes to sbk-analytics will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.26.6.1] - 2026-06-14
-
-### Added
-- Apache 2.0 license headers to all Python source files
-- Project configuration files (.editorconfig, GitHub templates)
-- Comprehensive documentation for AI agents (AGENTS.md)
-- Architecture documentation (ARCHITECTURE.md)
-- Contribution guidelines (CONTRIBUTING.md)
-- Development reference (DEVELOPMENT.md)
-- Support documentation (SUPPORT.md)
-- Single source of truth for version management
-
-### Changed
-- Version updated to 1.26.6.1
-- Dynamic versioning from package __init__.py
-- Enhanced README.md with AI agent documentation section
-
-### Fixed
-- SBK logo missing in Excel reports by adding Pillow and image loader dependencies
-- JDK resolution logic to prioritize SBK_JAVA_HOME over JAVA_HOME to avoid version conflicts
-- macOS logging issues with --forward-logs flag for real-time log forwarding
-- Documentation to reflect actual cache implementation with extracted/ subdirectories
-- Configuration table to show correct defaults for project-local folders
-
 ## [Unreleased]
+
+## [1.26.8.2] - 2026-08-22
 
 ### Added
 - Fully self-contained Bash and PowerShell launchers for Linux, macOS, and
@@ -105,6 +83,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   progress plus child-process output to stderr
 - Cache documentation distinguishes POSIX atomic publication from
   lock-coordinated Windows publication
+
+## [1.26.6.1] - 2026-06-14
+
+### Added
+- Apache 2.0 license headers to all Python source files
+- Project configuration files (.editorconfig, GitHub templates)
+- Comprehensive documentation for AI agents (AGENTS.md)
+- Architecture documentation (ARCHITECTURE.md)
+- Contribution guidelines (CONTRIBUTING.md)
+- Development reference (DEVELOPMENT.md)
+- Support documentation (SUPPORT.md)
+- Single source of truth for version management
+
+### Changed
+- Version updated to 1.26.6.1
+- Dynamic versioning from package __init__.py
+- Enhanced README.md with AI agent documentation section
+
+### Fixed
+- SBK logo missing in Excel reports by adding Pillow and image loader dependencies
+- JDK resolution logic to prioritize SBK_JAVA_HOME over JAVA_HOME to avoid version conflicts
+- macOS logging issues with --forward-logs flag for real-time log forwarding
+- Documentation to reflect actual cache implementation with extracted/ subdirectories
+- Configuration table to show correct defaults for project-local folders
 
 ## [0.1.0] - 2025-12-XX
 
