@@ -141,6 +141,11 @@ exit 2
         self.assertIn("uv\tvenv\t--managed-python", calls)
         self.assertIn("uv\tsync\t--active\t--locked\t--no-editable", calls)
 
+    def test_no_arguments_are_supported(self):
+        result = self._run()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("python\t-P\t-m\tanalytics\n", self.log.read_text())
+
     def test_second_run_is_offline_and_does_not_invoke_uv(self):
         first = self._run("--version")
         self.assertEqual(first.returncode, 0, first.stderr)
