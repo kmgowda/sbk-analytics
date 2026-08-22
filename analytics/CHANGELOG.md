@@ -58,6 +58,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Opt-in, workdir-confined file benchmark cleanup and disk-space reporting
 
 ### Fixed
+- Launcher fingerprints now cover all runtime source and configuration inputs,
+  and new environments force a local package rebuild so cached wheels cannot
+  report or execute an older sbk-analytics version
 - Made SSH null-device handling and the default benchmark work directory
   platform-aware, and added clear validation errors for malformed native
   launcher policy values

@@ -11,7 +11,9 @@ directly. These stage-zero layers need no system Python or Conda: they acquire
 a pinned uv binary with a checked-in platform SHA-256, install exact managed
 Python, and build a non-editable `uv.lock` environment in persistent per-user
 state. Fingerprinted environments are lock-coordinated, health-checked, and
-staged before publication. Bash replaces itself with safe-path Python;
+staged before publication. Runtime source and configuration inputs participate
+in the fingerprint, and each new environment forces a fresh local-package
+build rather than accepting a cached wheel. Bash replaces itself with safe-path Python;
 PowerShell waits for Python and propagates its exit code.
 
 `policy.py` is the dependency-free policy boundary used by the CLI,

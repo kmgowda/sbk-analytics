@@ -95,7 +95,7 @@ not require system Python, venv, or Conda. On the first run they:
 3. Let uv install the exact Python version from `.python-version` into private
    application state.
 4. Create a staged environment and install `uv.lock` with `--locked` and
-   `--no-editable`.
+   `--no-editable`, forcing the local application package to be rebuilt.
 5. Health-check the environment, write metadata last, and publish it under its
    source/lock fingerprint.
 
@@ -103,6 +103,11 @@ Later runs validate and execute the saved environment without invoking uv or
 the network. Concurrent launchers share per-environment locks; interrupted or
 corrupt staging directories are never reused. Active `VIRTUAL_ENV` and
 `CONDA_PREFIX` environments are deliberately not modified.
+
+The fingerprint covers all runtime Python sources, packaged text/configuration,
+root dependency and configuration files, examples, and every native launcher.
+Changing any of those inputs creates a new environment and rebuilds the local
+package, so a cached wheel cannot hide a source or version update.
 
 The default runtime state is `${XDG_STATE_HOME:-~/.local/state}/sbk-analytics`
 on Linux, `~/Library/Application Support/sbk-analytics` on macOS, and

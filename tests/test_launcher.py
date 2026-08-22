@@ -26,12 +26,17 @@ class LauncherTests(unittest.TestCase):
             "sbk-analytics.sh",
             "sbk-analytics.ps1",
             "sbk-bootstrap.env",
+            "sbk-config.env",
             "pyproject.toml",
+            "requirements.txt",
+            "environment.yml",
+            "MANIFEST.in",
             "uv.lock",
             ".python-version",
         ):
             shutil.copy2(ROOT / name, self.source / name)
         shutil.copytree(ROOT / "analytics", self.source / "analytics")
+        shutil.copytree(ROOT / "examples", self.source / "examples")
 
         self.application = self.source / "sbk-analytics"
         self.launcher = self.source / "sbk-analytics.sh"
@@ -140,6 +145,7 @@ exit 2
         self.assertIn("uv\tpython\tinstall", calls)
         self.assertIn("uv\tvenv\t--managed-python", calls)
         self.assertIn("uv\tsync\t--active\t--locked\t--no-editable", calls)
+        self.assertIn("--reinstall-package\tsbk-analytics", calls)
 
     def test_no_arguments_are_supported(self):
         result = self._run()
@@ -172,8 +178,18 @@ exit 2
 
     def test_source_change_builds_new_versioned_environment(self):
         first = self._run("--version")
-        banner = self.source / "analytics" / "banner.txt"
-        banner.write_text(banner.read_text() + "\n")
+        source = self.source / "analytics" / "__init__.py"
+        source.write_text(source.read_text() + "\n")
+        second = self._run("--version")
+        self.assertEqual(first.returncode, 0, first.stderr)
+        self.assertEqual(second.returncode, 0, second.stderr)
+        self.assertEqual(self.log.read_text().count("uv\tsync"), 2)
+        self.assertEqual(len(self._app_environments()), 2)
+
+    def test_configuration_change_builds_new_versioned_environment(self):
+        first = self._run("--version")
+        config = self.source / "sbk-config.env"
+        config.write_text(config.read_text() + "\n# fingerprint regression\n")
         second = self._run("--version")
         self.assertEqual(first.returncode, 0, first.stderr)
         self.assertEqual(second.returncode, 0, second.stderr)

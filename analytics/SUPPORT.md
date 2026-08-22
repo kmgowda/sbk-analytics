@@ -27,8 +27,9 @@ If you're new to sbk-analytics, start with:
   healthy saved environment is automatically reused without invoking uv
 - A checksum error is never bypassed. Check proxy/content rewriting and the
   platform SHA-256 values in `sbk-bootstrap.env`
-- Source or lock changes create a new versioned environment. Corrupt or
-  interrupted staging directories are repaired without reusing partial state
+- Runtime source, root/package configuration, example YAML, launcher, or lock
+  changes create a freshly built versioned environment. Corrupt or interrupted
+  staging directories are repaired without reusing partial or stale-wheel state
 
 **Problem**: `pip install -e .` fails
 - Ensure you're using Python 3.9+

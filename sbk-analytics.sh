@@ -169,22 +169,28 @@ sha256_file() {
 
 source_fingerprint() {
     {
-        printf 'schema=2\npython=%s\nuv=%s\nplatform=%s\n' \
+        printf 'schema=3\npython=%s\nuv=%s\nplatform=%s\n' \
             "$PYTHON_VERSION" "$UV_VERSION" "$PLATFORM_ID"
         for path in \
             "$SCRIPT_DIR/pyproject.toml" \
             "$SCRIPT_DIR/uv.lock" \
             "$SCRIPT_DIR/.python-version" \
             "$SCRIPT_DIR/sbk-bootstrap.env" \
+            "$SCRIPT_DIR/sbk-config.env" \
+            "$SCRIPT_DIR/requirements.txt" \
+            "$SCRIPT_DIR/environment.yml" \
+            "$SCRIPT_DIR/MANIFEST.in" \
             "$SCRIPT_DIR/sbk-analytics" \
-            "$SCRIPT_DIR/sbk-analytics.sh"; do
+            "$SCRIPT_DIR/sbk-analytics.sh" \
+            "$SCRIPT_DIR/sbk-analytics.ps1"; do
             [[ -f "$path" ]] || fail "bootstrap input is missing: $path"
             printf '%s %s\n' "${path#"$SCRIPT_DIR/"}" "$(sha256_file "$path")"
         done
         while IFS= read -r path; do
             printf '%s %s\n' "${path#"$SCRIPT_DIR/"}" "$(sha256_file "$path")"
-        done < <(find "$SCRIPT_DIR/analytics" -type f \
-            \( -name '*.py' -o -name '*.txt' -o -name '*.env' \) | LC_ALL=C sort)
+        done < <(find "$SCRIPT_DIR/analytics" "$SCRIPT_DIR/examples" -type f \
+            \( -name '*.py' -o -name '*.txt' -o -name '*.env' \
+               -o -name '*.yml' -o -name '*.yaml' \) | LC_ALL=C sort)
     } | sha256_stream
 }
 
@@ -338,7 +344,8 @@ bootstrap_application() {
         VIRTUAL_ENV="$CURRENT_STAGE" UV_CACHE_DIR="$MANAGED_UV_CACHE" \
             UV_PYTHON_INSTALL_DIR="$MANAGED_PYTHON_ROOT" \
             "$uv_bin" sync --active --locked --no-editable --no-dev \
-            --python "$python_bin" ${offline:+"$offline"} >&2
+            --reinstall-package sbk-analytics --python "$python_bin" \
+            ${offline:+"$offline"} >&2
     ) || fail "could not install the locked application environment"
     printf '%s\n' "$fingerprint" >"$CURRENT_STAGE/$BOOTSTRAP_MARKER"
     printf '{"schema":2,"fingerprint":"%s","python":"%s","platform":"%s","uv":"%s"}\n' \

@@ -374,9 +374,10 @@ selections never fall back to the network.
     invokes the `.ps1` launcher. The native launchers acquire a pinned,
     SHA-256-verified uv executable, let uv acquire exact Python, and publish a
     non-editable `uv.lock` environment under per-user state. Active venv/Conda
-    environments must never be modified. Source/lock/platform fingerprints,
-    per-environment locks, health checks, and staged publication make first-run
-    interruption and concurrent launch safe. Healthy environments run offline
+    environments must never be modified. Runtime source/config/lock/platform
+    fingerprints, forced local-package rebuilds, per-environment locks, health
+    checks, and staged publication make first-run interruption and concurrent
+    launch safe. Healthy environments run offline
 11. **Central policy**: cross-cutting runtime defaults and managed-artifact
     identity/layout belong in `analytics/policy.py`; do not duplicate them in
     resolver, runner, process, CLI, or system-info modules. Pre-Python launcher

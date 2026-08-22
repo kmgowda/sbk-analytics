@@ -144,17 +144,22 @@ function Get-SourceFingerprint {
     $sha256 = [Security.Cryptography.SHA256]::Create()
     $stream = New-Object IO.MemoryStream
     try {
-        $header = "schema=2`npython=$PythonVersion`nuv=$UvVersion`nplatform=$PlatformId`n"
+        $header = "schema=3`npython=$PythonVersion`nuv=$UvVersion`nplatform=$PlatformId`n"
         $headerBytes = [Text.Encoding]::UTF8.GetBytes($header)
         $stream.Write($headerBytes, 0, $headerBytes.Length)
         $files = @(
             "pyproject.toml", "uv.lock", ".python-version", "sbk-bootstrap.env",
-            "sbk-analytics", "sbk-analytics.ps1"
+            "sbk-config.env", "requirements.txt", "environment.yml", "MANIFEST.in",
+            "sbk-analytics", "sbk-analytics.sh", "sbk-analytics.ps1"
         ) | ForEach-Object { Join-Path $SourceRoot $_ }
-        $files += @(Get-ChildItem -LiteralPath (Join-Path $SourceRoot "analytics") `
-            -Recurse -File | Where-Object {
+        $runtimeFolders = @("analytics", "examples") | ForEach-Object {
+            Join-Path $SourceRoot $_
+        }
+        $files += @(Get-ChildItem -LiteralPath $runtimeFolders -Recurse -File |
+            Where-Object {
                 $_.Extension -eq ".py" -or $_.Extension -eq ".txt" -or
-                $_.Extension -eq ".env"
+                $_.Extension -eq ".env" -or $_.Extension -eq ".yml" -or
+                $_.Extension -eq ".yaml"
             } | Select-Object -ExpandProperty FullName)
         $sourcePrefix = $SourceRoot.TrimEnd([IO.Path]::DirectorySeparatorChar)
         foreach ($path in ($files | Sort-Object)) {
@@ -353,7 +358,7 @@ function Initialize-Application {
         try {
             if (-not (Invoke-Uv $Uv (@(
                 "sync", "--active", "--locked", "--no-editable", "--no-dev",
-                "--python", $python
+                "--reinstall-package", "sbk-analytics", "--python", $python
             ) + $offline))) {
                 Stop-Launcher "could not install the locked application environment"
             }
