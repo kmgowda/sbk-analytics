@@ -22,7 +22,7 @@ conda activate sbk-analytics
 
 # Or use venv
 python -m venv .venv
-source .venv/bin/activate  # Windows: .venv\Scripts\activate
+source .venv/bin/activate
 
 # Install in development mode
 pip install -e .
@@ -75,7 +75,7 @@ sbk-analytics/
    sbk-analytics -c examples/config.yml -v
    ```
 
-3. Test on multiple platforms (Linux, macOS, Windows if possible)
+3. Test on the supported platforms (Linux and macOS)
 
 ### Documentation Updates
 - Update relevant docstrings in code
@@ -132,7 +132,6 @@ Brief description of changes
 - [ ] Tested with example configurations
 - [ ] Tested on Linux
 - [ ] Tested on macOS
-- [ ] Tested on Windows (if applicable)
 
 ## Documentation
 - [ ] Updated README.md

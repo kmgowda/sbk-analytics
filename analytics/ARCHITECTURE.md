@@ -4,17 +4,15 @@ This document provides a high-level architectural overview of sbk-analytics.
 
 ## System Architecture
 
-The extensionless `sbk-analytics` application is the canonical launcher. It
-dispatches to `sbk-analytics.sh` on Linux/macOS or `sbk-analytics.ps1` from a
-Windows-compatible POSIX shell. Native PowerShell invokes the `.ps1` launcher
-directly. These stage-zero layers need no system Python or Conda: they acquire
+The extensionless `sbk-analytics` application is the canonical Linux/macOS
+launcher and dispatches to `sbk-analytics.sh`. Native Windows is not supported.
+These stage-zero layers need no system Python or Conda: they acquire
 a pinned uv binary with a checked-in platform SHA-256, install exact managed
 Python, and build a non-editable `uv.lock` environment in persistent per-user
 state. Fingerprinted environments are lock-coordinated, health-checked, and
 staged before publication. Runtime source and configuration inputs participate
 in the fingerprint, and each new environment forces a fresh local-package
-build rather than accepting a cached wheel. Bash replaces itself with safe-path Python;
-PowerShell waits for Python and propagates its exit code.
+build rather than accepting a cached wheel. Bash replaces itself with safe-path Python.
 
 `policy.py` is the dependency-free policy boundary used by the CLI,
 configuration parser, resolver, runner, process manager, charts adapter, and
@@ -92,7 +90,7 @@ compatible interpreter and environment exist.
 │          Process Lifecycle Module (processes.py)             │
 │  - Isolated workload process trees                           │
 │  - Signal and parent-death cleanup                           │
-│  - POSIX liveness guard / Windows Job Object                 │
+│  - POSIX liveness guard                                      │
 └─────────────────────────┬───────────────────────────────────┘
                           │
                           ▼
@@ -146,8 +144,7 @@ lazy during normal runs, so a failed SBK workload does not trigger a charts
 install. `deps doctor` intentionally resolves and starts all three tools.
 Archive members are checked before extraction, and managed installs are
 published only after executable validation and metadata creation. Directory
-publication is atomic on POSIX. On Windows it is coordinated by the same
-per-version lock, but is not documented as an atomic directory replacement.
+publication is atomic and coordinated by a per-version lock.
 
 ### 3. Execution Flow
 ```
@@ -167,8 +164,7 @@ System sheet → Final Excel output
 ```
 cli.py signal context → runner.py / charts.py → managed process tree
 catchable signal → workload-specific cleanup → TERM → 3 s grace → KILL
-POSIX parent death → liveness-pipe EOF → independent guard → TERM/KILL group
-Windows parent death → Job Object handle close → kill complete job tree
+parent death → liveness-pipe EOF → independent guard → TERM/KILL group
 ```
 
 Every SBK and sbk-charts invocation is registered until its complete process
@@ -328,7 +324,7 @@ System info → System sheet → Excel report
 ### Platforms
 - **Primary**: Linux
 - **Supported**: macOS (with special handling)
-- **Experimental**: Windows
+- **Not supported**: Native Windows
 
 ## Monitoring and Observability
 

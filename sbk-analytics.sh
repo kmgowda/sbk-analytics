@@ -26,7 +26,7 @@ fail() {
 
 [[ -r "$BOOTSTRAP_POLICY_FILE" ]] ||
     fail "bootstrap policy is missing: $BOOTSTRAP_POLICY_FILE"
-# This trusted, shipped file contains simple assignments shared with PowerShell.
+# This trusted, shipped file contains simple launcher policy assignments.
 # shellcheck disable=SC1090
 . "$BOOTSTRAP_POLICY_FILE"
 
@@ -181,8 +181,7 @@ source_fingerprint() {
             "$SCRIPT_DIR/environment.yml" \
             "$SCRIPT_DIR/MANIFEST.in" \
             "$SCRIPT_DIR/sbk-analytics" \
-            "$SCRIPT_DIR/sbk-analytics.sh" \
-            "$SCRIPT_DIR/sbk-analytics.ps1"; do
+            "$SCRIPT_DIR/sbk-analytics.sh"; do
             [[ -f "$path" ]] || fail "bootstrap input is missing: $path"
             printf '%s %s\n' "${path#"$SCRIPT_DIR/"}" "$(sha256_file "$path")"
         done

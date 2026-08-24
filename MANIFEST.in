@@ -9,7 +9,6 @@ include .python-version
 include uv.lock
 include sbk-analytics
 include sbk-analytics.sh
-include sbk-analytics.ps1
 recursive-include analytics *.py
 recursive-include analytics *.txt
 recursive-include analytics *.md

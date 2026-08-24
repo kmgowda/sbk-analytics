@@ -80,10 +80,7 @@ class ForcedParentExitTests(unittest.TestCase):
             "stdout": subprocess.DEVNULL,
             "stderr": subprocess.DEVNULL,
         }
-        if os.name == "nt":
-            kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
-        else:
-            kwargs["start_new_session"] = True
+        kwargs["start_new_session"] = True
         return subprocess.Popen([sys.executable, "-c", controller], **kwargs)
 
     def _assert_parent_exit_cleans_tree(self, forced: bool) -> None:
@@ -98,8 +95,6 @@ class ForcedParentExitTests(unittest.TestCase):
                 self.assertTrue(_running(grand_pid))
                 if forced:
                     controller.kill()
-                elif os.name == "nt":
-                    controller.terminate()
                 else:
                     os.kill(controller.pid, signal.SIGTERM)
                 controller.wait(timeout=10)
@@ -109,18 +104,10 @@ class ForcedParentExitTests(unittest.TestCase):
                     controller.kill()
                     controller.wait(timeout=5)
                 if child_pid is not None and _running(child_pid):
-                    if os.name == "nt":
-                        subprocess.run(
-                            ["taskkill", "/PID", str(child_pid), "/T", "/F"],
-                            stdout=subprocess.DEVNULL,
-                            stderr=subprocess.DEVNULL,
-                            check=False,
-                        )
-                    else:
-                        try:
-                            os.killpg(child_pid, signal.SIGKILL)
-                        except ProcessLookupError:
-                            pass
+                    try:
+                        os.killpg(child_pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
 
     def test_sigterm_cleans_child_and_grandchild(self):
         self._assert_parent_exit_cleans_tree(forced=False)
@@ -128,7 +115,6 @@ class ForcedParentExitTests(unittest.TestCase):
     def test_forced_parent_exit_cleans_child_and_grandchild(self):
         self._assert_parent_exit_cleans_tree(forced=True)
 
-    @unittest.skipIf(os.name == "nt", "POSIX signal exit-code behavior")
     def test_sigterm_cli_json_is_one_document(self):
         with tempfile.TemporaryDirectory() as directory:
             ready = Path(directory) / "ready"
@@ -170,7 +156,6 @@ class ForcedParentExitTests(unittest.TestCase):
             self.assertEqual(payload["signal"], signal.SIGTERM)
 
 
-@unittest.skipIf(os.name == "nt", "POSIX process-group behavior")
 class ManagedProcessTests(unittest.TestCase):
     def test_permission_error_during_group_signal_is_best_effort(self):
         with mock.patch(

@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+- Native Windows launcher, bootstrap checksums, CI job, packaging, tests, and
+  runtime-specific process/cache branches. Supported application targets are
+  now Linux and macOS.
+
 ## [1.26.8.2] - 2026-08-22
 
 ### Added

@@ -39,10 +39,9 @@ sbk-analytics/
 │   ├── config.yml
 │   └── local-smoke-test.yml      # Fast local end-to-end validation
 ├── sbk-config.env              # SBK configuration (versions, URLs, folders)
-├── sbk-bootstrap.env           # Shared native-launcher policy
-├── sbk-analytics               # Unified cross-platform launcher
+├── sbk-bootstrap.env           # Linux/macOS launcher policy
+├── sbk-analytics               # Canonical Linux/macOS launcher
 ├── sbk-analytics.sh            # Self-bootstrapping Linux/macOS launcher
-├── sbk-analytics.ps1           # Self-bootstrapping Windows launcher
 ├── sbk-config.local.env.example # Local-package configuration template
 ├── environment.yml              # Conda environment specification
 ├── requirements.txt             # Python dependencies
@@ -130,7 +129,7 @@ known-host handling.
 
 Managed downloads use per-version locks, isolated staging directories,
 validated executables, `metadata.json`, and a final `.ok` marker. Publishing is
-atomic on POSIX and lock-coordinated on Windows. Archive extraction rejects
+atomic and lock-coordinated. Archive extraction rejects
 traversal, links, devices, and FIFOs. GitHub SHA-256 asset digests are verified
 when the API supplies one.
 
@@ -192,10 +191,9 @@ to a consumer module.
 sbk-analytics invocation
 
 **Key behavior**:
-- Starts each workload in an isolated POSIX session or Windows process group
+- Starts each workload in an isolated POSIX session
 - Uses a POSIX liveness-pipe guard for cleanup after abrupt parent death
-- Uses a Windows `KILL_ON_JOB_CLOSE` Job Object for descendant cleanup
-- Handles SIGINT, SIGTERM, SIGHUP, SIGQUIT, and Windows SIGBREAK with a
+- Handles SIGINT, SIGTERM, SIGHUP, and SIGQUIT with a
   3-second graceful window
 - Registers an `atexit` fallback and escalates from tree TERM to tree KILL
 - Runner exception paths retain best-effort remote cleanup for sbk-gem jobs
@@ -287,9 +285,6 @@ classes:
 # Linux/macOS automatic environment setup
 ./sbk-analytics --version
 
-# Windows PowerShell automatic environment setup
-.\sbk-analytics.ps1 --version
-
 # Create virtual environment
 python -m venv .venv
 source .venv/bin/activate
@@ -369,9 +364,8 @@ selections never fall back to the network.
 9. **Process ownership**: SBK and charts launches must use `managed_popen()`;
    never introduce a direct `Popen`/`run` for long-lived workload commands
 10. **Launcher bootstrap**: the extensionless `sbk-analytics` application
-    dispatches to `sbk-analytics.sh` on Linux/macOS and
-    `sbk-analytics.ps1` in Windows-compatible POSIX shells. Native PowerShell
-    invokes the `.ps1` launcher. The native launchers acquire a pinned,
+    dispatches to `sbk-analytics.sh` on Linux/macOS. Native Windows is not
+    supported. The launcher acquires a pinned,
     SHA-256-verified uv executable, let uv acquire exact Python, and publish a
     non-editable `uv.lock` environment under per-user state. Active venv/Conda
     environments must never be modified. Runtime source/config/lock/platform
@@ -381,7 +375,7 @@ selections never fall back to the network.
 11. **Central policy**: cross-cutting runtime defaults and managed-artifact
     identity/layout belong in `analytics/policy.py`; do not duplicate them in
     resolver, runner, process, CLI, or system-info modules. Pre-Python launcher
-    defaults shared by Bash and PowerShell belong in `sbk-bootstrap.env`
+    pre-Python Bash defaults belong in `sbk-bootstrap.env`
 
 ### Common Tasks
 

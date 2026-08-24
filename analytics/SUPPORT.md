@@ -14,13 +14,9 @@ If you're new to sbk-analytics, start with:
 ### Installation Problems
 
 **Problem**: a self-bootstrapping launcher cannot prepare an environment
-- Use `./sbk-analytics` on Linux/macOS or a Windows-compatible POSIX shell.
-  Native Windows PowerShell uses `sbk-analytics.ps1` with PowerShell 5.1 or
-  newer because Windows does not directly execute extensionless POSIX scripts
-- If Windows execution policy blocks the script, run
-  `powershell -ExecutionPolicy Bypass -File .\sbk-analytics.ps1 <arguments>`
-- No host Python, venv, or Conda is required. Linux/macOS needs `curl` or
-  `wget` for the first uv download; Windows uses `Invoke-WebRequest`
+- Use `./sbk-analytics` on Linux or macOS. Native Windows is not supported.
+- No host Python, venv, or Conda is required. The first uv download needs
+  `curl` or `wget`.
 - Confirm GitHub and Python package repositories are reachable on first use
 - Confirm the per-user state directory, or `SBK_ANALYTICS_ENV_HOME`, is writable
 - Set `SBK_ANALYTICS_BOOTSTRAP_OFFLINE=1` only after the runtime is cached; a
@@ -148,7 +144,7 @@ When reporting issues, include:
 
 - **JDK Compatibility**: SBK compiled with specific Java versions
 - **macOS Logging**: Requires special handling with `--forward-logs`
-- **Windows Support**: Limited testing on Windows
+- **Native Windows**: Not supported; use a Linux or macOS host
 - **Network Dependencies**: Requires internet for uncached first-run artifacts;
   healthy saved environments and populated dependency caches run offline
 

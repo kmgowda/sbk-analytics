@@ -23,7 +23,7 @@ A clear and concise description of what you expected to happen.
 What actually happened.
 
 ## Environment
-- OS: [e.g., Ubuntu 22.04, macOS 14, Windows 11]
+- OS: [e.g., Ubuntu 24.04 or macOS 15]
 - Python version: [e.g., 3.10, 3.11]
 - sbk-analytics version: [e.g., 1.26.6.1]
 - JDK version: [e.g., 17, 21, 25]

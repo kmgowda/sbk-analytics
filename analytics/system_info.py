@@ -103,8 +103,6 @@ def _cpu_brand() -> str:
             ).stdout.strip()
             if out:
                 return out
-        elif sysname == "Windows":
-            return platform.processor() or "unknown"
     except Exception as e:
         log.debug("cpu brand lookup failed: %s", e)
     return platform.processor() or "unknown"

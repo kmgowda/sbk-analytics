@@ -12,9 +12,6 @@ cd sbk-analytics
 # Self-bootstrap and run on Linux/macOS (no activation required)
 ./sbk-analytics --version
 
-# Or on Windows PowerShell
-.\sbk-analytics.ps1 --version
-
 # Optional manual editable environment for development only
 python3 -m venv .venv
 . .venv/bin/activate
@@ -45,12 +42,11 @@ analytics/              # Main package
 ## Key Files
 
 - `sbk-config.env` - SBK versions, URLs, cache folders
-- `sbk-bootstrap.env` - shared Bash/PowerShell bootstrap policy
+- `sbk-bootstrap.env` - Linux/macOS Bash bootstrap policy
 - `.python-version` - exact launcher-managed Python version
 - `uv.lock` - reproducible cross-platform application dependency lock
-- `sbk-analytics` - canonical application and platform dispatcher
+- `sbk-analytics` - canonical Linux/macOS application
 - `sbk-analytics.sh` - Linux/macOS environment bootstrap and CLI launcher
-- `sbk-analytics.ps1` - Windows environment bootstrap and CLI launcher
 - `requirements.txt` - Python dependencies
 - `pyproject.toml` - Package configuration
 - `examples/` - Example configurations
@@ -172,7 +168,6 @@ sbk-analytics -c examples/config.yml
 ### Test on different platforms
 - Linux (primary)
 - macOS (special logging handling)
-- Windows (limited testing)
 
 ## Building Distribution
 

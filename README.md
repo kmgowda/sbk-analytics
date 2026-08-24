@@ -56,8 +56,8 @@ before a long run.
 ### Self-bootstrapping application
 
 The repository includes an extensionless `sbk-analytics` application, modeled
-after the sbk-dashboard launcher, that selects the native bootstrap launcher
-and passes every argument unchanged.
+after the sbk-dashboard launcher, that delegates to the Linux/macOS bootstrap
+launcher and passes every argument unchanged. Native Windows is not supported.
 
 Linux/macOS:
 
@@ -67,27 +67,8 @@ Linux/macOS:
 ./sbk-analytics -c examples/file-rocksdb-write-60s.yml
 ```
 
-Windows Git Bash/MSYS2/Cygwin can use the same application:
-
-```bash
-./sbk-analytics --version
-```
-
-Native Windows PowerShell uses the platform launcher because Windows does not
-directly execute extensionless POSIX scripts:
-
-```powershell
-.\sbk-analytics.ps1 --version
-.\sbk-analytics.ps1 deps doctor
-.\sbk-analytics.ps1 -c examples\file-rocksdb-write-60s.yml
-
-# If local execution policy blocks scripts:
-powershell -ExecutionPolicy Bypass -File .\sbk-analytics.ps1 --version
-```
-
-The unified application dispatches to `sbk-analytics.sh` on Linux/macOS and
-`sbk-analytics.ps1` on Windows-compatible POSIX shells. The native launchers do
-not require system Python, venv, or Conda. On the first run they:
+The unified application dispatches to `sbk-analytics.sh`. The launcher does
+not require system Python, venv, or Conda. On the first run it:
 
 1. Detect the operating system and architecture.
 2. Download the pinned standalone `uv` executable and verify its checked-in
@@ -110,8 +91,7 @@ Changing any of those inputs creates a new environment and rebuilds the local
 package, so a cached wheel cannot hide a source or version update.
 
 The default runtime state is `${XDG_STATE_HOME:-~/.local/state}/sbk-analytics`
-on Linux, `~/Library/Application Support/sbk-analytics` on macOS, and
-`%LOCALAPPDATA%\sbk-analytics` on Windows. Set
+on Linux and `~/Library/Application Support/sbk-analytics` on macOS. Set
 `SBK_ANALYTICS_ENV_HOME=/path/to/folder` to override it. Set
 `SBK_ANALYTICS_BOOTSTRAP_OFFLINE=1` to prohibit downloads while repairing an
 environment; a healthy saved environment is always reusable offline.
@@ -142,7 +122,7 @@ sbk-analytics -c examples/file-rocksdb-write-60s.yml
 ### Optional manual development environment (standard Python)
 ```bash
 python3 -m venv .venv
-. .venv/bin/activate  # Windows: .venv\Scripts\activate
+. .venv/bin/activate
 pip install -r requirements.txt
 pip install -e .
 sbk-analytics -c examples/file-rocksdb-write-60s.yml
@@ -236,7 +216,7 @@ orchestrates need a working runtime on the host:
 | --- | --- | --- |
 | Python    | not required | The launcher downloads and saves the pinned managed Python on first use. Python ≥3.9 is needed only for manual development installs. |
 | JDK       | ≥ matching SBK build (e.g. SBK 10.0 needs **JDK 25**) | Automatically resolved and cached by default. The SBK release archive ships `.class` files compiled with a specific JDK. |
-| `curl` or `wget` | first Linux/macOS bootstrap only | Downloads the verified standalone runtime manager. Windows uses PowerShell `Invoke-WebRequest`. |
+| `curl` or `wget` | first Linux/macOS bootstrap only | Downloads the verified standalone runtime manager. |
 | Internet access | first run / cache miss | Not needed after the runtime, JDK, SBK, and sbk-charts caches are populated. |
 
 ### Security compatibility defaults
@@ -335,10 +315,7 @@ cd sbk-analytics
 python3 -m venv .venv
 
 # 3. Activate the environment
-# On Linux/macOS:
 . .venv/bin/activate
-# On Windows:
-.venv\Scripts\activate
 
 # 4. Upgrade pip
 python -m pip install --upgrade pip
@@ -900,15 +877,14 @@ into the single `sbk-charts` invocation at the end.
 ### Interruption and forced-exit cleanup
 
 `sbk-yal`, `sbk-gem-yal`, and `sbk-charts` run in isolated process trees. If
-`sbk-analytics` receives Ctrl-C, SIGTERM, SIGHUP, SIGQUIT, or Windows SIGBREAK,
+`sbk-analytics` receives Ctrl-C, SIGTERM, SIGHUP, or SIGQUIT,
 it asks every active tree to stop, waits up to 3 seconds, and then force-kills
 anything that remains. This applies in serial and parallel modes and includes
 shells, JVMs, and other descendants created by the launched command.
 
-Abrupt parent death is covered too: POSIX platforms use an independent
-parent-liveness guard, while Windows uses a kill-on-close Job Object. Thus an
-uncatchable parent kill does not leave local SBK or sbk-charts descendants
-running. For `sbk-gem-yal`, catchable interruptions also perform the existing
+Abrupt parent death is covered too by an independent parent-liveness guard.
+Thus an uncatchable parent kill does not leave local SBK or sbk-charts
+descendants running. For `sbk-gem-yal`, catchable interruptions also perform the existing
 best-effort SSH cleanup of remote SBK clients. An uncatchable local kill cannot
 run new SSH commands, so remote-host cleanup in that specific case depends on
 the remote SBK/GEM connection lifecycle.
@@ -1093,10 +1069,9 @@ into those folders.
 ```
 sbk-analytics/
 ├── sbk-config.env            # bundled SBK / sbk-charts release pins
-├── sbk-bootstrap.env         # shared Bash/PowerShell bootstrap policy
-├── sbk-analytics             # unified cross-platform application
+├── sbk-bootstrap.env         # Linux/macOS bootstrap policy
+├── sbk-analytics             # canonical Linux/macOS application
 ├── sbk-analytics.sh          # self-bootstrapping Linux/macOS launcher
-├── sbk-analytics.ps1         # self-bootstrapping Windows launcher
 ├── pyproject.toml            # entry point: sbk-analytics → analytics.cli:main
 ├── requirements.txt
 ├── README.md
@@ -1112,7 +1087,7 @@ sbk-analytics/
     ├── yaml_gen.py           # per-instance sbkArgs/sbkGemArgs YAML generator
     ├── runner.py             # serial / parallel SBK execution + watchdog
     ├── processes.py          # managed workload trees + signal cleanup
-    ├── _process_guard.py     # POSIX/Windows parent-death companion
+    ├── _process_guard.py     # POSIX parent-death companion
     ├── charts.py             # single sbk-charts invocation
     └── system_info.py        # appends `system` sheet to the final xlsx
 ```

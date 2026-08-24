@@ -17,7 +17,6 @@ Related to #(issue_number)
 - [ ] Tested with example configurations
 - [ ] Tested on Linux
 - [ ] Tested on macOS
-- [ ] Tested on Windows (if applicable)
 - [ ] Added unit tests (if applicable)
 - [ ] Manual testing completed
 

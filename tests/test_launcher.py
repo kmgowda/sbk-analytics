@@ -1,4 +1,3 @@
-import json
 import os
 import platform
 import shutil
@@ -13,7 +12,6 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 
 
-@unittest.skipIf(os.name == "nt", "Bash launcher supports Linux and macOS")
 class LauncherTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
@@ -24,7 +22,6 @@ class LauncherTests(unittest.TestCase):
         for name in (
             "sbk-analytics",
             "sbk-analytics.sh",
-            "sbk-analytics.ps1",
             "sbk-bootstrap.env",
             "sbk-config.env",
             "pyproject.toml",
@@ -306,62 +303,6 @@ exit 2
         self.assertEqual(result.returncode, 1)
         self.assertIn("invalid bootstrap policy", result.stderr)
         self.assertIn("SBK_ANALYTICS_PYTHON_VERSION", result.stderr)
-
-
-@unittest.skipUnless(os.name == "nt", "PowerShell launcher requires Windows")
-class WindowsLauncherTests(unittest.TestCase):
-    def test_invalid_bootstrap_policy_fails_with_clear_error(self):
-        with tempfile.TemporaryDirectory() as directory:
-            launcher_root = Path(directory)
-            launcher = launcher_root / "sbk-analytics.ps1"
-            shutil.copy2(ROOT / "sbk-analytics.ps1", launcher)
-            policy = (ROOT / "sbk-bootstrap.env").read_text().replace(
-                "SBK_ANALYTICS_PYTHON_VERSION=3.12.12",
-                "SBK_ANALYTICS_PYTHON_VERSION=latest",
-            )
-            (launcher_root / "sbk-bootstrap.env").write_text(policy)
-            result = subprocess.run(
-                [
-                    "powershell.exe", "-NoLogo", "-NoProfile",
-                    "-NonInteractive", "-ExecutionPolicy", "Bypass",
-                    "-File", str(launcher), "--version",
-                ],
-                capture_output=True,
-                text=True,
-                timeout=30,
-            )
-            self.assertEqual(result.returncode, 1)
-            self.assertIn("invalid bootstrap policy", result.stderr)
-
-    def test_real_bootstrap_offline_reuse_json_and_exit_code(self):
-        with tempfile.TemporaryDirectory() as directory:
-            environment_home = Path(directory) / "managed-state"
-            env = os.environ.copy()
-            env["SBK_ANALYTICS_ENV_HOME"] = str(environment_home)
-            env.pop("VIRTUAL_ENV", None)
-            env.pop("CONDA_PREFIX", None)
-            base_command = [
-                "powershell.exe", "-NoLogo", "-NoProfile", "-NonInteractive",
-                "-ExecutionPolicy", "Bypass", "-File",
-                str(ROOT / "sbk-analytics.ps1"),
-            ]
-            first = subprocess.run(
-                [*base_command, "--version"], cwd=ROOT, env=env,
-                capture_output=True, text=True, timeout=600,
-            )
-            self.assertEqual(first.returncode, 0, first.stderr)
-            self.assertIn("using managed application environment", first.stderr)
-            env["SBK_ANALYTICS_BOOTSTRAP_OFFLINE"] = "1"
-            second = subprocess.run(
-                [*base_command, "deps", "status", "--json"],
-                cwd=ROOT, env=env, capture_output=True, text=True, timeout=120,
-            )
-            self.assertEqual(second.returncode, 0, second.stderr)
-            self.assertIn("sbk", json.loads(second.stdout))
-            app_pythons = list((environment_home / "app").glob(
-                "*/Scripts/python.exe"
-            ))
-            self.assertEqual(len(app_pythons), 1)
 
 
 if __name__ == "__main__":

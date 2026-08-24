@@ -139,22 +139,20 @@ class PolicyTests(unittest.TestCase):
         )
         self.assertRegex(bootstrap["SBK_ANALYTICS_UV_VERSION"], r"^\d+\.\d+\.\d+$")
         checksum_keys = [key for key in bootstrap if key.endswith("_SHA256")]
-        self.assertEqual(len(checksum_keys), 6)
+        self.assertEqual(len(checksum_keys), 4)
+        self.assertFalse(any("WINDOWS" in key for key in bootstrap))
+        self.assertFalse((ROOT / "sbk-analytics.ps1").exists())
         for key in checksum_keys:
             self.assertRegex(bootstrap[key], r"^[0-9a-f]{64}$")
-        for launcher in ("sbk-analytics.sh", "sbk-analytics.ps1"):
-            launcher_text = (ROOT / launcher).read_text()
-            self.assertIn("sbk-bootstrap.env", launcher_text)
-            for key in (
-                "SBK_ANALYTICS_PYTHON_VERSION",
-                "SBK_ANALYTICS_UV_VERSION",
-                "SBK_ANALYTICS_RUNTIME_FOLDER",
-                "SBK_ANALYTICS_BOOTSTRAP_MARKER",
-            ):
-                self.assertIn(key, launcher_text)
-        launcher_text = (ROOT / "sbk-analytics.sh").read_text() + (
-            ROOT / "sbk-analytics.ps1"
-        ).read_text()
+        launcher_text = (ROOT / "sbk-analytics.sh").read_text()
+        self.assertIn("sbk-bootstrap.env", launcher_text)
+        for key in (
+            "SBK_ANALYTICS_PYTHON_VERSION",
+            "SBK_ANALYTICS_UV_VERSION",
+            "SBK_ANALYTICS_RUNTIME_FOLDER",
+            "SBK_ANALYTICS_BOOTSTRAP_MARKER",
+        ):
+            self.assertIn(key, launcher_text)
         for key in checksum_keys:
             self.assertIn(key, launcher_text)
         manifest = (ROOT / "MANIFEST.in").read_text()
@@ -162,11 +160,11 @@ class PolicyTests(unittest.TestCase):
             "sbk-bootstrap.env",
             "sbk-analytics",
             "sbk-analytics.sh",
-            "sbk-analytics.ps1",
             ".python-version",
             "uv.lock",
         ):
             self.assertIn(f"include {filename}", manifest)
+        self.assertNotIn("sbk-analytics.ps1", manifest)
 
     def test_policy_consumers_do_not_reintroduce_cross_cutting_literals(self):
         consumers = (

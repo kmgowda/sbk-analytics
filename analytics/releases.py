@@ -148,19 +148,12 @@ class ChartsInstall:
     def cli(self) -> Path:
         if self._cli is not None:
             return self._cli
-        if os.name == "nt":
-            return (
-                self.venv_dir / "Scripts" /
-                f"{SBK_CHARTS_ARTIFACT.primary_executable}.exe"
-            )
         return self.venv_dir / "bin" / SBK_CHARTS_ARTIFACT.primary_executable
 
     @property
     def python(self) -> Path:
         if self._python is not None:
             return self._python
-        if os.name == "nt":
-            return self.venv_dir / "Scripts" / "python.exe"
         return self.venv_dir / "bin" / "python"
 
 
@@ -168,10 +161,7 @@ class ChartsInstall:
 
 
 def _jdk_executable(home: Path) -> Path:
-    executable = JDK_ARTIFACT.primary_executable
-    if os.name == "nt":
-        executable += ".exe"
-    return home / "bin" / executable
+    return home / "bin" / JDK_ARTIFACT.primary_executable
 
 
 def _local_directory(folder: Path, dependency: str) -> Path:
@@ -245,7 +235,7 @@ def _charts_version(cli: Path, *, require_ready: bool = False) -> str | None:
             )
         if match:
             return match.group(1)
-    python = cli.parent / ("python.exe" if os.name == "nt" else "python")
+    python = cli.parent / "python"
     if not python.is_file():
         return None
     return _command_version(
@@ -337,12 +327,8 @@ def resolve_local_sbk_charts(
         candidates = (cli,)
     elif folder is not None:
         root = _local_directory(folder, SBK_CHARTS_ARTIFACT.display_name)
-        if os.name == "nt":
-            executable = f"{SBK_CHARTS_ARTIFACT.primary_executable}.exe"
-            candidates = (root / executable, root / "Scripts" / executable)
-        else:
-            executable = SBK_CHARTS_ARTIFACT.primary_executable
-            candidates = (root / executable, root / "bin" / executable)
+        executable = SBK_CHARTS_ARTIFACT.primary_executable
+        candidates = (root / executable, root / "bin" / executable)
     else:
         raise LocalPackageError("sbk-charts local folder or executable is required")
     for cli in candidates:
@@ -527,25 +513,12 @@ def _cache_lock(lock_path: Path):
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     handle = lock_path.open("a+")
     try:
-        if os.name == "nt":
-            import msvcrt
-            if lock_path.stat().st_size == 0:
-                handle.write("0")
-                handle.flush()
-            handle.seek(0)
-            msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
-        else:
-            import fcntl
-            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        import fcntl
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
         yield
     finally:
-        if os.name == "nt":
-            import msvcrt
-            handle.seek(0)
-            msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
-        else:
-            import fcntl
-            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+        import fcntl
+        fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
         handle.close()
 
 
@@ -918,7 +891,7 @@ def _ensure_sbk_charts_locked(
 
     if not install.cli.exists():
         # some versions expose differently named entry points
-        bindir = stage_venv / ("Scripts" if os.name == "nt" else "bin")
+        bindir = stage_venv / "bin"
         candidates = list(bindir.glob("sbk-charts*")) + list(bindir.glob("sb-charts*"))
         if candidates:
             install = ChartsInstall(
@@ -1064,11 +1037,13 @@ def find_existing_jdk(required_major: int) -> Path | None:
 
 def _jdk_url(version: str) -> str:
     arch = "x64" if os.uname().machine in ("x86_64", "amd64") else os.uname().machine
-    os_name = {
-        "linux": "linux",
-        "darwin": "mac",
-        "win32": "windows",
-    }.get(sys.platform, sys.platform)
+    try:
+        os_name = {"linux": "linux", "darwin": "mac"}[sys.platform]
+    except KeyError as exc:
+        raise DependencyResolutionError(
+            f"managed JDK installation is unsupported on {sys.platform}; "
+            "sbk-analytics supports Linux and macOS"
+        ) from exc
     template = JDK_ARTIFACT.download_url_template
     if template is None:
         raise RuntimeError("JDK artifact download URL template is not configured")

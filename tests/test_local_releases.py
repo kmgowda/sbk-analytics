@@ -316,8 +316,7 @@ class ResolutionOutputTests(unittest.TestCase):
             _print_charts_resolution(charts, "4.26.7.1")
 
         text = output.getvalue()
-        # Windows runners may use a legacy console encoding such as cp1252.
-        # Dependency status output must remain printable there.
+        # Dependency status output remains printable in legacy encodings.
         text.encode("cp1252")
         self.assertIn("SBK source       : LOCAL", text)
         self.assertIn("sbk-charts source: LOCAL", text)

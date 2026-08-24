@@ -7,8 +7,7 @@
 #
 #     http://www.apache.org/licenses/LICENSE-2.0
 #
-# Canonical sbk-analytics launcher for Linux, macOS, and Windows-compatible
-# POSIX shells. Platform-specific launchers own the bootstrap implementation.
+# Canonical sbk-analytics launcher for Linux and macOS.
 
 set -eu
 
@@ -18,22 +17,6 @@ OS_NAME=$(uname -s 2>/dev/null || true)
 case "$OS_NAME" in
     Linux|Darwin)
         exec "$ROOT/sbk-analytics.sh" "$@"
-        ;;
-    CYGWIN*|MINGW*|MSYS*)
-        POWERSHELL=
-        for CANDIDATE in pwsh.exe powershell.exe pwsh powershell; do
-            if command -v "$CANDIDATE" >/dev/null 2>&1; then
-                POWERSHELL=$CANDIDATE
-                break
-            fi
-        done
-        if [ -z "$POWERSHELL" ]; then
-            printf '%s\n' \
-                '[sbk-analytics] ERROR: PowerShell is required on Windows' >&2
-            exit 1
-        fi
-        exec "$POWERSHELL" -NoLogo -NoProfile -ExecutionPolicy Bypass \
-            -File "$ROOT/sbk-analytics.ps1" "$@"
         ;;
     *)
         printf '[sbk-analytics] ERROR: unsupported operating system: %s\n' \
