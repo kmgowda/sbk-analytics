@@ -9,4 +9,4 @@
 #
 """sbk-analytics: orchestrate SBK benchmarks and sbk-charts analytics."""
 
-__version__ = "1.26.8.2"
+__version__ = "1.26.9.1"
