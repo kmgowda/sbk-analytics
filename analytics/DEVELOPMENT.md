@@ -156,7 +156,9 @@ Local overrides use `sbk.local.folder` and `sbk-charts.local.folder` in
 `sbk-config.env`. They are resolved before cache/network handling and must
 already contain executable commands. They remain read-only: analytics does not
 build SBK or install into either shared folder. Dependency diagnostics include
-layout, resolved path, Git revision/dirty state, and release/cache provenance.
+layout, resolved path, Git revision/tracked-file state, and release/cache
+provenance. Inspection and runtime resolution share the same ordered layout
+candidate helpers; update those helpers instead of creating a parallel search.
 
 ### Common issues
 - **JDK version mismatch**: Check `sbk.jdk.version` in sbk-config.env

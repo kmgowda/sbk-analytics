@@ -18,6 +18,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Extended immutable runtime policy coverage to dependency layouts and source
   vocabulary, executable/environment names, SBK and charts interfaces, pip
   invocation, diagnostic formatting, units, and signal exit conventions.
+- Kept shared-folder Git inspection lightweight by excluding untracked files,
+  added debug logging for Git failures, and unified status/runtime layout order.
 - Established SBK 10.6 as the configured baseline contract without embedding
   version checks or version-specific branches in runtime source.
 - Replaced text-rendered architecture and lifecycle flows with GitHub-rendered

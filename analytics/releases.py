@@ -129,7 +129,11 @@ class DependencySource(str, Enum):
 
 @dataclass(frozen=True)
 class SourceProvenance:
-    """Read-only origin details for a resolved dependency."""
+    """Read-only origin details for a resolved dependency.
+
+    ``dirty`` describes tracked-file changes. Untracked files are deliberately
+    excluded so provenance does not add a full checkout scan to normal runs.
+    """
 
     mode: str
     layout: str
@@ -261,7 +265,7 @@ def _require_executable(path: Path, dependency: str) -> Path:
 
 
 def _git_details(path: Path) -> tuple[str | None, bool | None]:
-    """Return a selected checkout root's revision and dirty state read-only."""
+    """Return a checkout's revision and tracked dirty state read-only."""
     checkout = path if path.is_dir() else path.parent
     if not (checkout / LAYOUT_POLICY.git_metadata).exists():
         return None, None
@@ -274,7 +278,13 @@ def _git_details(path: Path) -> tuple[str | None, bool | None]:
                 text=True,
                 timeout=DEPENDENCY_POLICY.source_control_timeout_s,
             )
-        except (OSError, subprocess.TimeoutExpired):
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            log.debug(
+                "Git provenance command failed for %s: %s: %s",
+                checkout,
+                " ".join(args),
+                exc,
+            )
             return None
 
     revision_result = run(*PROVENANCE_POLICY.git_revision_arguments)
@@ -289,7 +299,61 @@ def _git_details(path: Path) -> tuple[str | None, bool | None]:
         if status_result is not None and status_result.returncode == 0
         else None
     )
+    if revision_result is not None and revision_result.returncode != 0:
+        log.debug(
+            "Git revision inspection failed for %s (rc=%s): %s",
+            checkout,
+            revision_result.returncode,
+            (revision_result.stderr or "").strip(),
+        )
+    if status_result is not None and status_result.returncode != 0:
+        log.debug(
+            "Git status inspection failed for %s (rc=%s): %s",
+            checkout,
+            status_result.returncode,
+            (status_result.stderr or "").strip(),
+        )
     return revision or None, dirty
+
+
+def _sbk_local_candidates(
+    root: Path,
+) -> tuple[tuple[Path, str, Path, Path], ...]:
+    """Return the canonical SBK layouts in their resolution order."""
+    candidates = (
+        (root, PROVENANCE_POLICY.distribution_layout),
+        (
+            root.joinpath(*LAYOUT_POLICY.sbk_gradle_install_path),
+            PROVENANCE_POLICY.gradle_install_layout,
+        ),
+    )
+    return tuple(
+        (
+            home,
+            layout,
+            home / LAYOUT_POLICY.executable_directory
+            / SBK_ARTIFACT.primary_executable,
+            home / LAYOUT_POLICY.executable_directory
+            / SBK_ARTIFACT.additional_executables[0],
+        )
+        for home, layout in candidates
+    )
+
+
+def _charts_local_candidates(
+    root: Path, *, explicit_cli: Path | None = None,
+) -> tuple[tuple[Path, str], ...]:
+    """Return canonical sbk-charts commands in their resolution order."""
+    if explicit_cli is not None:
+        return ((explicit_cli, PROVENANCE_POLICY.explicit_executable_layout),)
+    executable = SBK_CHARTS_ARTIFACT.primary_executable
+    return (
+        (root / executable, PROVENANCE_POLICY.source_launcher_layout),
+        (
+            root / LAYOUT_POLICY.executable_directory / executable,
+            PROVENANCE_POLICY.environment_layout,
+        ),
+    )
 
 
 def _shared_provenance(
@@ -420,18 +484,10 @@ def resolve_local_sbk(
     recursive filesystem search.
     """
     root = _local_directory(folder, "SBK")
-    homes = (root, root.joinpath(*LAYOUT_POLICY.sbk_gradle_install_path))
-    for home in homes:
-        sbk_yal = (
-            home / LAYOUT_POLICY.executable_directory
-            / SBK_ARTIFACT.primary_executable
-        )
+    candidates = _sbk_local_candidates(root)
+    for home, layout, sbk_yal, sbk_gem_yal in candidates:
         if not sbk_yal.is_file():
             continue
-        sbk_gem_yal = (
-            home / LAYOUT_POLICY.executable_directory
-            / SBK_ARTIFACT.additional_executables[0]
-        )
         resolved_gem = None
         if sbk_gem_yal.is_file() and os.access(sbk_gem_yal, os.X_OK):
             resolved_gem = sbk_gem_yal
@@ -456,16 +512,11 @@ def resolve_local_sbk(
             provenance=_shared_provenance(
                 folder,
                 home,
-                PROVENANCE_POLICY.distribution_layout
-                if home == root else PROVENANCE_POLICY.gradle_install_layout,
+                layout,
             ),
         )
     checked = ", ".join(
-        str(
-            home / LAYOUT_POLICY.executable_directory
-            / SBK_ARTIFACT.primary_executable
-        )
-        for home in homes
+        str(sbk_yal) for _home, _layout, sbk_yal, _sbk_gem_yal in candidates
     )
     raise LocalPackageError(
         "SBK local folder is not a ready-to-run distribution or built "
@@ -484,18 +535,19 @@ def resolve_local_sbk_charts(
         cli = executable.expanduser().resolve(strict=True)
         _require_executable(cli, SBK_CHARTS_ARTIFACT.display_name)
         root = cli.parent
-        candidates = (cli,)
+        candidates = _charts_local_candidates(root, explicit_cli=cli)
+        configured = executable
     elif folder is not None:
         root = _local_directory(folder, SBK_CHARTS_ARTIFACT.display_name)
-        executable = SBK_CHARTS_ARTIFACT.primary_executable
-        candidates = (
-            root / executable,
-            root / LAYOUT_POLICY.executable_directory / executable,
-        )
+        candidates = _charts_local_candidates(root)
+        configured = folder
     else:
         raise LocalPackageError("sbk-charts local folder or executable is required")
-    for cli in candidates:
+    for cli, layout in candidates:
         if cli.is_file():
+            resolved_cli = _require_executable(
+                cli, SBK_CHARTS_ARTIFACT.display_name
+            )
             detected = _charts_version(cli, require_ready=preflight)
             if expected_version:
                 _check_version(
@@ -507,24 +559,16 @@ def resolve_local_sbk_charts(
             return ChartsInstall(
                 venv_dir=root,
                 source=DependencySource.LOCAL,
-                _cli=_require_executable(
-                    cli, SBK_CHARTS_ARTIFACT.display_name
-                ),
+                _cli=resolved_cli,
                 _python=Path(sys.executable),
                 detected_version=detected,
                 provenance=_shared_provenance(
-                    executable if folder is None else folder,
+                    configured,
                     cli,
-                    (
-                        PROVENANCE_POLICY.explicit_executable_layout
-                        if executable is not None and folder is None
-                        else PROVENANCE_POLICY.source_launcher_layout
-                        if cli == root / SBK_CHARTS_ARTIFACT.primary_executable
-                        else PROVENANCE_POLICY.environment_layout
-                    ),
+                    layout,
                 ),
             )
-    checked = ", ".join(str(candidate) for candidate in candidates)
+    checked = ", ".join(str(candidate) for candidate, _layout in candidates)
     raise LocalPackageError(
         f"sbk-charts local folder has no supported executable: {root}; "
         f"checked: {checked}"
@@ -544,25 +588,11 @@ def inspect_shared_sbk(folder: Path, *, require_gem: bool = False) -> dict:
     except LocalPackageError as exc:
         result["error"] = str(exc)
         return result
-    for home, layout in (
-        (root, PROVENANCE_POLICY.distribution_layout),
-        (
-            root.joinpath(*LAYOUT_POLICY.sbk_gradle_install_path),
-            PROVENANCE_POLICY.gradle_install_layout,
-        ),
-    ):
-        sbk_yal = (
-            home / LAYOUT_POLICY.executable_directory
-            / SBK_ARTIFACT.primary_executable
-        )
-        sbk_gem_yal = (
-            home / LAYOUT_POLICY.executable_directory
-            / SBK_ARTIFACT.additional_executables[0]
-        )
+    for home, layout, sbk_yal, sbk_gem_yal in _sbk_local_candidates(root):
+        if not sbk_yal.is_file():
+            continue
         yal_ready = sbk_yal.is_file() and os.access(sbk_yal, os.X_OK)
         gem_ready = sbk_gem_yal.is_file() and os.access(sbk_gem_yal, os.X_OK)
-        if not yal_ready:
-            continue
         provenance = _shared_provenance(root, home, layout)
         result.update({
             "valid": yal_ready and (gem_ready or not require_gem),
@@ -577,6 +607,11 @@ def inspect_shared_sbk(folder: Path, *, require_gem: bool = False) -> dict:
         })
         if require_gem and not gem_ready:
             result["error"] = "GEM workload requires executable sbk-gem-yal"
+        elif not yal_ready:
+            result["error"] = (
+                f"SBK {SBK_ARTIFACT.primary_executable} executable is not "
+                f"executable: {sbk_yal}"
+            )
         return result
     result["error"] = (
         "no executable sbk-yal in the distribution root or "
@@ -600,18 +635,11 @@ def inspect_shared_sbk_charts(
         if executable is not None:
             cli = executable.expanduser().resolve(strict=True)
             root = cli.parent
-            candidates = ((cli, PROVENANCE_POLICY.explicit_executable_layout),)
+            candidates = _charts_local_candidates(root, explicit_cli=cli)
             provenance_root = cli
         elif folder is not None:
             root = _local_directory(folder, SBK_CHARTS_ARTIFACT.display_name)
-            name = SBK_CHARTS_ARTIFACT.primary_executable
-            candidates = (
-                (root / name, PROVENANCE_POLICY.source_launcher_layout),
-                (
-                    root / LAYOUT_POLICY.executable_directory / name,
-                    PROVENANCE_POLICY.environment_layout,
-                ),
-            )
+            candidates = _charts_local_candidates(root)
             provenance_root = root
         else:
             raise LocalPackageError(
@@ -621,19 +649,24 @@ def inspect_shared_sbk_charts(
         result["error"] = str(exc)
         return result
     for cli, layout in candidates:
-        ready = cli.is_file() and os.access(cli, os.X_OK)
-        if not ready:
+        if not cli.is_file():
             continue
+        ready = os.access(cli, os.X_OK)
         revision, dirty = _git_details(provenance_root)
         result.update({
-            "valid": True,
+            "valid": ready,
             "layout": layout,
             "resolved_location": str(root),
             "executable": str(cli),
-            "executable_ready": True,
+            "executable_ready": ready,
             "revision": revision,
             "dirty": dirty,
         })
+        if not ready:
+            result["error"] = (
+                f"{SBK_CHARTS_ARTIFACT.display_name} executable is not "
+                f"executable: {cli}"
+            )
         return result
     result["error"] = "no supported executable sbk-charts command found"
     return result

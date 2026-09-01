@@ -16,6 +16,7 @@ from analytics.releases import (
     ensure_sbk,
     ensure_sbk_charts,
     _gh_release,
+    _git_details,
     inspect_shared_sbk,
     inspect_shared_sbk_charts,
     resolve_local_sbk,
@@ -107,8 +108,42 @@ class LocalSbkResolutionTests(unittest.TestCase):
                 install = resolve_local_sbk(root)
 
             self.assertEqual(run.call_count, 2)
+            status_command = run.call_args_list[1].args[0]
+            self.assertIn("--untracked-files=no", status_command)
+            self.assertNotIn("--untracked-files=normal", status_command)
             self.assertEqual(install.provenance.revision, "abc123def456")
             self.assertTrue(install.provenance.dirty)
+
+    def test_git_inspection_failure_is_visible_at_debug_level(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / ".git").mkdir()
+            with mock.patch(
+                "analytics.releases.subprocess.run",
+                side_effect=OSError("git unavailable"),
+            ), self.assertLogs("analytics.releases", level="DEBUG") as logs:
+                revision, dirty = _git_details(root)
+
+            self.assertIsNone(revision)
+            self.assertIsNone(dirty)
+            self.assertTrue(
+                any("Git provenance command failed" in line for line in logs.output)
+            )
+
+    def test_status_and_resolution_share_sbk_layout_precedence(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            blocked = root / "bin" / "sbk-yal"
+            blocked.parent.mkdir(parents=True)
+            blocked.write_text("#!/bin/sh\n", encoding="utf-8")
+            _sbk_home(root / "build" / "install" / "sbk")
+
+            status = inspect_shared_sbk(root)
+
+            self.assertEqual(status["layout"], "distribution")
+            self.assertFalse(status["valid"])
+            with self.assertRaisesRegex(RuntimeError, "not executable"):
+                resolve_local_sbk(root)
 
     def test_shared_status_explains_that_missing_build_is_not_created(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -244,6 +279,20 @@ class LocalChartsResolutionTests(unittest.TestCase):
             install = resolve_local_sbk_charts(root)
 
             self.assertEqual(install.cli, cli.resolve())
+
+    def test_status_and_resolution_share_charts_layout_precedence(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            blocked = root / "sbk-charts"
+            blocked.write_text("#!/bin/sh\n", encoding="utf-8")
+            _executable(root / "bin" / "sbk-charts")
+
+            status = inspect_shared_sbk_charts(root)
+
+            self.assertEqual(status["layout"], "source-launcher")
+            self.assertFalse(status["valid"])
+            with self.assertRaisesRegex(RuntimeError, "not executable"):
+                resolve_local_sbk_charts(root)
 
     def test_local_folder_overrides_conda(self):
         with tempfile.TemporaryDirectory() as directory:

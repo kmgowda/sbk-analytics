@@ -161,7 +161,7 @@ class DependencyProvenancePolicy:
         "rev-parse", "--short=12", "HEAD",
     )
     git_status_arguments: tuple[str, ...] = (
-        "status", "--porcelain", "--untracked-files=normal",
+        "status", "--porcelain", "--untracked-files=no",
     )
 
 

@@ -740,7 +740,8 @@ Relative paths are resolved against the directory containing `sbk-config.env`.
 Every run prints `LOCAL`, `MANAGED_CACHE`, `DOWNLOADED`, or `CONDA`, together
 with the selection mode, layout, configured and resolved paths, exact
 executable, and detected version. Git checkouts also report their revision and
-whether the working tree is dirty. Managed releases report their repository,
+whether tracked files are dirty; untracked files are excluded to keep normal
+runs fast on large shared checkouts. Managed releases report their repository,
 tag, release asset, and SHA-256 when that metadata is available. The configured
 version policy is applied to a detected local version. Runtime behavior assumes
 that the selected local package implements the same command and lifecycle

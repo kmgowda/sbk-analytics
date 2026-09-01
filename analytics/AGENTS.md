@@ -124,6 +124,8 @@ known-host handling.
 - `resolve_local_sbk_charts()`: Validate a local sbk-charts checkout/environment
 - `inspect_shared_sbk()` / `inspect_shared_sbk_charts()`: read-only status
   diagnostics; they never execute, build, install, or modify dependencies
+- `_sbk_local_candidates()` / `_charts_local_candidates()`: canonical layout
+  order shared by status inspection and runtime resolution; do not duplicate it
 - `ensure_sbk()`: Prefer local SBK, otherwise use/download the release cache
 - `ensure_sbk_charts()`: Prefer local sbk-charts, otherwise use its isolated,
   checksum-aware managed environment; never mutate the application runtime
