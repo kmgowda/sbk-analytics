@@ -33,8 +33,9 @@ Parses .env-style configuration files (like sbk-config.env). Handles case-insens
 
 ### policy.py
 Defines immutable application/artifact metadata and cross-cutting runtime
-policy for cache layout, dependency/network operations, process and benchmark
-timing, SSH behavior, configuration defaults, and exit codes.
+policy for dependency layouts and provenance, executable/environment names,
+command interfaces, cache/network operations, display units, process and
+benchmark timing, SSH behavior, configuration defaults, and exit codes.
 
 ### releases.py
 Resolves and caches external dependencies:
@@ -42,9 +43,11 @@ Resolves and caches external dependencies:
 - SBK resolution with priority order (explicit local folder, cached, download)
 - sbk-charts resolution with priority order (explicit local folder, verified
   isolated cache, install)
+- read-only shared-folder inspection and release/workspace provenance reporting
 
 ### runner.py
-Executes SBK instances in serial or parallel mode. Handles subprocess management, log forwarding, and hung JVM detection.
+Executes SBK instances in serial or parallel mode. Handles subprocess
+management and log forwarding while SBK owns its native lifecycle.
 
 ### charts.py
 Invokes sbk-charts for analytics. Handles AI model parameters and Excel report generation.

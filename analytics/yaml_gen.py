@@ -16,6 +16,10 @@ from typing import Any
 import yaml
 
 from .config import Instance
+from .policy import RUNTIME_POLICY
+
+
+SBK_INTERFACE_POLICY = RUNTIME_POLICY.sbk_interface
 
 
 def _normalise_nodes(value: Any) -> Any:
@@ -43,14 +47,15 @@ def generate_instance_yaml(
     out_dir.mkdir(parents=True, exist_ok=True)
 
     params: dict[str, Any] = dict(inst.params)
-    params["class"] = inst.class_name
-    params["out"] = "CSVLogger"
-    params["csvfile"] = str(csv_path)
+    params[SBK_INTERFACE_POLICY.class_option] = inst.class_name
+    params[SBK_INTERFACE_POLICY.output_option] = SBK_INTERFACE_POLICY.csv_logger
+    params[SBK_INTERFACE_POLICY.csv_file_option] = str(csv_path)
 
-    wrapper_key = "sbkArgs"
+    wrapper_key = SBK_INTERFACE_POLICY.local_arguments_wrapper
     if inst.uses_gem:
-        params["nodes"] = _normalise_nodes(params["nodes"])
-        wrapper_key = "sbkGemArgs"
+        nodes_option = SBK_INTERFACE_POLICY.nodes_option
+        params[nodes_option] = _normalise_nodes(params[nodes_option])
+        wrapper_key = SBK_INTERFACE_POLICY.gem_arguments_wrapper
 
     yml_path = out_dir / f"sbk-{inst.name}.yml"
     with yml_path.open("w") as f:

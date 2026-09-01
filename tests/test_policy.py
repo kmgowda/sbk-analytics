@@ -88,6 +88,30 @@ class PolicyTests(unittest.TestCase):
         self.assertGreater(benchmark.gem_native_shutdown_grace_s, 0)
         self.assertGreater(RUNTIME_POLICY.processes.termination_grace_s, 0)
         self.assertGreater(RUNTIME_POLICY.network.artifact_download_attempts, 0)
+        self.assertGreater(
+            RUNTIME_POLICY.dependencies.source_control_timeout_s, 0
+        )
+        self.assertGreater(RUNTIME_POLICY.display.bytes_per_kibibyte, 0)
+        self.assertGreater(RUNTIME_POLICY.exit_codes.signal_base, 0)
+
+    def test_dependency_runtime_vocabulary_is_centralized(self):
+        provenance = RUNTIME_POLICY.provenance
+        self.assertNotEqual(
+            provenance.shared_folder_mode,
+            provenance.github_release_mode,
+        )
+        self.assertEqual(
+            set(SBK_ARTIFACT.executables),
+            {"sbk-yal", "sbk-gem-yal"},
+        )
+        self.assertEqual(
+            RUNTIME_POLICY.dependency_layout.sbk_gradle_install_path,
+            ("build", "install", "sbk"),
+        )
+        self.assertEqual(
+            RUNTIME_POLICY.sbk_interface.nodes_option,
+            "nodes",
+        )
 
     def test_shipped_configuration_matches_canonical_metadata(self):
         root_config = parse_properties(ROOT / "sbk-config.env")
@@ -146,8 +170,13 @@ class PolicyTests(unittest.TestCase):
         for key in (
             "SBK_ANALYTICS_PYTHON_VERSION",
             "SBK_ANALYTICS_UV_VERSION",
+            "SBK_ANALYTICS_UV_RELEASE_BASE",
             "SBK_ANALYTICS_RUNTIME_FOLDER",
             "SBK_ANALYTICS_BOOTSTRAP_MARKER",
+            "SBK_ANALYTICS_ENV_METADATA",
+            "SBK_ANALYTICS_ENV_METADATA_SCHEMA",
+            "SBK_ANALYTICS_LOCK_ATTEMPTS",
+            "SBK_ANALYTICS_LOCK_POLL_SECONDS",
         ):
             self.assertIn(key, launcher_text)
         for key in checksum_keys:
@@ -179,6 +208,15 @@ class PolicyTests(unittest.TestCase):
             "metadata.json",
             SBK_ARTIFACT.repository_url,
             SBK_CHARTS_ARTIFACT.repository_url,
+            RUNTIME_POLICY.provenance.shared_folder_mode,
+            RUNTIME_POLICY.provenance.github_release_mode,
+            RUNTIME_POLICY.provenance.gradle_install_layout,
+            RUNTIME_POLICY.provenance.source_launcher_layout,
+            RUNTIME_POLICY.provenance.explicit_executable_layout,
+            RUNTIME_POLICY.environment.sbk_java_home,
+            RUNTIME_POLICY.environment.java_tool_options,
+            RUNTIME_POLICY.sbk_interface.local_arguments_wrapper,
+            RUNTIME_POLICY.sbk_interface.gem_arguments_wrapper,
         }
         violations = []
         for filename in consumers:

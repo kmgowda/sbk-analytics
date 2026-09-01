@@ -195,7 +195,62 @@ class CliFlowTests(unittest.TestCase):
         self.assertEqual(rc, 0)
         payload = json.loads(stdout.getvalue())
         self.assertIn("sbk", payload)
+        self.assertEqual(payload["sbk"]["selection"], "github-release")
+        self.assertEqual(payload["sbk"]["release_tag"], "10.6")
+        self.assertEqual(
+            payload["sbk_charts"]["selection"], "github-release"
+        )
         self.assertNotIn("Dependency status", stdout.getvalue())
+
+    def test_json_status_inspects_shared_folders_without_executing_them(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            sbk = root / "SBK"
+            charts = root / "sbk-charts"
+            for executable in (
+                sbk / "build" / "install" / "sbk" / "bin" / "sbk-yal",
+                charts / "sbk-charts",
+            ):
+                executable.parent.mkdir(parents=True, exist_ok=True)
+                executable.write_text("#!/bin/sh\nexit 0\n")
+                executable.chmod(executable.stat().st_mode | stat.S_IXUSR)
+            properties = root / "sbk-config.env"
+            properties.write_text(
+                "sbk.version=10.6\n"
+                f"sbk.local.folder={sbk}\n"
+                "sbk-charts.version=4.26.7.1\n"
+                f"sbk-charts.local.folder={charts}\n"
+            )
+            stdout = io.StringIO()
+            with mock.patch("analytics.releases.subprocess.run") as run, \
+                    contextlib.redirect_stdout(stdout), \
+                    contextlib.redirect_stderr(io.StringIO()):
+                rc = main(["-p", str(properties), "deps", "status", "--json"])
+
+            run.assert_not_called()
+            self.assertEqual(rc, 0)
+            payload = json.loads(stdout.getvalue())
+            self.assertEqual(payload["sbk"]["selection"], "shared-folder")
+            self.assertEqual(
+                payload["sbk"]["shared_folder"]["layout"], "gradle-install"
+            )
+            self.assertFalse(
+                payload["sbk"]["shared_folder"]["build_performed"]
+            )
+            self.assertEqual(
+                payload["sbk_charts"]["shared_folder"]["layout"],
+                "source-launcher",
+            )
+            human = io.StringIO()
+            with mock.patch("analytics.releases.subprocess.run") as run, \
+                    contextlib.redirect_stdout(human), \
+                    contextlib.redirect_stderr(io.StringIO()):
+                human_rc = main(["-p", str(properties), "deps", "status"])
+            run.assert_not_called()
+            self.assertEqual(human_rc, 0)
+            self.assertIn("selection        : shared-folder", human.getvalue())
+            self.assertIn("layout           : gradle-install", human.getvalue())
+            self.assertIn("status action    : no build performed", human.getvalue())
 
     def test_json_dependency_error_is_one_parseable_document(self):
         stdout = io.StringIO()

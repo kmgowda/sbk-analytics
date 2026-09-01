@@ -45,6 +45,7 @@ from .policy import RUNTIME_POLICY
 log = logging.getLogger(__name__)
 SYSTEM_INFO_POLICY = RUNTIME_POLICY.system_info
 SSH_POLICY = RUNTIME_POLICY.ssh
+DISPLAY_POLICY = RUNTIME_POLICY.display
 
 
 # Columns of the system sheet, in order.
@@ -179,8 +180,12 @@ def collect_local_system_info() -> dict[str, str]:
         "Physical CPUs": str(psutil.cpu_count(logical=False) or ""),
         "Logical CPUs": str(psutil.cpu_count(logical=True) or ""),
         "CPU MHz": freq or "",
-        "Total RAM (GiB)": f"{vm.total / (1024 ** 3):.2f}",
-        "Available RAM (GiB)": f"{vm.available / (1024 ** 3):.2f}",
+        "Total RAM (GiB)": (
+            f"{vm.total / (DISPLAY_POLICY.bytes_per_kibibyte ** 3):.2f}"
+        ),
+        "Available RAM (GiB)": (
+            f"{vm.available / (DISPLAY_POLICY.bytes_per_kibibyte ** 3):.2f}"
+        ),
     }
     info.update(_container_info())
     info["Collected at"] = datetime.now().isoformat(timespec="seconds")
@@ -276,7 +281,12 @@ def collect_remote_system_info(
 
     if proc.returncode != 0:
         err = (proc.stderr or "").strip().splitlines()[-1:] or [""]
-        return {"Status": f"ssh rc={proc.returncode}: {err[0][:120]}"}
+        return {
+            "Status": (
+                f"ssh rc={proc.returncode}: "
+                f"{err[0][:DISPLAY_POLICY.system_info_tail_characters]}"
+            )
+        }
 
     raw: dict[str, str] = {}
     for line in proc.stdout.splitlines():
@@ -288,7 +298,9 @@ def collect_remote_system_info(
 
     def _bytes_to_gib(kb_str: str) -> str:
         try:
-            return f"{int(kb_str) / (1024 ** 2):.2f}"
+            return (
+                f"{int(kb_str) / (DISPLAY_POLICY.bytes_per_kibibyte ** 2):.2f}"
+            )
         except (TypeError, ValueError):
             return ""
 

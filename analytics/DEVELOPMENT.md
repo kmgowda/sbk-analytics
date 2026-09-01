@@ -57,14 +57,18 @@ analytics/              # Main package
 
 Change cross-cutting operational defaults in `analytics/policy.py`. Its frozen
 dataclasses own dependency identities and repository defaults, managed-cache
-layout, network/retry settings, process and benchmark timing, SSH behavior,
-configuration defaults, and exit codes. Keep release version pins in
-`sbk-config.env`, and keep constants used by only one algorithm next to that
-algorithm. Add or update `tests/test_policy.py` whenever policy metadata or an
-ordering constraint changes. Pre-Python values shared by the native launchers
-belong in `sbk-bootstrap.env`; keep its exact Python aligned with
+layout, source/provenance vocabulary, executable and environment names, command
+interfaces, network/retry settings, display units, process and benchmark
+timing, SSH behavior, configuration defaults, and exit codes. Keep release
+version pins and operator selections in `sbk-config.env`; named constants used
+by only one algorithm remain next to that algorithm. Do not duplicate a policy
+literal in a consumer. Add or update `tests/test_policy.py` whenever policy
+metadata or an ordering constraint changes. Pre-Python values shared by the
+native launchers belong in `sbk-bootstrap.env`; keep its exact Python aligned with
 `.python-version`, regenerate `uv.lock` after dependency changes, and update
-all six uv artifact checksums when changing the pinned uv version.
+all uv artifact checksums when changing the pinned uv version. The same file
+owns the uv release root, runtime metadata names/schema, and bootstrap lock
+timing; do not duplicate those values in the launcher.
 
 ## Common Tasks
 
@@ -150,7 +154,11 @@ sbk-analytics -c config.yml -vv   # extra verbose
 
 Local overrides use `sbk.local.folder` and `sbk-charts.local.folder` in
 `sbk-config.env`. They are resolved before cache/network handling and must
-already contain executable commands.
+already contain executable commands. They remain read-only: analytics does not
+build SBK or install into either shared folder. Dependency diagnostics include
+layout, resolved path, Git revision/tracked-file state, and release/cache
+provenance. Inspection and runtime resolution share the same ordered layout
+candidate helpers; update those helpers instead of creating a parallel search.
 
 ### Common issues
 - **JDK version mismatch**: Check `sbk.jdk.version` in sbk-config.env

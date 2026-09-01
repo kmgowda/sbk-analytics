@@ -51,6 +51,11 @@ If you're new to sbk-analytics, start with:
   view that never downloads or modifies dependencies
 - If a checkout layout is unusual, configure the exact command with
   `sbk-charts.local.executable` or `--sbk-charts-executable`
+- sbk-analytics never runs an SBK build. After changing SBK source, rebuild it
+  with the SBK project's own development workflow before running analytics.
+- `deps status --json` reports shared-folder layout, resolved paths, Git
+  revision/tracked-file dirty state, and cached release metadata without
+  starting anything. Run with `-vv` to see Git inspection failures or timeouts.
 
 ### Runtime Issues
 

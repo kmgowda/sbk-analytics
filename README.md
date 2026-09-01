@@ -106,10 +106,12 @@ CLI so its editable `sbk-config.env` remains the default configuration.
 
 Runtime policy and artifact metadata are centralized in
 `analytics/policy.py`. This is the canonical source for dependency identities,
-repository defaults, managed-cache filenames, network/retry limits, process
-grace periods, native benchmark lifecycle, SSH behavior, configuration defaults,
-and application exit codes. Release version pins remain in `sbk-config.env` so
-operators can update them without changing Python code.
+repository defaults, dependency source/layout vocabulary, executable and
+environment names, managed-cache filenames, command-line contracts,
+network/retry limits, display units, process grace periods, native benchmark
+lifecycle, SSH behavior, configuration defaults, and application exit codes.
+Release version pins and operator choices remain in `sbk-config.env` so they can
+be updated without changing Python code.
 
 ### Optional manual development environment (Conda)
 ```bash
@@ -723,21 +725,32 @@ sbk-charts.local.folder=/root/projects/sbk-charts
 ```
 
 An SBK distribution root must contain `bin/sbk-yal`; GEM workloads also
-require `bin/sbk-gem-yal`. A built SBK source checkout is accepted when the
-same commands are under `build/install/sbk/bin/` (for example, after Gradle
-`installDist`). A local sbk-charts folder must contain either
+require `bin/sbk-gem-yal`. An externally built SBK source checkout is accepted
+when the same commands are under `build/install/sbk/bin/` (for example, after
+the SBK developer runs Gradle `installDist`). sbk-analytics deliberately does
+not build SBK. A local sbk-charts folder must contain either
 `sbk-charts` at its root or `bin/sbk-charts`.
 
-Local folders are authoritative and read-only from sbk-analytics' perspective:
-it does not create `.ok`/`.home`, change permissions, install dependencies, or
-fall back to GitHub when validation fails. Relative paths are resolved against
-the directory containing `sbk-config.env`.
+Local folders are authoritative: sbk-analytics does not create `.ok`/`.home`,
+change permissions, build SBK, perform its managed release installation there,
+or fall back to GitHub when validation fails. A selected sbk-charts source
+launcher remains responsible for maintaining its own isolated runtime.
+Relative paths are resolved against the directory containing `sbk-config.env`.
 
 Every run prints `LOCAL`, `MANAGED_CACHE`, `DOWNLOADED`, or `CONDA`, together
-with the exact selected folder and executable. The configured version policy
-is applied to a detected local version. Runtime behavior assumes that the
-selected local package implements the same command and lifecycle contract as
-the shipped baseline.
+with the selection mode, layout, configured and resolved paths, exact
+executable, and detected version. Git checkouts also report their revision and
+whether tracked files are dirty; untracked files are excluded to keep normal
+runs fast on large shared checkouts. Managed releases report their repository,
+tag, release asset, and SHA-256 when that metadata is available. The configured
+version policy is applied to a detected local version. Runtime behavior assumes
+that the selected local package implements the same command and lifecycle
+contract as the shipped baseline.
+
+`deps status --json` performs read-only path, layout, executable, cache, and
+provenance inspection without starting either dependency. `deps doctor`
+additionally starts the version/readiness commands. Neither command builds SBK
+or installs into a shared folder.
 
 You don't need to pass `-p` / `--properties` — `sbk-analytics` automatically
 uses the bundled file. Pass `-p <path>` only if you want to override it
@@ -1056,7 +1069,9 @@ versions hit the cache and skip the download + install entirely.
 Local folders configured with `sbk.local.folder` or
 `sbk-charts.local.folder` are outside this managed cache. sbk-analytics only
 validates and invokes them; it never writes cache markers or installation data
-into those folders.
+into those folders. SBK source changes must be built by the SBK development
+workflow before analytics selects `build/install/sbk`; this boundary is
+intentional and keeps shared checkouts stable and read-only.
 
 ## Troubleshooting
 

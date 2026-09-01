@@ -122,6 +122,10 @@ known-host handling.
   5. Download Temurin JDK
 - `resolve_local_sbk()`: Validate a local SBK distribution or built checkout
 - `resolve_local_sbk_charts()`: Validate a local sbk-charts checkout/environment
+- `inspect_shared_sbk()` / `inspect_shared_sbk_charts()`: read-only status
+  diagnostics; they never execute, build, install, or modify dependencies
+- `_sbk_local_candidates()` / `_charts_local_candidates()`: canonical layout
+  order shared by status inspection and runtime resolution; do not duplicate it
 - `ensure_sbk()`: Prefer local SBK, otherwise use/download the release cache
 - `ensure_sbk_charts()`: Prefer local sbk-charts, otherwise use its isolated,
   checksum-aware managed environment; never mutate the application runtime
@@ -145,8 +149,10 @@ artifact identities plus operational defaults shared by multiple subsystems.
 
 **Centralized policy groups**:
 - application, SBK, sbk-charts, and JDK metadata
-- cache marker/home/metadata filenames and cache namespaces
+- dependency source/layout vocabulary, executable paths, environment variable
+  names, command options, cache filenames, and cache namespaces
 - GitHub, download, retry, pip trust, and dependency probe behavior
+- shared display geometry, units, diagnostic limits, and signal exit convention
 - process termination, SBK-native lifecycle, SSH fallback, and system-info timing
 - configuration defaults, accepted values, and CLI exit codes
 
@@ -357,8 +363,9 @@ selections never fall back to the network.
 3. **macOS Logging**: Special handling for Java output buffering
 4. **Caching**: External dependencies cached to avoid re-downloads
 5. **Error Handling**: Graceful degradation for missing dependencies
-6. **Local packages**: Explicit local folders are authoritative, validated,
-   never modified, and never silently replaced by downloads
+6. **Local packages**: Explicit shared folders are authoritative, validated,
+   never built or modified, and never silently replaced by downloads. SBK
+   development builds remain the responsibility of the SBK project workflow
 7. **Lazy charts**: Normal runs resolve sbk-charts only after usable CSV input
 8. **Machine output**: `--json` reserves stdout for one JSON document
 9. **Process ownership**: SBK and charts launches must use `managed_popen()`;
