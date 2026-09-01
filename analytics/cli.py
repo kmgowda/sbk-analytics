@@ -38,6 +38,9 @@ from .releases import (
     ensure_jdk,
     ensure_sbk,
     ensure_sbk_charts,
+    inspect_shared_sbk,
+    inspect_shared_sbk_charts,
+    managed_metadata,
 )
 from .runner import _read_yml, run_jobs
 from .system_info import append_system_sheet
@@ -46,6 +49,10 @@ from .yaml_gen import generate_instance_yaml
 log = logging.getLogger(APPLICATION.name)
 CACHE_POLICY = RUNTIME_POLICY.cache
 EXIT_CODES = RUNTIME_POLICY.exit_codes
+PROVENANCE_POLICY = RUNTIME_POLICY.provenance
+SBK_INTERFACE_POLICY = RUNTIME_POLICY.sbk_interface
+DISPLAY_POLICY = RUNTIME_POLICY.display
+SSH_POLICY = RUNTIME_POLICY.ssh
 
 
 def _print_sbk_resolution(install: SbkInstall, version: str) -> None:
@@ -55,6 +62,10 @@ def _print_sbk_resolution(install: SbkInstall, version: str) -> None:
     print(f"  sbk-yal          : {install.sbk_yal}", flush=True)
     gem_executable = install.sbk_gem_yal or "not available (not required)"
     print(f"  sbk-gem-yal      : {gem_executable}", flush=True)
+    _print_source_provenance(
+        install.provenance,
+        local_action=PROVENANCE_POLICY.sbk_local_action,
+    )
     if install.source is DependencySource.LOCAL:
         print(f"  detected version : {install.detected_version or 'unknown'}", flush=True)
         print(f"  configured version: {version} (policy applies)", flush=True)
@@ -67,6 +78,10 @@ def _print_charts_resolution(install: ChartsInstall, version: str) -> None:
     print(f"[ok] sbk-charts source: {install.source.value}", flush=True)
     print(f"  folder           : {install.venv_dir}", flush=True)
     print(f"  executable       : {install.cli}", flush=True)
+    _print_source_provenance(
+        install.provenance,
+        local_action=PROVENANCE_POLICY.charts_local_action,
+    )
     if install.source is DependencySource.LOCAL:
         print(
             f"  detected version : {install.detected_version or 'unknown'}",
@@ -81,6 +96,48 @@ def _print_charts_resolution(install: ChartsInstall, version: str) -> None:
         )
     else:
         print(f"  version          : {version}", flush=True)
+
+
+def _print_source_provenance(provenance, *, local_action: str) -> None:
+    """Print consistent release/shared-folder origin details."""
+    if provenance is None:
+        return
+    selection = (
+        PROVENANCE_POLICY.shared_folder_display
+        if provenance.mode == PROVENANCE_POLICY.shared_folder_mode
+        else PROVENANCE_POLICY.github_release_display
+    )
+    print(f"  selection        : {selection}", flush=True)
+    print(f"  layout           : {provenance.layout}", flush=True)
+    if provenance.configured_location:
+        print(
+            f"  configured path  : {provenance.configured_location}",
+            flush=True,
+        )
+    if provenance.resolved_location:
+        print(f"  resolved path    : {provenance.resolved_location}", flush=True)
+    if provenance.repository_url:
+        print(f"  repository       : {provenance.repository_url}", flush=True)
+    if provenance.release_tag:
+        print(f"  release tag      : {provenance.release_tag}", flush=True)
+    if provenance.asset:
+        print(f"  release asset    : {provenance.asset}", flush=True)
+    if provenance.sha256:
+        print(f"  SHA-256          : {provenance.sha256}", flush=True)
+    if provenance.revision:
+        state = (
+            PROVENANCE_POLICY.dirty_state
+            if provenance.dirty else PROVENANCE_POLICY.clean_state
+        )
+        print(f"  Git revision     : {provenance.revision} ({state})", flush=True)
+    elif provenance.dirty is not None:
+        print(
+            f"  Git working tree : "
+            f"{PROVENANCE_POLICY.dirty_state if provenance.dirty else PROVENANCE_POLICY.clean_state}",
+            flush=True,
+        )
+    if provenance.mode == PROVENANCE_POLICY.shared_folder_mode:
+        print(f"  local action     : {local_action}", flush=True)
 
 
 def _print_banner() -> None:
@@ -129,13 +186,22 @@ def _build_system_sources(succeeded) -> list[dict]:
         if not is_gem:
             local_instances.append(r.class_name)
             continue
-        nodes = _parse_nodes(params.get("nodes"))
-        user = str(params.get("gemuser", "")).strip()
-        password = str(params.get("gempass", "")).strip()
+        nodes = _parse_nodes(params.get(SBK_INTERFACE_POLICY.nodes_option))
+        user = str(
+            params.get(SBK_INTERFACE_POLICY.gem_user_option, "")
+        ).strip()
+        password = str(
+            params.get(SBK_INTERFACE_POLICY.gem_password_option, "")
+        ).strip()
         try:
-            port = int(params.get("gemport", 22))
+            port = int(
+                params.get(
+                    SBK_INTERFACE_POLICY.gem_port_option,
+                    SSH_POLICY.default_port,
+                )
+            )
         except (TypeError, ValueError):
-            port = 22
+            port = SSH_POLICY.default_port
         for node in nodes:
             key = (node, user, port)
             entry = remote_map.setdefault(key, {
@@ -304,11 +370,17 @@ def _dependency_summary(sbk, charts, versions) -> dict:
     return {
         "sbk": {"source": sbk.source.value, "home": str(sbk.home),
                 "executable": str(sbk.sbk_yal),
-                "detected_version": sbk.detected_version},
+                "detected_version": sbk.detected_version,
+                "provenance": (
+                    sbk.provenance.as_dict() if sbk.provenance else None
+                )},
         "sbk_charts": {
             "source": charts.source.value, "home": str(charts.venv_dir),
             "executable": str(charts.cli),
             "detected_version": charts.detected_version,
+            "provenance": (
+                charts.provenance.as_dict() if charts.provenance else None
+            ),
         },
         "downloads_folder": str(versions.downloads_folder) if versions.downloads_folder else None,
         "ssl_verify": versions.ssl_verify,
@@ -321,6 +393,7 @@ def _dependency_summary_sbk(sbk) -> dict:
         "home": str(sbk.home),
         "executable": str(sbk.sbk_yal),
         "detected_version": sbk.detected_version,
+        "provenance": sbk.provenance.as_dict() if sbk.provenance else None,
     }
 
 
@@ -334,24 +407,58 @@ def _dependency_status(versions) -> dict:
     charts_cache = (
         root / SBK_CHARTS_ARTIFACT.cache_namespace / versions.sbk_charts
     )
+    sbk_metadata = managed_metadata(sbk_cache)
+    charts_metadata = managed_metadata(charts_cache)
+    sbk_shared = (
+        inspect_shared_sbk(versions.sbk_local_folder)
+        if versions.sbk_local_folder is not None else None
+    )
+    charts_shared = (
+        inspect_shared_sbk_charts(
+            versions.sbk_charts_local_folder,
+            executable=versions.sbk_charts_local_executable,
+        )
+        if (
+            versions.sbk_charts_local_folder is not None
+            or versions.sbk_charts_local_executable is not None
+        ) else None
+    )
     status = {
         "sbk": {
+            "selection": (
+                PROVENANCE_POLICY.shared_folder_mode
+                if sbk_shared is not None
+                else PROVENANCE_POLICY.github_release_mode
+            ),
             "configured_local": str(versions.sbk_local_folder)
             if versions.sbk_local_folder else None,
+            "shared_folder": sbk_shared,
+            "repository_url": versions.sbk_url,
+            "release_tag": versions.sbk,
             "managed_cache": str(sbk_cache),
             "cache_complete": (
                 sbk_cache / CACHE_POLICY.completion_marker
             ).is_file(),
+            "cache_metadata": sbk_metadata or None,
         },
         "sbk_charts": {
+            "selection": (
+                PROVENANCE_POLICY.shared_folder_mode
+                if charts_shared is not None
+                else PROVENANCE_POLICY.github_release_mode
+            ),
             "configured_local": str(versions.sbk_charts_local_folder)
             if versions.sbk_charts_local_folder else None,
             "configured_executable": str(versions.sbk_charts_local_executable)
             if versions.sbk_charts_local_executable else None,
+            "shared_folder": charts_shared,
+            "repository_url": versions.sbk_charts_url,
+            "release_tag": versions.sbk_charts,
             "managed_cache": str(charts_cache),
             "cache_complete": (
                 charts_cache / CACHE_POLICY.completion_marker
             ).is_file(),
+            "cache_metadata": charts_metadata or None,
         },
         "jdk": {
             "managed_cache": str(versions.jdk_folder / versions.sbk_jdk),
@@ -368,6 +475,56 @@ def _dependency_status(versions) -> dict:
 def _emit_json(stream, payload: dict) -> None:
     if stream is not None:
         print(json.dumps(payload, indent=2, sort_keys=True), file=stream)
+
+
+def _print_dependency_status(status: dict) -> None:
+    """Render the read-only dependency report without opaque nested dicts."""
+    print("Dependency status (read-only; use 'deps doctor' for readiness):")
+    for key, label in (("sbk", "SBK"), ("sbk_charts", "sbk-charts")):
+        item = status[key]
+        print(f"\n{label}:")
+        print(f"  selection        : {item['selection']}")
+        if item["selection"] == PROVENANCE_POLICY.shared_folder_mode:
+            shared = item.get("shared_folder") or {}
+            print(f"  configured path  : {shared.get('configured_location')}")
+            print(f"  valid            : {shared.get('valid', False)}")
+            if shared.get("layout"):
+                print(f"  layout           : {shared['layout']}")
+            if shared.get("resolved_location"):
+                print(f"  resolved path    : {shared['resolved_location']}")
+            executable = shared.get("sbk_yal") or shared.get("executable")
+            if executable:
+                print(f"  executable       : {executable}")
+            if shared.get("revision"):
+                state = (
+                    PROVENANCE_POLICY.dirty_state
+                    if shared.get("dirty") else PROVENANCE_POLICY.clean_state
+                )
+                print(f"  Git revision     : {shared['revision']} ({state})")
+            if shared.get("error"):
+                print(f"  error            : {shared['error']}")
+            action = (
+                PROVENANCE_POLICY.sbk_status_action
+                if key == SBK_ARTIFACT.key
+                else PROVENANCE_POLICY.charts_status_action
+            )
+            print(f"  status action    : {action}")
+        else:
+            print(f"  repository       : {item['repository_url']}")
+            print(f"  release tag      : {item['release_tag']}")
+        print(f"  managed cache    : {item['managed_cache']}")
+        print(f"  cache complete   : {item['cache_complete']}")
+        metadata = item.get("cache_metadata") or {}
+        if metadata.get("asset"):
+            print(f"  cached asset     : {metadata['asset']}")
+        digest = metadata.get("sha256") or metadata.get("source_sha256")
+        if digest:
+            print(f"  cached SHA-256   : {digest}")
+    jdk = status["jdk"]
+    print("\nJDK:")
+    print(f"  managed cache    : {jdk['managed_cache']}")
+    print(f"  cache complete   : {jdk['cache_complete']}")
+    print(f"\nTLS verification  : {status['ssl_verify']}")
 
 
 def _init_local_config(output: Path) -> int:
@@ -405,7 +562,7 @@ def _cleanup_benchmark_data(cfg, work: Path) -> list[Path]:
 
 
 def _setup_logging(verbosity: int) -> None:
-    level = logging.WARNING - 10 * verbosity
+    level = logging.WARNING - DISPLAY_POLICY.logging_verbosity_step * verbosity
     level = max(logging.DEBUG, level)
     
     # Force reconfiguration to ensure it works on all platforms
@@ -471,10 +628,7 @@ def _execute(args: argparse.Namespace, json_stream=None) -> int:
         if json_stream is not None:
             _emit_json(json_stream, status)
         else:
-            print("Dependency status (read-only; use 'deps doctor' to validate):")
-            for name in ("sbk", "sbk_charts", "jdk"):
-                print(f"  {name}: {status[name]}")
-            print(f"  ssl_verify: {versions.ssl_verify}")
+            _print_dependency_status(status)
         return EXIT_CODES.success
     cfg = load_config(args.config) if args.config is not None else None
 
@@ -514,7 +668,11 @@ def _execute(args: argparse.Namespace, json_stream=None) -> int:
         work.mkdir(parents=True, exist_ok=True)
         log.info("work dir: %s", work.resolve())
         usage = shutil.disk_usage(work)
-        print(f"Filesystem free space: {usage.free / (1024 ** 3):.2f} GiB", flush=True)
+        gibibyte = DISPLAY_POLICY.bytes_per_kibibyte ** 3
+        print(
+            f"Filesystem free space: {usage.free / gibibyte:.2f} GiB",
+            flush=True,
+        )
 
     # 1. Resolve the required JDK (used via SBK_JAVA_HOME), SBK, and sbk-charts.
     #    ensure_jdk() first checks the existing SBK_JAVA_HOME / JAVA_HOME /
@@ -729,7 +887,8 @@ def _execute(args: argparse.Namespace, json_stream=None) -> int:
     }
     summary["filesystem_free_bytes_after"] = usage.free
     _emit_json(json_stream, summary)
-    print(f"Filesystem free space after run: {usage.free / (1024 ** 3):.2f} GiB")
+    gibibyte = DISPLAY_POLICY.bytes_per_kibibyte ** 3
+    print(f"Filesystem free space after run: {usage.free / gibibyte:.2f} GiB")
     print(f"\nDone. Output: {output_xlsx}", flush=True)
     return EXIT_CODES.success
 

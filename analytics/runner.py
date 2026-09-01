@@ -32,6 +32,10 @@ from .processes import (
 log = logging.getLogger(__name__)
 BENCHMARK_POLICY = RUNTIME_POLICY.benchmarks
 SSH_POLICY = RUNTIME_POLICY.ssh
+ENVIRONMENT_POLICY = RUNTIME_POLICY.environment
+LAYOUT_POLICY = RUNTIME_POLICY.dependency_layout
+SBK_INTERFACE_POLICY = RUNTIME_POLICY.sbk_interface
+DISPLAY_POLICY = RUNTIME_POLICY.display
 
 PARALLEL_WARNING = (
     "WARNING: parallel mode is experimental. Multiple SBK instances will run "
@@ -94,10 +98,10 @@ def _print_sbk_banner(
     mode_tag = "serial" if serial else "parallel"
     lines = [
         "",
-        "=" * 78,
+        "=" * DISPLAY_POLICY.section_width,
         f"  [{mode_tag}] LAUNCHING {binary.upper()} instance "
         f"({instance_index} of {instance_total}): {instance_name}",
-        "=" * 78,
+        "=" * DISPLAY_POLICY.section_width,
         f"  executable : {cmd[0]}",
         f"  command    : {' '.join(cmd)}",
         f"  yaml       : {yml_path}",
@@ -106,16 +110,25 @@ def _print_sbk_banner(
     if log_path:
         lines.append(f"  log file   : {log_path}")
     if env is not None:
-        if "SBK_JAVA_HOME" in env:
-            lines.append(f"  SBK_JAVA_HOME : {env['SBK_JAVA_HOME']}")
-        if "JAVA_HOME" in env:
-            lines.append(f"  JAVA_HOME     : {env['JAVA_HOME']}")
+        if ENVIRONMENT_POLICY.sbk_java_home in env:
+            lines.append(
+                f"  {ENVIRONMENT_POLICY.sbk_java_home} : "
+                f"{env[ENVIRONMENT_POLICY.sbk_java_home]}"
+            )
+        if ENVIRONMENT_POLICY.java_home in env:
+            lines.append(
+                f"  {ENVIRONMENT_POLICY.java_home}     : "
+                f"{env[ENVIRONMENT_POLICY.java_home]}"
+            )
     lines.append(f"  timeout    : {timeout_desc}")
-    wrapper = "sbkGemArgs" if is_gem else "sbkArgs"
+    wrapper = (
+        SBK_INTERFACE_POLICY.gem_arguments_wrapper
+        if is_gem else SBK_INTERFACE_POLICY.local_arguments_wrapper
+    )
     lines.append(f"  -- {binary} arguments ({wrapper}:) --")
     for k, v in params.items():
         lines.append(f"    {k}: {v}")
-    lines.append("=" * 78)
+    lines.append("=" * DISPLAY_POLICY.section_width)
     # Print banner unconditionally (independent of -v / log level); these are
     # status messages, not debug logs.
     print("\n".join(lines), file=sys.stderr, flush=True)
@@ -133,10 +146,12 @@ def _read_yml(yml_path: Path) -> tuple[dict, bool]:
         return {}, False
     if not isinstance(data, dict):
         return {}, False
-    if isinstance(data.get("sbkGemArgs"), dict):
-        return data["sbkGemArgs"], True
-    if isinstance(data.get("sbkArgs"), dict):
-        return data["sbkArgs"], False
+    gem_wrapper = SBK_INTERFACE_POLICY.gem_arguments_wrapper
+    local_wrapper = SBK_INTERFACE_POLICY.local_arguments_wrapper
+    if isinstance(data.get(gem_wrapper), dict):
+        return data[gem_wrapper], True
+    if isinstance(data.get(local_wrapper), dict):
+        return data[local_wrapper], False
     return {}, False
 
 
@@ -154,10 +169,11 @@ def _expected_seconds(yml_path: Path) -> int | None:
     fixed-record idle detection, and normal process completion.
     """
     params, _ = _read_yml(yml_path)
-    if "seconds" not in params:
+    seconds_option = SBK_INTERFACE_POLICY.seconds_option
+    if seconds_option not in params:
         return None
     try:
-        secs = int(params["seconds"])
+        secs = int(params[seconds_option])
     except (TypeError, ValueError):
         return None
     return secs if secs > 0 else None
@@ -189,7 +205,7 @@ def _kill_remote_sbk_clients(yml_path: Path) -> None:
     params, is_gem = _read_yml(yml_path)
     if not is_gem:
         return
-    nodes_raw = params.get("nodes")
+    nodes_raw = params.get(SBK_INTERFACE_POLICY.nodes_option)
     if not nodes_raw:
         return
 
@@ -205,10 +221,17 @@ def _kill_remote_sbk_clients(yml_path: Path) -> None:
     if not nodes:
         return
 
-    user = str(params.get("gemuser", "")).strip()
-    password = str(params.get("gempass", "")).strip()
+    user = str(params.get(SBK_INTERFACE_POLICY.gem_user_option, "")).strip()
+    password = str(
+        params.get(SBK_INTERFACE_POLICY.gem_password_option, "")
+    ).strip()
     try:
-        port = int(params.get("gemport", SSH_POLICY.default_port))
+        port = int(
+            params.get(
+                SBK_INTERFACE_POLICY.gem_port_option,
+                SSH_POLICY.default_port,
+            )
+        )
     except (TypeError, ValueError):
         port = SSH_POLICY.default_port
 
@@ -277,7 +300,11 @@ def _ssh_pkill_one(node: str, user: str, password: str, port: int,
         else:
             log.warning(
                 "remote sbk kill: %s failed rc=%s: %s",
-                node, proc.returncode, (proc.stderr or "").strip()[:200],
+                node,
+                proc.returncode,
+                (proc.stderr or "").strip()[
+                    :DISPLAY_POLICY.remote_cleanup_tail_characters
+                ],
             )
     except (subprocess.TimeoutExpired, OSError) as e:
         log.warning("remote sbk kill: %s error: %s", node, e)
@@ -323,15 +350,17 @@ def _run_serial(
         
         # Force Java to use unbuffered stdout/stderr (important for macOS)
         java_opts = []
-        if 'JAVA_TOOL_OPTIONS' in env_unbuffered:
-            java_opts.append(env_unbuffered['JAVA_TOOL_OPTIONS'])
+        if ENVIRONMENT_POLICY.java_tool_options in env_unbuffered:
+            java_opts.append(
+                env_unbuffered[ENVIRONMENT_POLICY.java_tool_options]
+            )
         java_opts.extend([
             '-Djava.stdout.buffered=false',
             '-Djava.stderr.buffered=false',
             '-Dsun.stdout.encoding=UTF-8',
             '-Dsun.stderr.encoding=UTF-8'
         ])
-        env_unbuffered['JAVA_TOOL_OPTIONS'] = ' '.join(java_opts)
+        env_unbuffered[ENVIRONMENT_POLICY.java_tool_options] = ' '.join(java_opts)
         
         # On macOS or when forced, explicitly capture and forward output to ensure visibility
         use_forwarding = sys.platform == 'darwin' or forward_logs
@@ -542,13 +571,16 @@ def _sbk_env(jdk_home: Path | None) -> dict[str, str] | None:
     env = os.environ.copy()
     jdk_home_str = str(jdk_home)
     # Set the launcher-specific Java home for SBK.
-    env["SBK_JAVA_HOME"] = jdk_home_str
+    env[ENVIRONMENT_POLICY.sbk_java_home] = jdk_home_str
     # Explicitly unset JAVA_HOME to prevent SBK from using a different Java version
     # SBK uses SBK_JAVA_HOME if set, otherwise it falls back to JAVA_HOME.
-    if "JAVA_HOME" in env:
-        del env["JAVA_HOME"]
+    if ENVIRONMENT_POLICY.java_home in env:
+        del env[ENVIRONMENT_POLICY.java_home]
     # Prepend JDK bin to PATH
-    env["PATH"] = f"{jdk_home / 'bin'}{os.pathsep}{env.get('PATH', '')}"
+    env[ENVIRONMENT_POLICY.path] = (
+        f"{jdk_home / LAYOUT_POLICY.executable_directory}{os.pathsep}"
+        f"{env.get(ENVIRONMENT_POLICY.path, '')}"
+    )
     return env
 
 

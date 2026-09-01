@@ -46,6 +46,16 @@ validate_leaf_name() {
     fi
 }
 
+validate_positive_integer() {
+    [[ "$2" =~ ^[1-9][0-9]*$ ]] ||
+        policy_error "$1" "expected a positive integer"
+}
+
+validate_https_url() {
+    [[ "$2" == https://* ]] ||
+        policy_error "$1" "expected an HTTPS URL"
+}
+
 validate_version "SBK_ANALYTICS_PYTHON_VERSION" \
     "${SBK_ANALYTICS_PYTHON_VERSION-}"
 validate_version "SBK_ANALYTICS_UV_VERSION" "${SBK_ANALYTICS_UV_VERSION-}"
@@ -53,11 +63,25 @@ validate_leaf_name "SBK_ANALYTICS_RUNTIME_FOLDER" \
     "${SBK_ANALYTICS_RUNTIME_FOLDER-}"
 validate_leaf_name "SBK_ANALYTICS_BOOTSTRAP_MARKER" \
     "${SBK_ANALYTICS_BOOTSTRAP_MARKER-}"
+validate_leaf_name "SBK_ANALYTICS_ENV_METADATA" \
+    "${SBK_ANALYTICS_ENV_METADATA-}"
+validate_positive_integer "SBK_ANALYTICS_ENV_METADATA_SCHEMA" \
+    "${SBK_ANALYTICS_ENV_METADATA_SCHEMA-}"
+validate_positive_integer "SBK_ANALYTICS_LOCK_ATTEMPTS" \
+    "${SBK_ANALYTICS_LOCK_ATTEMPTS-}"
+validate_positive_integer "SBK_ANALYTICS_LOCK_POLL_SECONDS" \
+    "${SBK_ANALYTICS_LOCK_POLL_SECONDS-}"
+validate_https_url "SBK_ANALYTICS_UV_RELEASE_BASE" \
+    "${SBK_ANALYTICS_UV_RELEASE_BASE-}"
 
 readonly PYTHON_VERSION="$SBK_ANALYTICS_PYTHON_VERSION"
 readonly UV_VERSION="$SBK_ANALYTICS_UV_VERSION"
 readonly BOOTSTRAP_MARKER="$SBK_ANALYTICS_BOOTSTRAP_MARKER"
-readonly UV_RELEASE_BASE_DEFAULT="https://github.com/astral-sh/uv/releases/download"
+readonly ENV_METADATA="$SBK_ANALYTICS_ENV_METADATA"
+readonly ENV_METADATA_SCHEMA="$SBK_ANALYTICS_ENV_METADATA_SCHEMA"
+readonly LOCK_ATTEMPTS="$SBK_ANALYTICS_LOCK_ATTEMPTS"
+readonly LOCK_POLL_SECONDS="$SBK_ANALYTICS_LOCK_POLL_SECONDS"
+readonly UV_RELEASE_BASE="$SBK_ANALYTICS_UV_RELEASE_BASE"
 
 case "$(uname -s 2>/dev/null || true)" in
     Linux)
@@ -196,7 +220,7 @@ source_fingerprint() {
 acquire_lock() {
     local lock="$1" attempt owner
     mkdir -p "$LOCK_ROOT" || fail "cannot create lock folder: $LOCK_ROOT"
-    for ((attempt = 1; attempt <= 120; attempt++)); do
+    for ((attempt = 1; attempt <= LOCK_ATTEMPTS; attempt++)); do
         if mkdir "$lock" 2>/dev/null; then
             printf '%s\n' "$$" >"$lock/pid"
             CURRENT_LOCK="$lock"
@@ -208,7 +232,7 @@ acquire_lock() {
             continue
         fi
         [[ "$attempt" -eq 1 ]] && log "waiting for bootstrap lock: $lock"
-        sleep 1
+        sleep "$LOCK_POLL_SECONDS"
     done
     fail "timed out waiting for bootstrap lock: $lock"
 }
@@ -269,7 +293,7 @@ ensure_uv() {
     rm -rf "$CURRENT_STAGE"
     mkdir -p "$CURRENT_STAGE" || fail "cannot stage uv under $CURRENT_STAGE"
     archive="$CURRENT_STAGE/uv.tar.gz"
-    url="${SBK_ANALYTICS_UV_BASE_URL:-$UV_RELEASE_BASE_DEFAULT}/$UV_VERSION/uv-$UV_TARGET.tar.gz"
+    url="${SBK_ANALYTICS_UV_BASE_URL:-$UV_RELEASE_BASE}/$UV_VERSION/uv-$UV_TARGET.tar.gz"
     log "downloading verified uv $UV_VERSION for $PLATFORM_ID"
     download_file "$url" "$archive" || fail "could not download uv from $url"
     [[ "$(sha256_file "$archive")" == "$UV_ARCHIVE_SHA256" ]] ||
@@ -347,9 +371,9 @@ bootstrap_application() {
             ${offline:+"$offline"} >&2
     ) || fail "could not install the locked application environment"
     printf '%s\n' "$fingerprint" >"$CURRENT_STAGE/$BOOTSTRAP_MARKER"
-    printf '{"schema":2,"fingerprint":"%s","python":"%s","platform":"%s","uv":"%s"}\n' \
-        "$fingerprint" "$PYTHON_VERSION" "$PLATFORM_ID" "$UV_VERSION" \
-        >"$CURRENT_STAGE/metadata.json"
+    printf '{"schema":%s,"fingerprint":"%s","python":"%s","platform":"%s","uv":"%s"}\n' \
+        "$ENV_METADATA_SCHEMA" "$fingerprint" "$PYTHON_VERSION" \
+        "$PLATFORM_ID" "$UV_VERSION" >"$CURRENT_STAGE/$ENV_METADATA"
     app_is_ready "$CURRENT_STAGE" "$fingerprint" ||
         fail "new application environment failed its health check"
     if [[ -d "$env_root" ]]; then

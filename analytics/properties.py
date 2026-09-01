@@ -63,6 +63,7 @@ from .policy import RUNTIME_POLICY, SBK_ARTIFACT, SBK_CHARTS_ARTIFACT
 DEPENDENCY_POLICY = RUNTIME_POLICY.dependencies
 CACHE_POLICY = RUNTIME_POLICY.cache
 CONFIGURATION_POLICY = RUNTIME_POLICY.configuration
+LAYOUT_POLICY = RUNTIME_POLICY.dependency_layout
 
 
 def _norm(key: str) -> str:
@@ -74,8 +75,8 @@ def _normalise_repo_url(url: str) -> str:
     return a canonical ``https://github.com/<owner>/<repo>`` URL.
     """
     s = url.strip().rstrip("/")
-    if s.endswith(".git"):
-        s = s[:-4]
+    if s.endswith(LAYOUT_POLICY.git_url_suffix):
+        s = s[:-len(LAYOUT_POLICY.git_url_suffix)]
     if "://" not in s:
         # treat as owner/repo
         parts = [p for p in s.split("/") if p]

@@ -17,6 +17,7 @@ from typing import Any
 from .policy import RUNTIME_POLICY
 
 log = logging.getLogger(__name__)
+SBK_INTERFACE_POLICY = RUNTIME_POLICY.sbk_interface
 
 _REMOVED_GEM_OPTIONS = {
     "copyonlydrivers": "use 'fullcopy: false' for compact driver-scoped provisioning",
@@ -119,7 +120,11 @@ def normalize_sbk_params(params: dict[str, Any], *, context: str) -> dict[str, A
                 f"{context}: SBK removed option '{keys[option]}'; {guidance}"
             )
 
-    nodes = normalized.get(keys.get("nodes", "")) if "nodes" in keys else None
+    nodes_option = SBK_INTERFACE_POLICY.nodes_option
+    nodes = (
+        normalized.get(keys.get(nodes_option, ""))
+        if nodes_option in keys else None
+    )
     if isinstance(nodes, (list, tuple)):
         is_gem = any(str(node).strip() for node in nodes)
     else:
@@ -153,9 +158,14 @@ def normalize_sbk_params(params: dict[str, Any], *, context: str) -> dict[str, A
             raise ValueError(
                 f"{context}: SBK options '{left}' and '{right}' are mutually exclusive"
             )
-    if "totalrecords" in keys and "totalthroughput" in keys and "seconds" in keys:
+    seconds_option = SBK_INTERFACE_POLICY.seconds_option
+    if (
+        "totalrecords" in keys
+        and "totalthroughput" in keys
+        and seconds_option in keys
+    ):
         try:
-            timed = int(normalized[keys["seconds"]]) > 0
+            timed = int(normalized[keys[seconds_option]]) > 0
         except (TypeError, ValueError):
             timed = False
         if timed:

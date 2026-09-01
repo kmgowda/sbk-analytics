@@ -16,11 +16,13 @@ from pathlib import Path
 from typing import Any
 
 from .config import OrchestratorConfig
-from .policy import SBK_CHARTS_ARTIFACT
+from .policy import RUNTIME_POLICY, SBK_CHARTS_ARTIFACT
 from .processes import managed_popen, terminate_process
 from .releases import ChartsInstall
 
 log = logging.getLogger(__name__)
+CHARTS_INTERFACE_POLICY = RUNTIME_POLICY.charts_interface
+DISPLAY_POLICY = RUNTIME_POLICY.display
 
 
 def _ai_args(ai_params: dict[str, Any]) -> list[str]:
@@ -44,9 +46,12 @@ def _prepare_cwd(work_dir: Path) -> Path:
     work around this by running sbk-charts in a dedicated cwd containing a
     stub banner file.
     """
-    cwd = work_dir / f"{SBK_CHARTS_ARTIFACT.cache_namespace}-cwd"
-    (cwd / "src" / "main").mkdir(parents=True, exist_ok=True)
-    banner = cwd / "src" / "main" / "banner.txt"
+    cwd = work_dir / (
+        f"{SBK_CHARTS_ARTIFACT.cache_namespace}"
+        f"{CHARTS_INTERFACE_POLICY.working_directory_suffix}"
+    )
+    banner = cwd.joinpath(*CHARTS_INTERFACE_POLICY.banner_path)
+    banner.parent.mkdir(parents=True, exist_ok=True)
     if not banner.exists():
         banner.write_text(f"{SBK_CHARTS_ARTIFACT.display_name}\n")
     return cwd
@@ -67,13 +72,13 @@ def run_sbk_charts(
 
     cmd: list[str] = [
         str(install.cli),
-        "-i",
+        CHARTS_INTERFACE_POLICY.input_option,
         ",".join(str(p) for p in csv_paths),
-        "-o",
+        CHARTS_INTERFACE_POLICY.output_option,
         str(output_xlsx),
     ]
     if cfg.chat:
-        cmd.append("-chat")
+        cmd.append(CHARTS_INTERFACE_POLICY.chat_option)
     # AI backend sub-command is positional
     cmd.append(cfg.ai_model)
     cmd.extend(_ai_args(cfg.ai_params))
@@ -82,9 +87,9 @@ def run_sbk_charts(
 
     banner = [
         "",
-        "=" * 78,
+        "=" * DISPLAY_POLICY.section_width,
         "  LAUNCHING SBK-CHARTS (single invocation, end of run)",
-        "=" * 78,
+        "=" * DISPLAY_POLICY.section_width,
         f"  executable : {cmd[0]}",
         f"  command    : {' '.join(cmd)}",
         f"  cwd        : {cwd}",
@@ -99,7 +104,7 @@ def run_sbk_charts(
         banner.append("  -- AI sub-command params --")
         for k, v in cfg.ai_params.items():
             banner.append(f"    {k}: {v}")
-    banner.append("=" * 78)
+    banner.append("=" * DISPLAY_POLICY.section_width)
     # Print banner unconditionally (independent of -v / log level); these are
     # status messages, not debug logs.
     print("\n".join(banner), file=sys.stderr, flush=True)

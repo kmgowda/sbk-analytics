@@ -117,6 +117,107 @@ class CachePolicy:
     metadata_filename: str = "metadata.json"
     default_downloads_folder: str = "./.sbk"
     default_jdk_folder: str = "./.jdk"
+    lock_name_template: str = ".{name}.lock"
+    install_stage_template: str = ".{name}.install-{pid}"
+
+
+@dataclass(frozen=True)
+class DependencyLayoutPolicy:
+    """Stable filesystem names used by dependency providers."""
+
+    executable_directory: str = "bin"
+    virtual_environment_directory: str = "venv"
+    python_executable: str = "python"
+    extracted_directory: str = "extracted"
+    sbk_gradle_install_path: tuple[str, ...] = ("build", "install", "sbk")
+    git_metadata: str = ".git"
+    git_url_suffix: str = ".git"
+
+
+@dataclass(frozen=True)
+class DependencyProvenancePolicy:
+    """Machine-readable source and layout vocabulary."""
+
+    shared_folder_mode: str = "shared-folder"
+    github_release_mode: str = "github-release"
+    distribution_layout: str = "distribution"
+    gradle_install_layout: str = "gradle-install"
+    source_launcher_layout: str = "source-launcher"
+    environment_layout: str = "environment"
+    explicit_executable_layout: str = "explicit-executable"
+    managed_install_layout: str = "managed-install"
+    shared_folder_display: str = "shared folder (read-only)"
+    github_release_display: str = "GitHub release"
+    clean_state: str = "clean"
+    dirty_state: str = "dirty"
+    sbk_local_action: str = "validate and execute only; SBK build is external"
+    charts_local_action: str = (
+        "execute selected command; launcher owns its runtime"
+    )
+    sbk_status_action: str = "no build performed"
+    charts_status_action: str = "no readiness command started"
+    git_command: str = "git"
+    git_revision_arguments: tuple[str, ...] = (
+        "rev-parse", "--short=12", "HEAD",
+    )
+    git_status_arguments: tuple[str, ...] = (
+        "status", "--porcelain", "--untracked-files=normal",
+    )
+
+
+@dataclass(frozen=True)
+class EnvironmentPolicy:
+    """Environment variable names shared by dependency resolution and runners."""
+
+    sbk_java_home: str = "SBK_JAVA_HOME"
+    java_home: str = "JAVA_HOME"
+    java_tool_options: str = "JAVA_TOOL_OPTIONS"
+    path: str = "PATH"
+    git_ssl_no_verify: str = "GIT_SSL_NO_VERIFY"
+    git_ssl_ca_info: str = "GIT_SSL_CAINFO"
+    pip_cert: str = "PIP_CERT"
+    enabled_value: str = "1"
+
+
+@dataclass(frozen=True)
+class SbkInterfacePolicy:
+    """Stable SBK YAML wrapper and lifecycle option names."""
+
+    local_arguments_wrapper: str = "sbkArgs"
+    gem_arguments_wrapper: str = "sbkGemArgs"
+    nodes_option: str = "nodes"
+    seconds_option: str = "seconds"
+    class_option: str = "class"
+    output_option: str = "out"
+    csv_file_option: str = "csvfile"
+    csv_logger: str = "CSVLogger"
+    gem_user_option: str = "gemuser"
+    gem_password_option: str = "gempass"
+    gem_port_option: str = "gemport"
+
+
+@dataclass(frozen=True)
+class ChartsInterfacePolicy:
+    """Stable sbk-charts command and runtime resource names."""
+
+    input_option: str = "-i"
+    output_option: str = "-o"
+    chat_option: str = "-chat"
+    working_directory_suffix: str = "-cwd"
+    banner_path: tuple[str, ...] = ("src", "main", "banner.txt")
+
+
+@dataclass(frozen=True)
+class DisplayPolicy:
+    """Shared human-readable output and unit conversion values."""
+
+    section_width: int = 78
+    bytes_per_kibibyte: int = 1024
+    percentage_scale: float = 100.0
+    diagnostic_tail_characters: int = 500
+    remote_cleanup_tail_characters: int = 200
+    system_info_tail_characters: int = 120
+    logging_verbosity_step: int = 10
 
 
 @dataclass(frozen=True)
@@ -139,6 +240,11 @@ class NetworkPolicy:
         "pypi.python.org",
         "raw.githubusercontent.com",
     )
+    pip_module: str = "pip"
+    pip_install_subcommand: str = "install"
+    pip_trusted_host_option: str = "--trusted-host"
+    pip_quiet_option: str = "--quiet"
+    pip_upgrade_option: str = "--upgrade"
 
 
 @dataclass(frozen=True)
@@ -151,6 +257,7 @@ class DependencyPolicy:
     command_version_timeout_s: float = 20.0
     charts_readiness_timeout_s: float = 60.0
     java_version_timeout_s: float = 10.0
+    source_control_timeout_s: float = 5.0
 
     @property
     def default_version_policy(self) -> str:
@@ -232,11 +339,18 @@ class ExitCodePolicy:
     missing_output: int = 3
     system_info_failure: int = 4
     handled_error: int = 5
+    signal_base: int = 128
 
 
 @dataclass(frozen=True)
 class RuntimePolicy:
     cache: CachePolicy = CachePolicy()
+    dependency_layout: DependencyLayoutPolicy = DependencyLayoutPolicy()
+    provenance: DependencyProvenancePolicy = DependencyProvenancePolicy()
+    environment: EnvironmentPolicy = EnvironmentPolicy()
+    sbk_interface: SbkInterfacePolicy = SbkInterfacePolicy()
+    charts_interface: ChartsInterfacePolicy = ChartsInterfacePolicy()
+    display: DisplayPolicy = DisplayPolicy()
     network: NetworkPolicy = NetworkPolicy()
     dependencies: DependencyPolicy = DependencyPolicy()
     processes: ProcessPolicy = ProcessPolicy()

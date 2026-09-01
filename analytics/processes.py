@@ -37,6 +37,7 @@ from .policy import RUNTIME_POLICY
 log = logging.getLogger(__name__)
 
 PROCESS_POLICY = RUNTIME_POLICY.processes
+EXIT_CODE_POLICY = RUNTIME_POLICY.exit_codes
 _ACTIVE: set["ManagedProcess"] = set()
 _ACTIVE_LOCK = threading.RLock()
 
@@ -46,7 +47,7 @@ class ProcessExit(SystemExit):
 
     def __init__(self, signum: int):
         self.signum = signum
-        super().__init__(128 + signum)
+        super().__init__(EXIT_CODE_POLICY.signal_base + signum)
 
 
 class ManagedProcess:

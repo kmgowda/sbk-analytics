@@ -74,6 +74,7 @@ from .sbk_contract import normalize_sbk_params
 
 
 CONFIGURATION_POLICY = RUNTIME_POLICY.configuration
+SBK_INTERFACE_POLICY = RUNTIME_POLICY.sbk_interface
 
 
 @dataclass
@@ -86,7 +87,9 @@ class Instance:
     @property
     def uses_gem(self) -> bool:
         """Whether this instance requires the distributed GEM runner."""
-        return _has_value(self.params.get("nodes"))
+        return _has_value(
+            self.params.get(SBK_INTERFACE_POLICY.nodes_option)
+        )
 
 
 @dataclass

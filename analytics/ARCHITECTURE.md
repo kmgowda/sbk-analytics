@@ -17,8 +17,10 @@ build rather than accepting a cached wheel. Bash replaces itself with safe-path 
 `policy.py` is the dependency-free policy boundary used by the CLI,
 configuration parser, resolver, runner, process manager, charts adapter, and
 system-info collector. Immutable typed policy groups centralize values that
-cross module boundaries, while `sbk-config.env` remains the operator-controlled
-source for release version pins and local dependency selections.
+cross module boundaries, including dependency layouts/provenance, executable
+and environment names, command interfaces, units, status vocabulary, and
+timeouts. `sbk-config.env` remains the operator-controlled source for release
+version pins and local dependency selections.
 The native launchers load their smaller pre-Python policy boundary from
 `sbk-bootstrap.env`, because `analytics.policy` cannot be imported until a
 compatible interpreter and environment exist.
@@ -91,7 +93,7 @@ flowchart TB
 
     Resolver --> EnsureSBK["ensure_sbk()"]
     EnsureSBK --> LocalSBK{"Local SBK configured?"}
-    LocalSBK -->|Yes| ValidateSBK["Validate local executables"]
+    LocalSBK -->|Yes| ValidateSBK["Read-only validation<br/>No SBK build"]
     LocalSBK -->|No| CachedSBK{"Complete managed cache?"}
     CachedSBK -->|Yes| ReuseSBK["Reuse cached SBK"]
     CachedSBK -->|No| DownloadSBK["Lock, download, validate, publish"]
@@ -103,7 +105,7 @@ flowchart TB
 
     CSV["At least one successful CSV"] --> EnsureCharts["ensure_sbk_charts()"]
     EnsureCharts --> LocalCharts{"Local charts selected?"}
-    LocalCharts -->|Yes| ValidateCharts["Validate local command"]
+    LocalCharts -->|Yes| ValidateCharts["Read-only validation<br/>No install"]
     LocalCharts -->|No| CachedCharts{"Complete charts cache?"}
     CachedCharts -->|Yes| ReuseCharts["Reuse isolated environment"]
     CachedCharts -->|No| InstallCharts["Verify source and install"]
@@ -112,6 +114,9 @@ flowchart TB
 Explicit local SBK validation happens before JDK resolution. sbk-charts is
 lazy during normal runs, so a failed SBK workload does not trigger a charts
 install. `deps doctor` intentionally resolves and starts all three tools.
+Shared-folder resolution never builds SBK or performs a managed release install
+into either checkout; the owning development workflow must prepare runnable
+commands first. A selected sbk-charts source launcher owns its isolated runtime.
 Archive members are checked before extraction, and managed installs are
 published only after executable validation and metadata creation. Directory
 publication is atomic and coordinated by a per-version lock.
