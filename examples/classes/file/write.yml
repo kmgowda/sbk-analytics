@@ -9,7 +9,7 @@ sbk:
   time: ns
   idletimeoutseconds: 120
 
-classes:
+benchmarks:
   # 65,536 × 4 KiB = 256 MiB.
   - name: file-write-4k
     class: file

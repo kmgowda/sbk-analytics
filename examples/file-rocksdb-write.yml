@@ -3,7 +3,7 @@
 # Parameter resolution per instance (lowest to highest precedence):
 #   1. shared `sbk:` block (defaults for ALL instances)
 #   2. `class_params[<class>]` (per-class defaults, if any)
-#   3. the instance's own keys under `classes:` (per-instance overrides)
+#   3. the instance's own keys under `benchmarks:` (per-instance overrides)
 #   4. orchestrator-managed:  class, out=CSVLogger, csvfile=<unique-path>
 #
 # An instance therefore needs to specify only the parameters that differ from
@@ -24,7 +24,7 @@ sbk:
   time: ms
   writers: 1          # default; can be overridden per instance
 
-classes:
+benchmarks:
   # File driver: only needs its class-specific param `file`.
   - class: file
     file: /tmp/sbk-analytics/file.dat

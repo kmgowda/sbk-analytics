@@ -4,7 +4,7 @@
 #   1. mode             - serial | parallel  (default: serial)
 #   2. sbk              - shared SBK / SBK-GEM-YAL defaults
 #                          (presence of 'nodes' switches to sbk-gem-yal)
-#   3. classes          - list of benchmark instances
+#   3. benchmarks       - list of benchmark instances
 #   4. class_params     - (optional) per-class default overrides
 #   5. sbk-charts       - sbk-charts options:
 #                          output, ai_model, ai_params, chat
@@ -32,7 +32,7 @@ sbk:
   # fullcopy, hostkeycheck/knownhosts, sbmport/sbmsleepms, totalrecords, or
   # totalthroughput. SBK-GEM embeds SBM; analytics does not launch sbm directly.
 
-classes:
+benchmarks:
   - class: file
     writers: 1
     size: 100

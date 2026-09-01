@@ -9,7 +9,7 @@ sbk:
   time: ns
   idletimeoutseconds: 120
 
-classes:
+benchmarks:
   - name: file-read-4k
     class: file
     readers: 1

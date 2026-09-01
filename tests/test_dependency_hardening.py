@@ -254,15 +254,15 @@ class CleanupSafetyTests(unittest.TestCase):
     def test_cleanup_before_run_defaults_false_and_accepts_true(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "input.yml"
-            path.write_text("classes: [file]\n")
+            path.write_text("benchmarks: [file]\n")
             self.assertFalse(load_config(path).cleanup_before_run)
-            path.write_text("classes: [file]\ncleanup_before_run: true\n")
+            path.write_text("benchmarks: [file]\ncleanup_before_run: true\n")
             self.assertTrue(load_config(path).cleanup_before_run)
 
     def test_cleanup_before_run_rejects_invalid_boolean(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "input.yml"
-            path.write_text("classes: [file]\ncleanup_before_run: always\n")
+            path.write_text("benchmarks: [file]\ncleanup_before_run: always\n")
             with self.assertRaisesRegex(ValueError, "cleanup_before_run"):
                 load_config(path)
 
@@ -287,7 +287,7 @@ class CleanupSafetyTests(unittest.TestCase):
     def test_cleanup_value_is_validated(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "input.yml"
-            path.write_text("classes: [file]\ncleanup: everything\n")
+            path.write_text("benchmarks: [file]\ncleanup: everything\n")
             with self.assertRaisesRegex(ValueError, "cleanup"):
                 load_config(path)
 
@@ -315,7 +315,7 @@ class CliFlowTests(unittest.TestCase):
             )
             config = root / "input.yml"
             config.write_text(
-                f"workdir: {root / 'work'}\nclasses: [file]\n"
+                f"workdir: {root / 'work'}\nbenchmarks: [file]\n"
             )
             sbk_home = root / "sbk"
             sbk = SbkInstall(sbk_home, DependencySource.LOCAL,
@@ -347,7 +347,7 @@ class CliFlowTests(unittest.TestCase):
             config = root / "input.yml"
             config.write_text(
                 f"workdir: {work}\ncleanup_before_run: true\n"
-                "classes: [file]\n"
+                "benchmarks: [file]\n"
             )
             sbk_home = root / "sbk"
             sbk = SbkInstall(
@@ -497,7 +497,7 @@ class CliFlowTests(unittest.TestCase):
             )
             config = root / "input.yml"
             config.write_text(
-                f"workdir: {root / 'work'}\nclasses: [file]\n"
+                f"workdir: {root / 'work'}\nbenchmarks: [file]\n"
             )
             sbk = SbkInstall(
                 root / "sbk", DependencySource.LOCAL,
@@ -534,7 +534,7 @@ class CliFlowTests(unittest.TestCase):
             )
             config = root / "input.yml"
             config.write_text(
-                f"workdir: {root / 'work'}\nclasses: [file]\n"
+                f"workdir: {root / 'work'}\nbenchmarks: [file]\n"
                 "sbk-charts:\n  output: result.xlsx\n"
             )
             sbk = SbkInstall(

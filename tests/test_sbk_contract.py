@@ -22,7 +22,7 @@ class SbkContractConfigurationTests(unittest.TestCase):
 
     def test_runtimecleanup_is_migrated_to_packagescleanup(self):
         config = self._load(
-            "classes: [file]\nsbk:\n  nodes: [node1]\n  runtimecleanup: true\n"
+            "benchmarks: [file]\nsbk:\n  nodes: [node1]\n  runtimecleanup: true\n"
         )
         params = config.instances[0].params
         self.assertNotIn("runtimecleanup", params)
@@ -38,12 +38,12 @@ class SbkContractConfigurationTests(unittest.TestCase):
                 ValueError, "SBK removed option"
             ):
                 self._load(
-                    f"classes: [file]\nsbk:\n  nodes: [node1]\n  {option}: true\n"
+                    f"benchmarks: [file]\nsbk:\n  nodes: [node1]\n  {option}: true\n"
                 )
 
     def test_new_gem_options_and_wrapper_are_preserved(self):
         config = self._load(
-            "classes: [file]\nsbk:\n"
+            "benchmarks: [file]\nsbk:\n"
             "  nodes: [node1, node2]\n"
             "  packagescleanup: true\n"
             "  fullcopy: false\n"
@@ -67,19 +67,19 @@ class SbkContractConfigurationTests(unittest.TestCase):
 
     def test_gem_only_options_require_nodes(self):
         with self.assertRaisesRegex(ValueError, "require a non-empty 'nodes'"):
-            self._load("classes: [file]\nsbk:\n  packagescleanup: true\n")
+            self._load("benchmarks: [file]\nsbk:\n  packagescleanup: true\n")
 
     def test_aggregate_option_conflicts_are_rejected(self):
         with self.assertRaisesRegex(ValueError, "mutually exclusive"):
             self._load(
-                "classes: [file]\nsbk:\n  nodes: node1\n"
+                "benchmarks: [file]\nsbk:\n  nodes: node1\n"
                 "  totalrecords: 100\n  records: 10\n"
             )
 
     def test_blank_nodes_does_not_enable_gem_options(self):
         with self.assertRaisesRegex(ValueError, "require a non-empty 'nodes'"):
             self._load(
-                "classes: [file]\nsbk:\n  nodes: '   '\n  fullcopy: false\n"
+                "benchmarks: [file]\nsbk:\n  nodes: '   '\n  fullcopy: false\n"
             )
 
     def test_contract_numeric_options_are_validated(self):
@@ -89,14 +89,14 @@ class SbkContractConfigurationTests(unittest.TestCase):
                 ValueError, "positive integer"
             ):
                 self._load(
-                    f"classes: [file]\nsbk:\n{nodes}  {option}: 0\n"
+                    f"benchmarks: [file]\nsbk:\n{nodes}  {option}: 0\n"
                 )
         with self.assertRaisesRegex(ValueError, "positive number"):
             self._load(
-                "classes: [file]\nsbk:\n  nodes: node1\n  totalthroughput: -1\n"
+                "benchmarks: [file]\nsbk:\n  nodes: node1\n  totalthroughput: -1\n"
             )
         config = self._load(
-            "classes: [file]\nsbk:\n  nodes: node1\n  sbmsleepms: 0\n"
+            "benchmarks: [file]\nsbk:\n  nodes: node1\n  sbmsleepms: 0\n"
         )
         self.assertEqual(config.instances[0].params["sbmsleepms"], 0)
 

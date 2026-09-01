@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Added canonical top-level YAML `benchmarks` terminology. The former
+  `classes` key remains accepted as a deprecated alias with a warning, while
+  defining both keys is rejected to prevent ambiguous persistent workflows.
 - Added a persistent per-class example catalog with paired multi-instance file
   and RocksDB write/read benchmarking workflows and continuous render tests.
 - Added top-level YAML `cleanup_before_run` (default `false`) to empty a safely

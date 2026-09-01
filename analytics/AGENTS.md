@@ -86,7 +86,8 @@ sbk-analytics/
 - `OrchestratorConfig`: Main configuration class with attributes:
   - `mode`: Execution mode (serial/parallel)
   - `sbk_config`: SBK repository and version
-  - `classes`: List of benchmark classes to run
+  - `instances`: Parsed list of benchmark invocations declared under the
+    canonical YAML `benchmarks:` key
   - `workdir`: Working directory for outputs
   - `ai_model`: AI model for analysis
   - `ai_params`: AI parameters
@@ -293,7 +294,7 @@ mode: serial  # or parallel
 sbk:
   url: https://github.com/kmgowda/SBK
   version: 10.0
-classes:
+benchmarks:
   - name: class_name
     params:
       # SBK-specific parameters
@@ -565,7 +566,7 @@ sbk:                                # Shared SBK parameters (defaults for all in
   time: ms
   writers: 1
 
-classes:                            # List of benchmark instances
+benchmarks:                          # List of benchmark instances
   - class: file
     file: /tmp/benchmark.dat
   - class: rocksdb
@@ -589,7 +590,7 @@ Parameters are resolved in the following order (lowest to highest precedence):
 
 1. **Shared `sbk:` block** - Defaults for ALL instances
 2. **`class_params[<class>]`** - Per-class defaults (if specified)
-3. **Instance's own keys** - Per-instance overrides in `classes:` list
+3. **Instance's own keys** - Per-instance overrides in `benchmarks:` list
 4. **Orchestrator-managed** - `class`, `out=CSVLogger`, `csvfile=<unique-path>`
 
 This means an instance only needs to specify parameters that differ from the shared defaults.
@@ -675,7 +676,7 @@ These parameters can be specified in the `sbk:` block or per-instance:
 
 #### Style A: Simple Class List (Legacy)
 ```yaml
-classes: [file, rocksdb, hdfs]
+benchmarks: [file, rocksdb, hdfs]
 class_params:
   file: {file: /tmp/file.dat, writers: 1}
   rocksdb: {rfile: /tmp/rocksdb, writers: 1}
@@ -684,7 +685,7 @@ class_params:
 
 #### Style B: Detailed Instance List (Recommended)
 ```yaml
-classes:
+benchmarks:
   - class: file
     file: /tmp/file.dat
     writers: 1
@@ -699,7 +700,7 @@ classes:
 
 #### Style C: Mixed with Custom Names
 ```yaml
-classes:
+benchmarks:
   - class: file
     name: file-write-heavy
     file: /tmp/file.dat
@@ -723,7 +724,7 @@ sbk:
   seconds: 60
   size: 1000
   writers: 1
-classes:
+benchmarks:
   - class: file
     file: /tmp/benchmark/file.dat
   - class: rocksdb
@@ -740,7 +741,7 @@ mode: serial
 sbk:
   seconds: 60
   size: 100
-classes:
+benchmarks:
   - class: file
     name: file-write
     file: /tmp/benchmark/file.dat
@@ -766,7 +767,7 @@ mode: parallel
 sbk:
   seconds: 60
   size: 100
-classes:
+benchmarks:
   - class: file
     name: file-1-writer
     file: /tmp/benchmark/file-1.dat
@@ -792,7 +793,7 @@ mode: serial
 sbk:
   seconds: 60
   writers: 1
-classes:
+benchmarks:
   - class: file
     name: file-100b
     file: /tmp/benchmark/file-100b.dat
@@ -820,7 +821,7 @@ sbk:
   size: 100
   writers: 1
   nodes: ["node1:8080", "node2:8080", "node3:8080"]  # Triggers sbk-gem-yal
-classes:
+benchmarks:
   - class: file
     file: /tmp/benchmark/file.dat
   - class: rocksdb
@@ -837,14 +838,14 @@ sbk:
   seconds: 60
   size: 100
   writers: 1
-classes:
+benchmarks:
   - class: file
     file: /tmp/file.dat
   - class: rocksdb
     rfile: /tmp/rocksdb
 
 # Avoid repetition
-classes:
+benchmarks:
   - class: file
     seconds: 60
     size: 100
@@ -860,7 +861,7 @@ classes:
 #### 2. Use Descriptive Instance Names
 When using Style B, provide meaningful names:
 ```yaml
-classes:
+benchmarks:
   - class: file
     name: file-write-4k-records
     file: /tmp/file.dat
@@ -876,7 +877,7 @@ Make sure parent directories exist for file paths:
 ```yaml
 # Use workdir for consistent file locations
 workdir: /tmp/sbk-analytics
-classes:
+benchmarks:
   - class: file
     file: /tmp/sbk-analytics/file.dat    # Parent will be created
   - class: rocksdb
@@ -900,7 +901,9 @@ Ensure required parameters are present for each class:
 
 AI agents should validate YAML configurations against these rules:
 
-1. **Required Top-Level Keys**: `classes` must be present and non-empty
+1. **Required Top-Level Keys**: `benchmarks` must be present and non-empty.
+   Legacy `classes` is accepted with a deprecation warning but must never be
+   combined with `benchmarks` in the same file.
 2. **Valid Mode**: `mode` must be `serial` or `parallel`
 3. **Valid AI Model**: `ai_model` must be one of `huggingface`, `ollama`, `lmstudio`, `noai`
 4. **Unique Instance Names**: All instance names must be unique
@@ -957,7 +960,7 @@ sbk:
   time: ms
   writers: 1                    # Default, will be overridden
 
-classes:
+benchmarks:
   # File driver with varying writers
   - class: file
     name: file-1-writer
@@ -1003,7 +1006,7 @@ class_params:
   file: {writers: 1, readers: 0}
   rocksdb: {writers: 1, readers: 0}
 
-classes:
+benchmarks:
   - class: file
     file: /tmp/file.dat           # Inherits writers: 1, readers: 0
   - class: rocksdb

@@ -11,7 +11,7 @@ sbk:
   time: ns
   writers: 1
 
-classes:
+benchmarks:
   - class: file
     file: /tmp/sbk-analytics/file-60s.dat
   - class: rocksdb

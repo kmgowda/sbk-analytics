@@ -222,6 +222,8 @@ sbk-analytics --version
 For AI agents needing to generate YAML workload configurations, see the **YAML Configuration Generation for AI Agents** section in [AGENTS.md](AGENTS.md#yaml-configuration-generation-for-ai-agents), which includes:
 - Complete YAML schema reference
 - All storage driver classes and their parameters
+- Canonical `benchmarks:` workflow parsing, the deprecated `classes:` alias,
+  and rejection when both keys are present
 - Common workload patterns with examples
 - Best practices for YAML generation
 - Validation rules and troubleshooting

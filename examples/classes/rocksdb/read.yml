@@ -9,7 +9,7 @@ sbk:
   time: ns
   idletimeoutseconds: 120
 
-classes:
+benchmarks:
   - name: rocksdb-read-4k
     class: rocksdb
     readers: 1
