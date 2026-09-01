@@ -14,6 +14,7 @@ from analytics.releases import (
     SbkInstall,
     ensure_sbk,
     ensure_sbk_charts,
+    _gh_release,
     resolve_local_sbk,
     resolve_local_sbk_charts,
 )
@@ -33,6 +34,19 @@ def _sbk_home(root: Path) -> Path:
 
 
 class LocalSbkResolutionTests(unittest.TestCase):
+    def test_release_lookup_accepts_v_prefixed_github_tag(self):
+        missing = mock.Mock(status_code=404)
+        found = mock.Mock(status_code=200)
+        found.json.return_value = {"tag_name": "v11.0", "assets": []}
+        with mock.patch(
+            "analytics.releases.requests.get", side_effect=(missing, found)
+        ) as request:
+            release = _gh_release("owner/repository", "11.0", ssl_verify=True)
+
+        self.assertEqual(release["tag_name"], "v11.0")
+        self.assertEqual(request.call_count, 2)
+        self.assertTrue(request.call_args_list[1].args[0].endswith("/v11.0"))
+
     def test_distribution_layout_is_used_without_mutation(self):
         with tempfile.TemporaryDirectory() as directory:
             root = _sbk_home(Path(directory))

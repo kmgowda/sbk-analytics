@@ -22,6 +22,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Require both exit code zero and a non-empty CSV before charting an SBK run.
 
 ### Fixed
+- Resolve configured plain release versions such as `10.6` against upstream
+  GitHub tags that use the conventional `v` prefix, such as `v10.6`.
 - Prevented analytics from killing SBK-GEM while 10.6 is still provisioning
   nodes before the benchmark timer starts.
 
