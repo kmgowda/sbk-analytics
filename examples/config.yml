@@ -18,6 +18,11 @@ mode: serial
 # report when `sbk-charts.output` is a bare filename.
 workdir: /tmp/sbk-analytics
 
+# Optional destructive pre-run cleanup. When true, every existing entry below
+# workdir is removed once, after dependency validation and immediately before
+# SBK/SBK-GEM starts. The workdir itself is preserved. Default: false.
+cleanup_before_run: false
+
 sbk:
   seconds: 60
   time: ms

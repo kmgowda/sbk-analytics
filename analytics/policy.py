@@ -372,6 +372,8 @@ class DiagnosticFieldPolicy:
     cleanup: str = "cleanup"
     cleanup_policy: str = "policy"
     removed_paths: str = "removed_paths"
+    cleanup_before_run: str = "before_run"
+    before_run_removed_entries: str = "before_run_removed_entries"
     filesystem_free_bytes_after: str = "filesystem_free_bytes_after"
     valid: str = "valid"
     layout: str = "layout"
@@ -664,11 +666,15 @@ class ConfigurationPolicy:
     )
     default_cleanup: str = "never"
     cleanup_on_success: str = "on-success"
+    default_cleanup_before_run: bool = False
     true_tokens: tuple[str, ...] = ("1", "true", "yes", "on")
     false_tokens: tuple[str, ...] = ("0", "false", "no", "off")
     mode_keys: tuple[str, ...] = ("mode",)
     workdir_keys: tuple[str, ...] = ("workdir", "work_dir", "work-dir")
     cleanup_keys: tuple[str, ...] = ("cleanup",)
+    cleanup_before_run_keys: tuple[str, ...] = (
+        "cleanup_before_run", "cleanup-before-run",
+    )
     sbk_group_keys: tuple[str, ...] = ("sbk", "sbk_params", "sbk-params")
     classes_keys: tuple[str, ...] = ("classes", "class_list", "class-list")
     class_params_keys: tuple[str, ...] = (

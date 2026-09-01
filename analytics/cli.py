@@ -58,6 +58,7 @@ SYSTEM_INFO_POLICY = RUNTIME_POLICY.system_info
 ENVIRONMENT_POLICY = RUNTIME_POLICY.environment
 LIFECYCLE_POLICY = RUNTIME_POLICY.lifecycle
 CACHE_METADATA_POLICY = RUNTIME_POLICY.cache_metadata
+CONFIGURATION_POLICY = RUNTIME_POLICY.configuration
 CLI_POLICY = RUNTIME_POLICY.cli
 DIAGNOSTIC_FIELDS = RUNTIME_POLICY.diagnostics
 
@@ -659,6 +660,51 @@ def _cleanup_benchmark_data(cfg, work: Path) -> list[Path]:
     return removed
 
 
+def _cleanup_workdir_before_run(
+    work: Path,
+    *,
+    protected_paths: tuple[Path | None, ...] = (),
+) -> list[Path]:
+    """Remove every entry below workdir after refusing dangerous scopes."""
+    work_root = work.expanduser().resolve()
+    source_root = os.environ.get(ENVIRONMENT_POLICY.source_root)
+    protected = {
+        Path(work_root.anchor).resolve(),
+        Path.home().resolve(),
+        Path.cwd().resolve(),
+        Path(tempfile.gettempdir()).resolve(),
+        Path(__file__).resolve().parent.parent,
+    }
+    if source_root:
+        protected.add(Path(source_root).expanduser().resolve())
+    protected.update(
+        path.expanduser().resolve()
+        for path in protected_paths
+        if path is not None
+    )
+    for path in protected:
+        if work_root == path or work_root in path.parents:
+            raise ConfigurationError(
+                f"{CONFIGURATION_POLICY.cleanup_before_run_keys[0]} refuses "
+                "workdir because it contains "
+                f"protected path {path}: {work_root}"
+            )
+    if not work_root.is_dir():
+        raise ConfigurationError(
+            f"{CONFIGURATION_POLICY.cleanup_before_run_keys[0]} requires an "
+            f"existing directory: {work_root}"
+        )
+
+    removed: list[Path] = []
+    for entry in work_root.iterdir():
+        if entry.is_symlink() or not entry.is_dir():
+            entry.unlink()
+        else:
+            shutil.rmtree(entry)
+        removed.append(entry)
+    return removed
+
+
 def _setup_logging(verbosity: int) -> None:
     level = logging.WARNING - DISPLAY_POLICY.logging_verbosity_step * verbosity
     level = max(logging.DEBUG, level)
@@ -852,6 +898,30 @@ def _execute(args: argparse.Namespace, json_stream=None) -> int:
     for inst in cfg.instances:
         log.info("SBK executable for %s: %s", inst.name, executables[inst.name])
 
+    pre_run_removed: list[Path] = []
+    if cfg.cleanup_before_run:
+        pre_run_removed = _cleanup_workdir_before_run(
+            work,
+            protected_paths=(
+                args.config,
+                properties_path,
+                versions.downloads_folder,
+                versions.jdk_folder,
+                versions.sbk_local_folder,
+                versions.sbk_charts_local_folder,
+                versions.sbk_charts_local_executable,
+                sbk.home,
+                jdk.home,
+            ),
+        )
+        print(
+            "Pre-run workdir cleanup: removed "
+            f"{len(pre_run_removed)} top-level entr"
+            f"{'y' if len(pre_run_removed) == 1 else 'ies'} from "
+            f"{work.resolve()}.",
+            flush=True,
+        )
+
     # 2. Generate per-class YAMLs
     yml_dir = work / "yml"
     csv_dir = work / "csv"
@@ -1014,6 +1084,9 @@ def _execute(args: argparse.Namespace, json_stream=None) -> int:
         DIAGNOSTIC_FIELDS.cleanup_policy: cfg.cleanup,
         DIAGNOSTIC_FIELDS.removed_paths: [str(path) for path in removed]
         if cfg.cleanup == cleanup_on_success else [],
+        DIAGNOSTIC_FIELDS.cleanup_before_run: cfg.cleanup_before_run,
+        DIAGNOSTIC_FIELDS.before_run_removed_entries:
+            len(pre_run_removed),
     }
     summary[DIAGNOSTIC_FIELDS.filesystem_free_bytes_after] = usage.free
     _emit_json(json_stream, summary)

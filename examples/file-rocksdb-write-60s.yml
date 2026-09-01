@@ -1,6 +1,9 @@
 # Single-writer benchmark on `file` and `rocksdb`, 60s each.
 mode: serial
 workdir: /tmp/sbk-analytics
+# Set true to prevent old YAML, CSV, log, report, and benchmark-data files from
+# accumulating in workdir across runs. Default: false.
+cleanup_before_run: false
 
 sbk:
   seconds: 60

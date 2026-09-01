@@ -64,6 +64,8 @@ sbk-analytics/
 - `_print_banner()`: Displays ASCII art banner
 - `_dependency_status()`: Read-only local/cache configuration report
 - `_cleanup_benchmark_data()`: Safe, workdir-confined File-driver cleanup
+- `_cleanup_workdir_before_run()`: Opt-in full workdir-content cleanup with
+  protected-path refusal before SBK/SBK-GEM execution
 
 **Commands and diagnostics**:
 - `sbk-analytics deps status [--json]`: read-only; never installs/downloads
@@ -91,6 +93,9 @@ sbk-analytics/
   - `chat`: Chat mode flag
   - `cleanup`: `never` (default) or `on-success`; cleanup supports only the
     File driver and only its `file`/`fname` path when contained by `workdir`
+  - `cleanup_before_run`: boolean (default `false`); when true, removes every
+    entry below the protected and resolved workdir immediately before workloads
+    start
 
 ### 3. Properties Module (`properties.py`)
 **Purpose**: Parse .env-style configuration files

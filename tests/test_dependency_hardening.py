@@ -12,9 +12,15 @@ import zipfile
 from pathlib import Path
 from unittest import mock
 
-from analytics.cli import _apply_overrides, _cleanup_benchmark_data, _parse_args, main
+from analytics.cli import (
+    _apply_overrides,
+    _cleanup_benchmark_data,
+    _cleanup_workdir_before_run,
+    _parse_args,
+    main,
+)
 from analytics.config import Instance, OrchestratorConfig, load_config
-from analytics.errors import CacheError, LocalPackageError
+from analytics.errors import CacheError, ConfigurationError, LocalPackageError
 from analytics.processes import ProcessExit
 from analytics.properties import parse_properties
 from analytics.releases import (
@@ -209,6 +215,57 @@ class JdkPublicationTests(unittest.TestCase):
             self.assertEqual(metadata["detected_major"], 25)
 
 class CleanupSafetyTests(unittest.TestCase):
+    def test_cleanup_before_run_removes_all_entries_but_preserves_workdir(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            work = root / "work"
+            nested = work / "nested"
+            nested.mkdir(parents=True)
+            (work / "old.csv").write_text("old")
+            (work / ".hidden").write_text("old")
+            (nested / "old.log").write_text("old")
+            outside = root / "outside"
+            outside.mkdir()
+            (outside / "keep").write_text("keep")
+            (work / "outside-link").symlink_to(outside, target_is_directory=True)
+
+            removed = _cleanup_workdir_before_run(work)
+
+            self.assertEqual(len(removed), 4)
+            self.assertTrue(work.is_dir())
+            self.assertEqual(list(work.iterdir()), [])
+            self.assertEqual((outside / "keep").read_text(), "keep")
+
+    def test_cleanup_before_run_refuses_workdir_containing_protected_path(self):
+        with tempfile.TemporaryDirectory() as directory:
+            work = Path(directory) / "work"
+            protected = work / "dependency" / "sbk-yal"
+            protected.parent.mkdir(parents=True)
+            protected.write_text("keep")
+            with self.assertRaisesRegex(
+                ConfigurationError, "contains protected path"
+            ):
+                _cleanup_workdir_before_run(
+                    work,
+                    protected_paths=(protected,),
+                )
+            self.assertEqual(protected.read_text(), "keep")
+
+    def test_cleanup_before_run_defaults_false_and_accepts_true(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "input.yml"
+            path.write_text("classes: [file]\n")
+            self.assertFalse(load_config(path).cleanup_before_run)
+            path.write_text("classes: [file]\ncleanup_before_run: true\n")
+            self.assertTrue(load_config(path).cleanup_before_run)
+
+    def test_cleanup_before_run_rejects_invalid_boolean(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "input.yml"
+            path.write_text("classes: [file]\ncleanup_before_run: always\n")
+            with self.assertRaisesRegex(ValueError, "cleanup_before_run"):
+                load_config(path)
+
     def test_cleanup_only_removes_file_data_inside_workdir(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -271,6 +328,49 @@ class CliFlowTests(unittest.TestCase):
                     mock.patch("analytics.cli.ensure_jdk", return_value=JdkInstall(root)), \
                     mock.patch("analytics.cli.run_jobs", return_value=[failed]), \
                     mock.patch("analytics.cli.ensure_sbk_charts") as charts:
+                rc = main(["-p", str(properties), "-c", str(config)])
+            self.assertEqual(rc, 2)
+            charts.assert_not_called()
+
+    def test_cleanup_before_run_happens_immediately_before_benchmark(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            work = root / "work"
+            work.mkdir()
+            stale = work / "stale-output"
+            stale.write_text("old")
+            properties = root / "sbk-config.env"
+            properties.write_text(
+                "sbk.version=10.6\nsbk-charts.version=4.26.7.1\n"
+                "sbk.jdk.folder=./jdk\n"
+            )
+            config = root / "input.yml"
+            config.write_text(
+                f"workdir: {work}\ncleanup_before_run: true\n"
+                "classes: [file]\n"
+            )
+            sbk_home = root / "sbk"
+            sbk = SbkInstall(
+                sbk_home,
+                DependencySource.LOCAL,
+                _sbk_yal=sbk_home / "sbk-yal",
+            )
+            failed = RunResult(
+                "file", root / "job.yml", root / "missing.csv", None, 1, 0.1
+            )
+
+            def assert_clean_then_run(*args, **kwargs):
+                self.assertTrue(work.is_dir())
+                self.assertFalse(stale.exists())
+                return [failed]
+
+            with mock.patch("analytics.cli._print_banner"), \
+                    mock.patch("analytics.cli.ensure_sbk", return_value=sbk), \
+                    mock.patch(
+                        "analytics.cli.ensure_jdk", return_value=JdkInstall(root)
+                    ), mock.patch(
+                        "analytics.cli.run_jobs", side_effect=assert_clean_then_run
+                    ), mock.patch("analytics.cli.ensure_sbk_charts") as charts:
                 rc = main(["-p", str(properties), "-c", str(config)])
             self.assertEqual(rc, 2)
             charts.assert_not_called()

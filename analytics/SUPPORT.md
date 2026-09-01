@@ -106,6 +106,15 @@ If you're new to sbk-analytics, start with:
 - The resolved data path must be strictly inside `workdir`
 - RocksDB, other drivers, external paths, CSVs, logs, and reports are preserved
 
+**Problem**: `cleanup_before_run: true` was refused
+- This option deletes every entry below `workdir`, so it refuses filesystem,
+  home, current/source, system-temp, configuration, dependency, JDK, and cache
+  scopes that could remove application or shared data
+- Use a dedicated benchmark directory such as `/tmp/sbk-analytics`, and keep
+  reusable `sbk-charts.use_files` outside it
+- A deletion error aborts the run; correct ownership, mount, or permissions
+  before retrying
+
 ### Output Issues
 
 **Problem**: Excel report not generated
