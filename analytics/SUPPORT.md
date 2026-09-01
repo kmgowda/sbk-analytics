@@ -76,6 +76,12 @@ If you're new to sbk-analytics, start with:
 - Use verbose logging: `sbk-analytics -c config.yml -v`
 - Check SBK logs in workdir/logs/ (parallel mode)
 
+**Problem**: the YAML reports that top-level `classes` is deprecated
+- Rename only the top-level `classes:` key to `benchmarks:`
+- Keep each nested `class:` value unchanged; it selects the SBK driver
+- Do not keep both top-level keys in one file because the configuration is
+  rejected as ambiguous
+
 **Problem**: a workload appears to remain after sbk-analytics is stopped
 - Current releases terminate the complete local process tree for `sbk-yal`,
   `sbk-gem-yal`, and `sbk-charts`

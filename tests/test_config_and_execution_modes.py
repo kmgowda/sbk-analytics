@@ -10,12 +10,43 @@ from analytics.runner import run_jobs
 from analytics.yaml_gen import generate_instance_yaml
 
 
+class BenchmarkKeyTests(unittest.TestCase):
+    def _load(self, content: str):
+        with tempfile.TemporaryDirectory() as tmp:
+            config_path = Path(tmp) / "config.yml"
+            config_path.write_text(content, encoding="utf-8")
+            return load_config(config_path)
+
+    def test_benchmarks_is_the_canonical_key(self):
+        config = self._load("benchmarks: [file, rocksdb]\n")
+        self.assertEqual(
+            [instance.class_name for instance in config.instances],
+            ["file", "rocksdb"],
+        )
+
+    def test_legacy_classes_key_is_accepted_with_warning(self):
+        with self.assertLogs("analytics.config", level="WARNING") as captured:
+            config = self._load("classes: [file]\n")
+
+        self.assertEqual(config.instances[0].class_name, "file")
+        self.assertIn("deprecated", "\n".join(captured.output))
+        self.assertIn("benchmarks", "\n".join(captured.output))
+
+    def test_benchmarks_and_legacy_classes_cannot_be_combined(self):
+        with self.assertRaisesRegex(ValueError, "cannot be combined"):
+            self._load("benchmarks: [file]\nclasses: [rocksdb]\n")
+
+    def test_empty_benchmarks_is_rejected_using_canonical_name(self):
+        with self.assertRaisesRegex(ValueError, "'benchmarks'"):
+            self._load("benchmarks: []\n")
+
+
 class ConfigBooleanTests(unittest.TestCase):
     def _load_chat(self, value: str) -> bool:
         with tempfile.TemporaryDirectory() as tmp:
             config_path = Path(tmp) / "config.yml"
             config_path.write_text(
-                f"classes: [file]\nsbk-charts:\n  chat: {value}\n",
+                f"benchmarks: [file]\nsbk-charts:\n  chat: {value}\n",
                 encoding="utf-8",
             )
             return load_config(config_path).chat
@@ -42,7 +73,7 @@ class ExecutionModeTests(unittest.TestCase):
             root = Path(tmp)
             config_path = root / "config.yml"
             config_path.write_text(
-                "classes: [file]\nsbk:\n  nodes: []\n",
+                "benchmarks: [file]\nsbk:\n  nodes: []\n",
                 encoding="utf-8",
             )
             config = load_config(config_path)
@@ -60,7 +91,7 @@ class ExecutionModeTests(unittest.TestCase):
             root = Path(tmp)
             config_path = root / "config.yml"
             config_path.write_text(
-                "classes:\n"
+                "benchmarks:\n"
                 "  - class: file\n"
                 "    name: local\n"
                 "  - class: file\n"

@@ -13,6 +13,19 @@ ROOT = Path(__file__).resolve().parent.parent
 CLASS_EXAMPLES = ROOT / "examples" / "classes"
 
 
+class ShippedExampleTests(unittest.TestCase):
+    def test_all_workflow_examples_use_canonical_benchmarks_key(self):
+        workflows = sorted((ROOT / "examples").rglob("*.yml"))
+        self.assertTrue(workflows)
+        configuration = RUNTIME_POLICY.configuration
+        for workflow in workflows:
+            with self.subTest(workflow=workflow.relative_to(ROOT)):
+                document = yaml.safe_load(workflow.read_text())
+                self.assertIn(configuration.benchmarks_keys[0], document)
+                self.assertNotIn(configuration.legacy_classes_keys[0], document)
+                self.assertTrue(load_config(workflow).instances)
+
+
 class StorageClassExampleTests(unittest.TestCase):
     def test_file_and_rocksdb_write_read_workflows_are_complete(self):
         expected = {

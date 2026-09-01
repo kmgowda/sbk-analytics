@@ -677,7 +677,12 @@ class ConfigurationPolicy:
         "cleanup_before_run", "cleanup-before-run",
     )
     sbk_group_keys: tuple[str, ...] = ("sbk", "sbk_params", "sbk-params")
-    classes_keys: tuple[str, ...] = ("classes", "class_list", "class-list")
+    benchmarks_keys: tuple[str, ...] = (
+        "benchmarks", "benchmark_list", "benchmark-list",
+    )
+    legacy_classes_keys: tuple[str, ...] = (
+        "classes", "class_list", "class-list",
+    )
     class_params_keys: tuple[str, ...] = (
         "class_params", "class-params", "classparams",
     )

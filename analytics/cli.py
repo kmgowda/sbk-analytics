@@ -292,7 +292,7 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         "--config",
         required=False,
         type=Path,
-        help="Input YML with the 8 parameter groups (mode, sbk, classes, ...)",
+        help="Input YML with the orchestration groups (mode, sbk, benchmarks, ...)",
     )
     p.add_argument("--sbk-local", type=Path, help="Local SBK distribution or checkout")
     p.add_argument(

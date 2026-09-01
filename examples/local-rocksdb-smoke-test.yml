@@ -8,7 +8,7 @@ sbk:
   size: 100
   writers: 1
 
-classes:
+benchmarks:
   - class: rocksdb
     # Keep the database directly below an existing parent so this remains
     # valid when --work-dir overrides the YAML workdir.

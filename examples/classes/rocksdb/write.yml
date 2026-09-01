@@ -9,7 +9,7 @@ sbk:
   time: ns
   idletimeoutseconds: 120
 
-classes:
+benchmarks:
   # 65,536 × 4 KiB = approximately 256 MiB plus RocksDB overhead.
   - name: rocksdb-write-4k
     class: rocksdb
