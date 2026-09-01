@@ -792,6 +792,10 @@ workdir: /tmp/sbk-analytics    # 1b. (optional) output dir for generated
                                #     YAMLs, CSVs and the Excel report.
                                #     Default: /tmp/sbk-analytics.
 
+cleanup_before_run: false      # 1c. (optional) true empties workdir once,
+                               #     immediately before SBK/SBK-GEM starts.
+                               #     Default: false.
+
 sbk:                    # 2. SBK-YAL / SBK-GEM-YAL defaults shared by every
   seconds: 60           #    instance (presence of 'nodes' switches to sbk-gem-yal)
   time: ms
@@ -1053,6 +1057,20 @@ successful report. Cleanup currently supports only `class: file`, using its
 `file` or legacy `fname` parameter. For safety, only paths inside `workdir` are
 removed; RocksDB (`rfile`), other drivers, external paths, CSVs, logs, and the
 Excel report are always preserved. The default is `cleanup: never`.
+
+Set top-level YAML `cleanup_before_run: true` to empty the resolved `workdir`
+before each benchmark. It defaults to `false`. Cleanup occurs only after SBK
+and JDK resolution succeeds, but before generated YAML/CSV creation or any
+SBK/SBK-GEM process starts. It removes every existing file, hidden entry,
+symlink, and directory below `workdir`, while preserving `workdir` itself.
+Consequently, previous reports, logs, CSVs, RocksDB data, and any `use_files`
+stored there are deleted. Put files that must survive outside `workdir`.
+
+This operation fails closed when `workdir` is, contains, or resolves through a
+symlink to a protected location such as the filesystem root, home directory,
+current/source checkout, system temporary root, input configuration, local
+dependency, JDK, or managed-download directory. No benchmark starts after a
+cleanup refusal or partial deletion error.
 Set `GITHUB_TOKEN` to avoid unauthenticated rate limits when first downloading.
 
 ### Default Cache Structure (project-local)

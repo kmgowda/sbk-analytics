@@ -17,6 +17,7 @@ The YML contains the following groups (see README):
     class_params:     (optional) per-class defaults
     cleanup:          never | on-success; only File-driver file/fname paths
                       contained by workdir are eligible for removal
+    cleanup_before_run: false | true; empty workdir before starting SBK
     sbk-charts:       options for the sbk-charts invocation
       output:         output xlsx file
       ai_model:       huggingface | ollama | lmstudio | noai
@@ -109,6 +110,9 @@ class OrchestratorConfig:
     # Deliberately narrow: on-success cleanup handles only class=file data
     # selected by file/fname, and cli.py enforces workdir containment.
     cleanup: str = CONFIGURATION_POLICY.default_cleanup
+    # Destructive pre-run cleanup is opt-in and applies to every direct entry
+    # below workdir. cli.py validates protected paths before removing anything.
+    cleanup_before_run: bool = CONFIGURATION_POLICY.default_cleanup_before_run
 
     @property
     def uses_gem(self) -> bool:
@@ -185,6 +189,14 @@ def load_config(path: str | Path) -> OrchestratorConfig:
             f"cleanup must be one of {CONFIGURATION_POLICY.valid_cleanup}, "
             f"got {cleanup!r}"
         )
+    cleanup_before_run = _parse_bool(
+        _first(
+            raw,
+            *CONFIGURATION_POLICY.cleanup_before_run_keys,
+            default=CONFIGURATION_POLICY.default_cleanup_before_run,
+        ),
+        CONFIGURATION_POLICY.cleanup_before_run_keys[0],
+    )
 
     sbk_params = _first(
         raw, *CONFIGURATION_POLICY.sbk_group_keys, default={}
@@ -221,6 +233,7 @@ def load_config(path: str | Path) -> OrchestratorConfig:
         chat=chat,
         use_files=list(use_files),
         cleanup=cleanup,
+        cleanup_before_run=cleanup_before_run,
     )
 
 

@@ -289,6 +289,7 @@ class PolicyTests(unittest.TestCase):
             RUNTIME_POLICY.cache_metadata.detected_major,
             RUNTIME_POLICY.cache_metadata.installed_at,
             *RUNTIME_POLICY.configuration.workdir_keys,
+            *RUNTIME_POLICY.configuration.cleanup_before_run_keys,
             *RUNTIME_POLICY.configuration.sbk_group_keys,
             *RUNTIME_POLICY.configuration.classes_keys,
             *RUNTIME_POLICY.configuration.class_params_keys,

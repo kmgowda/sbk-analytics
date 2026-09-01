@@ -92,6 +92,11 @@ python -m unittest -v tests.test_process_cleanup
 These integration tests terminate a controller normally and forcibly, then
 verify that both its managed child and grandchild have stopped.
 
+Pre-run workdir cleanup is intentionally destructive and fail-closed. Changes
+to its path-containment/protection logic require focused
+`tests.test_dependency_hardening.CleanupSafetyTests` coverage plus the full
+suite. Never weaken protected-path checks merely to accept a broader workdir.
+
 ### Run a benchmark
 ```bash
 sbk-analytics -c examples/file-rocksdb-write-60s.yml

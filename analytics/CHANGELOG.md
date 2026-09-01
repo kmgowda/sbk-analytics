@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Added top-level YAML `cleanup_before_run` (default `false`) to empty a safely
+  validated workdir immediately before SBK/SBK-GEM benchmarking.
 - SBK 10.6+ option compatibility, including validation for its GEM/SBM
   aggregate, cleanup, provisioning, host-key, port, and idle-timeout options.
 - Read-only dependency provenance diagnostics for shared development folders

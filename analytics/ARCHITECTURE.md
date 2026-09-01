@@ -308,6 +308,8 @@ flowchart LR
 - SBK-native benchmark lifecycle and authoritative completion status
 - Managed process-tree and parent-death cleanup
 - Resource cleanup on exit
+- Optional fail-closed pre-run workdir-content cleanup after dependency
+  validation and before generated artifacts or workload processes
 
 ## Security Considerations
 
