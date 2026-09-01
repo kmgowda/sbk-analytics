@@ -124,7 +124,6 @@ class DependencySource(str, Enum):
     LOCAL = "LOCAL"
     MANAGED_CACHE = "MANAGED_CACHE"
     DOWNLOADED = "DOWNLOADED"
-    CONDA = "CONDA"
 
 
 @dataclass(frozen=True)
@@ -1148,9 +1147,12 @@ def ensure_sbk_charts(
     
     cache.parent.mkdir(parents=True, exist_ok=True)
     with _cache_lock(_cache_lock_path(cache)):
-        return _ensure_sbk_charts_locked(
+        install = _ensure_sbk_charts_locked(
             version, repo_url, cache, ssl_verify, source_sha256
         )
+        if preflight:
+            _charts_version(install.cli, require_ready=True)
+        return install
 
 
 def _ensure_sbk_charts_locked(
@@ -1289,6 +1291,11 @@ def _ensure_sbk_charts_locked(
                 f"sbk-charts installed but no CLI script found under {bindir}"
             )
 
+    # Publish only an environment whose real command starts successfully.
+    # This catches missing transitive imports and broken console entry points,
+    # not merely the presence of a generated script.
+    _charts_version(install.cli, require_ready=True)
+
     relative_cli = install.cli.relative_to(stage)
     relative_python = install.python.relative_to(stage)
     final_cli = cache / relative_cli
@@ -1404,7 +1411,7 @@ def find_existing_jdk(required_major: int) -> Path | None:
     """
     for home in _candidate_jdk_homes():
         java = _jdk_executable(home)
-        if not java.exists():
+        if not java.is_file() or not os.access(java, os.X_OK):
             log.debug("skipping JDK candidate %s: no bin/java", home)
             continue
         major = _java_major_version(java)
@@ -1422,7 +1429,7 @@ def find_existing_jdk(required_major: int) -> Path | None:
     return None
 
 
-def _jdk_url(version: str) -> str:
+def _jdk_platform() -> tuple[str, str]:
     arch = "x64" if os.uname().machine in ("x86_64", "amd64") else os.uname().machine
     try:
         os_name = {"linux": "linux", "darwin": "mac"}[sys.platform]
@@ -1431,12 +1438,42 @@ def _jdk_url(version: str) -> str:
             f"managed JDK installation is unsupported on {sys.platform}; "
             "sbk-analytics supports Linux and macOS"
         ) from exc
-    template = JDK_ARTIFACT.download_url_template
+    return os_name, arch
+
+
+def _jdk_asset(
+    version: str, ssl_verify: bool | str
+) -> tuple[str, str]:
+    """Resolve the upstream Temurin package URL and published SHA-256."""
+    os_name, arch = _jdk_platform()
+    template = JDK_ARTIFACT.metadata_url_template
     if template is None:
-        raise RuntimeError("JDK artifact download URL template is not configured")
-    return template.format(
-        version=version, os=os_name, arch=arch
-    )
+        raise RuntimeError("JDK artifact metadata URL template is not configured")
+    url = template.format(version=version, os=os_name, arch=arch)
+    try:
+        response = requests.get(
+            url,
+            timeout=NETWORK_POLICY.github_metadata_timeout_s,
+            verify=ssl_verify,
+        )
+        response.raise_for_status()
+        assets = response.json()
+        package = assets[0]["binary"]["package"]
+        download_url = str(package["link"])
+        checksum = str(package["checksum"]).lower()
+    except (requests.RequestException, ValueError, IndexError, KeyError, TypeError) as exc:
+        raise DependencyResolutionError(
+            f"could not resolve checksum-verified Temurin JDK {version} metadata"
+        ) from exc
+    if not re.fullmatch(r"[0-9a-f]{64}", checksum):
+        raise DependencyResolutionError(
+            f"Temurin JDK {version} metadata contains an invalid SHA-256"
+        )
+    if not download_url.startswith("https://"):
+        raise DependencyResolutionError(
+            f"Temurin JDK {version} metadata contains a non-HTTPS package URL"
+        )
+    return download_url, checksum
 
 
 def ensure_jdk(
@@ -1454,7 +1491,8 @@ def ensure_jdk(
     4. **Specified folder** -- if jdk_folder is provided and contains the required version, use it.
     5. **Download** -- fetch Temurin of the requested major version from
        the Adoptium API, extract it under the specified folder (or cache if not specified),
-       and set SBK_JAVA_HOME to point to it for current and future builds.
+       and return its validated home. The runner sets SBK_JAVA_HOME only in
+       the immutable child environment used for this analytics invocation.
     """
     try:
         required_major = int(version)
@@ -1478,7 +1516,7 @@ def ensure_jdk(
         if not java_home:
             return False
         java_path = _jdk_executable(java_home)
-        if not java_path.exists():
+        if not java_path.is_file() or not os.access(java_path, os.X_OK):
             log.debug("Java home %s does not contain bin/java", java_home)
             return False
         major = _java_major_version(java_path)
@@ -1501,10 +1539,6 @@ def ensure_jdk(
         log.info("Checking JAVA_HOME=%s", java_home)
         if _check_java_home(Path(java_home)):
             log.info("JAVA_HOME points to JDK %s at %s; using it", required_major, java_home)
-            # Set SBK_JAVA_HOME to point to this JDK
-            os.environ[ENVIRONMENT_POLICY.sbk_java_home] = str(
-                Path(java_home).resolve()
-            )
             return JdkInstall(home=Path(java_home))
         else:
             log.warning("JAVA_HOME is set but does not contain JDK %s", required_major)
@@ -1520,20 +1554,18 @@ def ensure_jdk(
             jdk_home = java_path.parent.parent
             if _check_java_home(jdk_home):
                 log.info("java on PATH points to JDK %s at %s; using it", required_major, jdk_home)
-                # Set SBK_JAVA_HOME to point to this JDK
-                os.environ[ENVIRONMENT_POLICY.sbk_java_home] = str(
-                    jdk_home.resolve()
-                )
                 return JdkInstall(home=jdk_home)
         else:
             log.debug("java on PATH is not in a JDK bin directory")
         # Also check the version directly
         major = _java_major_version(java_path)
         if major == required_major:
-            log.info("java on PATH reports JDK %s; using it (though JDK home location is unclear)", required_major)
-            # We can't set SBK_JAVA_HOME properly in this case, but we can return the java path
-            # However, this might not work for SBK which needs the full JDK home
-            log.warning("java on PATH matches version %s but JDK home location unclear; may not work for SBK", required_major)
+            log.warning(
+                "java on PATH matches version %s but its JDK home cannot be "
+                "derived; continuing to a configured cache/download so "
+                "SBK_JAVA_HOME is always a valid home",
+                required_major,
+            )
 
     # 4. Check specified folder for cached version (fourth priority)
     if jdk_folder and marker.exists() and home_file.exists():
@@ -1541,10 +1573,6 @@ def ensure_jdk(
         log.info("Checking cached JDK in specified folder: %s", cached_home)
         if _check_java_home(cached_home):
             log.info("JDK %s found in specified folder %s (cache hit)", required_major, cached_home)
-            # Set SBK_JAVA_HOME to point to this JDK
-            os.environ[ENVIRONMENT_POLICY.sbk_java_home] = str(
-                cached_home.resolve()
-            )
             return JdkInstall(home=cached_home)
         else:
             log.warning("Cached JDK in specified folder does not match version %s; re-downloading", required_major)
@@ -1559,9 +1587,6 @@ def ensure_jdk(
         if marker.exists() and home_file.exists():
             cached_home = Path(home_file.read_text().strip())
             if _check_java_home(cached_home):
-                os.environ[ENVIRONMENT_POLICY.sbk_java_home] = str(
-                    cached_home.resolve()
-                )
                 return JdkInstall(home=cached_home)
         return _install_jdk_locked(version, cache, ssl_verify)
 
@@ -1575,9 +1600,14 @@ def _install_jdk_locked(
         shutil.rmtree(stage)
     stage.mkdir(parents=True)
 
-    url = _jdk_url(version)
+    url, expected_checksum = _jdk_asset(version, ssl_verify)
     archive = stage / f"jdk-{version}.tar.gz"
     checksum = _download(url, archive, ssl_verify=ssl_verify)
+    if checksum.lower() != expected_checksum:
+        raise CacheError(
+            "downloaded JDK checksum mismatch: "
+            f"expected {expected_checksum}, got {checksum.lower()}"
+        )
 
     extract_dir = stage / LAYOUT_POLICY.extracted_directory
     extract_dir.mkdir(parents=True, exist_ok=True)
@@ -1592,9 +1622,18 @@ def _install_jdk_locked(
                 home = sub.parent
                 break
 
-    if not _jdk_executable(home).exists():
+    java = _jdk_executable(home)
+    if not java.is_file() or not os.access(java, os.X_OK):
         raise RuntimeError(
-            f"extracted JDK does not contain bin/java under {extract_dir}"
+            f"extracted JDK does not contain executable bin/java under {extract_dir}"
+        )
+
+    required_major = int(version)
+    actual_major = _java_major_version(java)
+    if actual_major != required_major:
+        raise CacheError(
+            "downloaded JDK failed version validation: "
+            f"required major {required_major}, detected {actual_major or 'unknown'}"
         )
 
     relative_home = home.relative_to(stage)
@@ -1605,17 +1644,16 @@ def _install_jdk_locked(
         dependency=JDK_ARTIFACT.key, version=version,
         source_url=url, sha256=checksum,
         executable=str(_jdk_executable(final_home)),
+        detected_major=actual_major,
     )
     try:
         archive.unlink()
     except OSError as e:
         log.debug("could not remove archive %s: %s", archive, e)
     
-    # Set SBK_JAVA_HOME to point to this JDK (not JAVA_HOME)
     (stage / CACHE_POLICY.completion_marker).touch()
     if cache.exists():
         shutil.rmtree(cache)
     stage.replace(cache)
-    os.environ[ENVIRONMENT_POLICY.sbk_java_home] = str(final_home.resolve())
-    log.info("JDK %s downloaded and ready at %s (SBK_JAVA_HOME set)", version, final_home)
+    log.info("JDK %s downloaded and validated at %s", version, final_home)
     return JdkInstall(home=final_home)

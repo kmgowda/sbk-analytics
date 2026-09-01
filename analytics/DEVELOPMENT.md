@@ -20,6 +20,11 @@ pip install -e .
 # Test installation
 sbk-analytics --version
 sbk-analytics -c examples/file-rocksdb-write-60s.yml
+
+# Fast shared-folder SBK 10.6+ and sbk-charts validation
+sbk-analytics --sbk-local /path/to/SBK \
+  --sbk-charts-local /path/to/sbk-charts \
+  -c examples/local-rocksdb-smoke-test.yml
 ```
 
 ## Project Structure
@@ -34,6 +39,7 @@ analytics/              # Main package
 ├── runner.py          # SBK execution (serial/parallel)
 ├── charts.py          # sbk-charts invocation
 ├── processes.py       # managed process trees and signal cleanup
+├── lifecycle.py       # durable ownership and stale-run reconciliation
 ├── _process_guard.py  # POSIX parent-death companion
 ├── yaml_gen.py        # YAML generation for SBK
 ├── properties.py      # .env file parsing
@@ -114,15 +120,17 @@ sbk-analytics -c examples/config.yml
 
 ## Key Design Decisions
 
-- **JDK Resolution**: SBK_JAVA_HOME (not JAVA_HOME) to avoid conflicts
+- **JDK Resolution**: validate upstream SHA-256 and Java major, then set
+  SBK_JAVA_HOME only in the reusable SBK child environment
 - **Runtime Bootstrap**: Verified uv plus exact managed Python; no host Python,
   venv, or Conda prerequisite
 - **Environment Isolation**: Never modify active environments; always isolate
   sbk-charts from sbk-analytics
 - **Caching**: External dependencies cached locally
 - **macOS Handling**: Special subprocess handling for logging
-- **SBK Lifecycle**: SBK owns timing/readiness/failure reporting; broad
-  remote cleanup is interruption fallback only
+- **SBK Lifecycle**: SBK owns timing/readiness/failure reporting and remote
+  cleanup; analytics owns local groups through mandatory guards and durable
+  PID/start-time/PGID records. Never add a broad remote process-name kill
 
 ## Dependencies
 
@@ -137,7 +145,7 @@ sbk-analytics -c examples/config.yml
 ### External
 - JDK (auto-downloaded)
 - SBK (explicit local checkout or auto-downloaded)
-- sbk-charts (explicit local checkout, conda package, or auto-installed)
+- sbk-charts (explicit ready-to-run local checkout or isolated managed install)
 
 ## Debugging
 
@@ -209,10 +217,11 @@ For AI agents needing to generate YAML workload configurations, see the **YAML C
 
 ## Environment Variables
 
-- `SBK_JAVA_HOME` - JDK for SBK (set by sbk-analytics)
+- `SBK_JAVA_HOME` - optional JDK input; selected value is set in SBK children
 - `JAVA_HOME` - User's JAVA_HOME (not modified)
 - `SBK_ANALYTICS_ENV_HOME` - managed runtime root override
 - `SBK_ANALYTICS_BOOTSTRAP_OFFLINE` - disable bootstrap downloads
+- `SBK_ANALYTICS_LIFECYCLE_FOLDER` - durable workload registry override
 - `PYTHONUNBUFFERED` - Unbuffered Python output
 
 ## Getting Help

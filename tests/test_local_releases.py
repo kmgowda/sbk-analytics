@@ -8,6 +8,7 @@ from pathlib import Path
 from unittest import mock
 
 from analytics.cli import _print_charts_resolution, _print_sbk_resolution
+from analytics.errors import LocalPackageError
 from analytics.releases import (
     ChartsInstall,
     DependencySource,
@@ -370,17 +371,57 @@ class LocalChartsResolutionTests(unittest.TestCase):
                     mock.patch(
                         "analytics.releases.venv.EnvBuilder",
                         FakeVenvBuilder,
-                    ), mock.patch("analytics.releases.subprocess.run") as run:
+                    ), mock.patch(
+                        "analytics.releases.subprocess.run",
+                        return_value=mock.Mock(returncode=0, stdout="", stderr=""),
+                    ) as run:
                 install = ensure_sbk_charts(
                     "4.26.7.1", downloads_folder=downloads
                 )
 
             self.assertEqual(install.source, DependencySource.DOWNLOADED)
-            self.assertEqual(run.call_count, 2)
+            self.assertEqual(run.call_count, 4)
             cache = downloads / "sbk-charts" / "4.26.7.1"
             self.assertTrue((cache / ".ok").is_file())
             self.assertTrue((cache / "metadata.json").is_file())
             self.assertFalse(list(cache.parent.glob(".4.26.7.1.install-*")))
+
+    def test_managed_charts_uses_its_own_venv_from_conda_or_venv_hosts(self):
+        for active_name in ("CONDA_PREFIX", "VIRTUAL_ENV"):
+            with self.subTest(active_name=active_name), \
+                    tempfile.TemporaryDirectory() as directory:
+                downloads = Path(directory)
+
+                class FakeVenvBuilder:
+                    def __init__(self, **_kwargs):
+                        pass
+
+                    def create(self, venv_dir):
+                        _executable(Path(venv_dir) / "bin" / "python")
+                        _executable(Path(venv_dir) / "bin" / "sbk-charts")
+
+                result = mock.Mock(returncode=0, stdout="", stderr="")
+                with mock.patch.dict(
+                    os.environ, {active_name: "/active/user/environment"}
+                ), mock.patch(
+                    "analytics.releases.venv.EnvBuilder", FakeVenvBuilder
+                ), mock.patch(
+                    "analytics.releases.subprocess.run", return_value=result
+                ) as run:
+                    ensure_sbk_charts(
+                        "4.26.7.1", downloads_folder=downloads
+                    )
+                    self.assertEqual(
+                        os.environ[active_name], "/active/user/environment"
+                    )
+
+                pip_commands = [
+                    call.args[0] for call in run.call_args_list
+                    if "-m" in call.args[0] and "pip" in call.args[0]
+                ]
+                self.assertEqual(len(pip_commands), 2)
+                for command in pip_commands:
+                    self.assertIn("venv/bin/python", command[0])
 
     def test_verified_source_archive_avoids_git(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -404,7 +445,10 @@ class LocalChartsResolutionTests(unittest.TestCase):
                 "analytics.releases.venv.EnvBuilder", FakeVenvBuilder
             ), mock.patch(
                 "analytics.releases._download", side_effect=fake_download
-            ), mock.patch("analytics.releases.subprocess.run") as run:
+            ), mock.patch(
+                "analytics.releases.subprocess.run",
+                return_value=mock.Mock(returncode=0, stdout="", stderr=""),
+            ) as run:
                 install = ensure_sbk_charts(
                     "4.26.7.1",
                     downloads_folder=downloads,
@@ -412,10 +456,37 @@ class LocalChartsResolutionTests(unittest.TestCase):
                 )
 
             self.assertEqual(install.source, DependencySource.DOWNLOADED)
-            install_command = run.call_args_list[-1].args[0]
+            install_command = run.call_args_list[-2].args[0]
             self.assertFalse(any(str(value).startswith("git+") for value in install_command))
             metadata = (downloads / "sbk-charts" / "4.26.7.1" / "metadata.json")
             self.assertIn(digest, metadata.read_text())
+
+    def test_broken_charts_command_is_never_published(self):
+        with tempfile.TemporaryDirectory() as directory:
+            downloads = Path(directory)
+
+            class FakeVenvBuilder:
+                def __init__(self, **_kwargs):
+                    pass
+
+                def create(self, venv_dir):
+                    _executable(Path(venv_dir) / "bin" / "python")
+                    _executable(Path(venv_dir) / "bin" / "sbk-charts")
+
+            installer = mock.Mock(returncode=0, stdout="", stderr="")
+            broken = mock.Mock(
+                returncode=1, stdout="", stderr="missing charts dependency"
+            )
+            with mock.patch(
+                "analytics.releases.venv.EnvBuilder", FakeVenvBuilder
+            ), mock.patch(
+                "analytics.releases.subprocess.run",
+                side_effect=[installer, installer, broken],
+            ), self.assertRaisesRegex(LocalPackageError, "readiness check failed"):
+                ensure_sbk_charts("4.26.7.1", downloads_folder=downloads)
+
+            cache = downloads / "sbk-charts" / "4.26.7.1"
+            self.assertFalse((cache / ".ok").exists())
 
     def test_source_archive_digest_mismatch_is_rejected_before_pip(self):
         with tempfile.TemporaryDirectory() as directory:

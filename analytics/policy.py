@@ -63,7 +63,7 @@ class ArtifactMetadata:
     primary_executable: str
     additional_executables: tuple[str, ...] = ()
     repository_slug: str | None = None
-    download_url_template: str | None = None
+    metadata_url_template: str | None = None
 
     @property
     def executables(self) -> tuple[str, ...]:
@@ -96,9 +96,9 @@ JDK_ARTIFACT = ArtifactMetadata(
     display_name="JDK",
     distribution_name="Temurin JDK",
     repository_url="https://github.com/adoptium/temurin-binaries",
-    download_url_template=(
-        "https://api.adoptium.net/v3/binary/latest/{version}/ga/"
-        "{os}/{arch}/jdk/hotspot/normal/eclipse"
+    metadata_url_template=(
+        "https://api.adoptium.net/v3/assets/latest/{version}/hotspot"
+        "?architecture={arch}&image_type=jdk&os={os}&vendor=eclipse"
     ),
     cache_namespace="jdk",
     primary_executable="java",
@@ -177,6 +177,10 @@ class EnvironmentPolicy:
     git_ssl_ca_info: str = "GIT_SSL_CAINFO"
     pip_cert: str = "PIP_CERT"
     enabled_value: str = "1"
+    lifecycle_folder: str = "SBK_ANALYTICS_LIFECYCLE_FOLDER"
+    lifecycle_run_id: str = "SBK_ANALYTICS_RUN_ID"
+    application_state_home: str = "SBK_ANALYTICS_ENV_HOME"
+    xdg_state_home: str = "XDG_STATE_HOME"
 
 
 @dataclass(frozen=True)
@@ -215,7 +219,6 @@ class DisplayPolicy:
     bytes_per_kibibyte: int = 1024
     percentage_scale: float = 100.0
     diagnostic_tail_characters: int = 500
-    remote_cleanup_tail_characters: int = 200
     system_info_tail_characters: int = 120
     logging_verbosity_step: int = 10
 
@@ -282,12 +285,31 @@ class ProcessPolicy:
 
 
 @dataclass(frozen=True)
+class LifecyclePolicy:
+    """Durable workload-ownership registry and reconciliation policy."""
+
+    registry_directory: str = "runs"
+    linux_state_path: tuple[str, ...] = (".local", "state")
+    macos_state_path: tuple[str, ...] = ("Library", "Application Support")
+    record_suffix: str = ".json"
+    unresolved_suffix: str = ".unresolved"
+    temporary_suffix: str = ".tmp"
+    schema_version: int = 1
+    registry_directory_mode: int = 0o700
+    record_mode: int = 0o600
+    identity_tolerance_s: float = 0.1
+    reconciliation_poll_interval_s: float = 0.05
+    local_role: str = "sbk"
+    gem_role: str = "sbk-gem"
+    charts_role: str = "sbk-charts"
+
+
+@dataclass(frozen=True)
 class SshPolicy:
     default_port: int = 22
     connect_timeout_s: int = 5
     strict_host_key_checking: bool = False
     known_hosts_file: str = os.devnull
-    remote_kill_command_timeout_s: float = 10.0
     system_info_command_timeout_s: float = 30.0
 
     @property
@@ -303,11 +325,8 @@ class SshPolicy:
 class BenchmarkPolicy:
     process_poll_interval_s: float = 0.5
     heartbeat_interval_s: float = 5.0
-    remote_kill_join_timeout_s: float = 15.0
     gem_native_shutdown_grace_s: float = 30.0
     log_forward_join_s: float = 1.0
-    remote_process_pattern: str = "io.sbk.main"
-    remote_kill_signal: int = 9
 
 
 @dataclass(frozen=True)
@@ -354,6 +373,7 @@ class RuntimePolicy:
     network: NetworkPolicy = NetworkPolicy()
     dependencies: DependencyPolicy = DependencyPolicy()
     processes: ProcessPolicy = ProcessPolicy()
+    lifecycle: LifecyclePolicy = LifecyclePolicy()
     ssh: SshPolicy = SshPolicy()
     benchmarks: BenchmarkPolicy = BenchmarkPolicy()
     system_info: SystemInfoPolicy = SystemInfoPolicy()

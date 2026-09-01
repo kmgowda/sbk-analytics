@@ -78,16 +78,18 @@ If you're new to sbk-analytics, start with:
 
 **Problem**: a workload appears to remain after sbk-analytics is stopped
 - Current releases terminate the complete local process tree for `sbk-yal`,
-  `sbk-gem-yal`, and `sbk-charts`; verify with `ps`/Task Manager that the
-  process is from the same invocation
+  `sbk-gem-yal`, and `sbk-charts`
 - Allow up to 30 seconds for SBK-GEM to perform its native remote cleanup
 - Use `-v` to see termination messages for catchable signals
-- Remote SBK clients normally receive SBK-GEM's own cleanup. Analytics
-  uses SSH cleanup only if that native shutdown times out; after an uncatchable
-  local kill, inspect the remote nodes separately
-- The emergency remote cleanup disables SSH host-key checking and runs
-  `pkill -9 -f io.sbk.main`; use only trusted, dedicated benchmark nodes,
-  because other matching SBK workloads on those nodes will also be stopped
+- Run `sbk-analytics deps status` to inspect active, stale, or quarantined
+  ownership records without changing them
+- Run `sbk-analytics deps doctor` or the next benchmark to reconcile a verified
+  stale local process group. Records whose PID/start-time/command identity does
+  not match are quarantined and never signalled
+- Remote SBK clients and embedded SBM are owned by SBK-GEM. Analytics does not
+  run global remote `pkill` commands because they can stop unrelated workloads
+- Set `SBK_ANALYTICS_LIFECYCLE_FOLDER` only when the default per-user state
+  directory is unsuitable; the folder contains no GEM credentials
 
 **Problem**: `cleanup: on-success` did not remove benchmark data
 - Cleanup intentionally supports only `class: file` and its `file`/`fname`

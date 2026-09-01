@@ -19,7 +19,7 @@ from analytics.processes import ProcessExit
 from analytics.properties import parse_properties
 from analytics.releases import (
     ChartsInstall, DependencySource, JdkInstall, SbkInstall, _cache_lock,
-    _charts_version, _extract, _run_pip, cache_root,
+    _charts_version, _extract, _install_jdk_locked, _jdk_asset, _run_pip, cache_root,
     resolve_local_sbk_charts,
 )
 from analytics.runner import RunResult
@@ -132,6 +132,82 @@ class ArchiveSafetyTests(unittest.TestCase):
                 _extract(archive, root / "out")
 
 
+class JdkPublicationTests(unittest.TestCase):
+    @staticmethod
+    def _fake_extract(_archive: Path, destination: Path) -> Path:
+        home = destination / "jdk"
+        java = home / "bin" / "java"
+        java.parent.mkdir(parents=True)
+        java.write_text("#!/bin/sh\nexit 0\n")
+        java.chmod(java.stat().st_mode | stat.S_IXUSR)
+        return home
+
+    def test_wrong_downloaded_java_major_is_never_published(self):
+        with tempfile.TemporaryDirectory() as directory:
+            cache = Path(directory) / "jdk" / "25"
+            with mock.patch(
+                "analytics.releases._jdk_asset",
+                return_value=("https://example.invalid/jdk.tar.gz", "a" * 64),
+            ), mock.patch(
+                "analytics.releases._download", return_value="a" * 64
+            ), mock.patch(
+                "analytics.releases._extract", side_effect=self._fake_extract
+            ), mock.patch(
+                "analytics.releases._java_major_version", return_value=21
+            ), self.assertRaisesRegex(CacheError, "required major 25"):
+                _install_jdk_locked("25", cache, False)
+            self.assertFalse((cache / ".ok").exists())
+
+    def test_jdk_metadata_provides_https_package_and_sha256(self):
+        response = mock.Mock()
+        response.json.return_value = [{
+            "binary": {"package": {
+                "link": "https://example.invalid/temurin.tar.gz",
+                "checksum": "A" * 64,
+            }}
+        }]
+        with mock.patch(
+            "analytics.releases.requests.get", return_value=response
+        ) as get:
+            url, digest = _jdk_asset("25", True)
+        response.raise_for_status.assert_called_once_with()
+        self.assertEqual(url, "https://example.invalid/temurin.tar.gz")
+        self.assertEqual(digest, "a" * 64)
+        self.assertIn("assets/latest/25", get.call_args.args[0])
+
+    def test_jdk_upstream_checksum_mismatch_is_never_extracted(self):
+        with tempfile.TemporaryDirectory() as directory:
+            cache = Path(directory) / "jdk" / "25"
+            with mock.patch(
+                "analytics.releases._jdk_asset",
+                return_value=("https://example.invalid/jdk.tar.gz", "a" * 64),
+            ), mock.patch(
+                "analytics.releases._download", return_value="b" * 64
+            ), mock.patch("analytics.releases._extract") as extract, \
+                    self.assertRaisesRegex(CacheError, "checksum mismatch"):
+                _install_jdk_locked("25", cache, False)
+            extract.assert_not_called()
+            self.assertFalse((cache / ".ok").exists())
+
+    def test_validated_downloaded_java_records_detected_major(self):
+        with tempfile.TemporaryDirectory() as directory:
+            cache = Path(directory) / "jdk" / "25"
+            with mock.patch(
+                "analytics.releases._jdk_asset",
+                return_value=("https://example.invalid/jdk.tar.gz", "a" * 64),
+            ), mock.patch(
+                "analytics.releases._download", return_value="a" * 64
+            ), mock.patch(
+                "analytics.releases._extract", side_effect=self._fake_extract
+            ), mock.patch(
+                "analytics.releases._java_major_version", return_value=25
+            ):
+                install = _install_jdk_locked("25", cache, False)
+            self.assertTrue((cache / ".ok").is_file())
+            self.assertEqual(install.home, cache / "extracted" / "jdk")
+            metadata = json.loads((cache / "metadata.json").read_text())
+            self.assertEqual(metadata["detected_major"], 25)
+
 class CleanupSafetyTests(unittest.TestCase):
     def test_cleanup_only_removes_file_data_inside_workdir(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -160,6 +236,18 @@ class CleanupSafetyTests(unittest.TestCase):
 
 
 class CliFlowTests(unittest.TestCase):
+    def test_dependency_status_does_not_create_lifecycle_registry(self):
+        with tempfile.TemporaryDirectory() as directory:
+            registry = Path(directory) / "lifecycle"
+            with mock.patch.dict(
+                os.environ,
+                {"SBK_ANALYTICS_LIFECYCLE_FOLDER": str(registry)},
+            ), contextlib.redirect_stdout(io.StringIO()), \
+                    contextlib.redirect_stderr(io.StringIO()):
+                rc = main(["deps", "status"])
+            self.assertEqual(rc, 0)
+            self.assertFalse(registry.exists())
+
     def test_charts_resolution_is_skipped_when_sbk_produces_no_csv(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

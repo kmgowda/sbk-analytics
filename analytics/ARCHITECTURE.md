@@ -41,7 +41,7 @@ flowchart TB
         Resolver["releases.py<br/>Resolve JDK, SBK, and sbk-charts"]
         Generator["yaml_gen.py<br/>Generate sbkArgs / sbkGemArgs YAML"]
         Runner["runner.py<br/>Serial or parallel SBK execution"]
-        Processes["processes.py<br/>Managed process trees"]
+        Processes["processes.py + lifecycle.py<br/>Managed trees and durable ownership"]
         CSV["Successful CSV results<br/>Exit code 0 + non-empty file"]
         Charts["charts.py<br/>Single sbk-charts invocation"]
         SystemInfo["system_info.py<br/>Host and remote system data"]
@@ -101,7 +101,8 @@ flowchart TB
     Resolver --> EnsureJDK["ensure_jdk()"]
     EnsureJDK --> ExistingJDK{"Matching JDK available?"}
     ExistingJDK -->|Yes| ReuseJDK["Use installed or cached JDK"]
-    ExistingJDK -->|No| DownloadJDK["Download and cache Temurin"]
+    ExistingJDK -->|No| DownloadJDK["Resolve upstream checksum<br/>download and verify Temurin"]
+    DownloadJDK --> ValidateJDK["Run java -version<br/>require configured major"]
 
     CSV["At least one successful CSV"] --> EnsureCharts["ensure_sbk_charts()"]
     EnsureCharts --> LocalCharts{"Local charts selected?"}
@@ -158,21 +159,32 @@ flowchart TB
     Kind -->|No| Term["TERM process group"] --> Grace["Standard grace"] --> Force{"Still running?"}
     Kind -->|Yes| GemTerm["TERM SBK-GEM group"] --> Native["Allow native remote cleanup<br/>30-second grace"] --> GemRunning{"Still running?"}
     GemRunning -->|No| Done["Cleanup complete"]
-    GemRunning -->|Yes| Emergency["Emergency SSH cleanup"] --> Kill["KILL local process group"]
+    GemRunning -->|Yes| Kill["KILL only owned local process group"]
     Force -->|No| Done
     Force -->|Yes| Kill
 
     ParentDeath["Uncatchable parent death"] --> EOF["Liveness pipe closes"]
     EOF --> Guard["Independent process guard"] --> GuardTerm["TERM, then KILL process group"]
+
+    Register["Durable run record<br/>PID + start time + PGID + command"] --> Stale{"Controller still valid?"}
+    Stale -->|Yes| Preserve["Preserve concurrent active run"]
+    Stale -->|No| Verify{"Workload identity matches?"}
+    Verify -->|Yes| Reconcile["TERM then KILL stale local group"]
+    Verify -->|No| Quarantine["Quarantine record; do not signal"]
 ```
 
-Every SBK and sbk-charts invocation is registered until its complete process
-tree exits. Normal wrapper exit also triggers removal of any remaining
-descendants in its workload group. SBK-GEM owns normal deployment,
-benchmark timing, failure reporting, and remote cleanup. Catchable GEM
-interruptions allow native cleanup first and use broad remote SSH cleanup only
-as an emergency fallback; no local mechanism can initiate new remote cleanup
-after SIGKILL.
+Every SBK and sbk-charts invocation is registered in memory and in a durable,
+credential-free per-user ownership registry until its process tree exits.
+Guard and registry creation are fail-closed. A later benchmark or `deps doctor`
+reconciles stale records only after PID creation time, process group, and
+command identity all match. Normal wrapper exit also triggers removal of any
+remaining descendants in its workload group.
+
+SBK-GEM owns normal deployment, benchmark timing, failure reporting, embedded
+SBM, and remote cleanup. Catchable GEM interruptions allow native cleanup
+first. Analytics never uses a global remote process-name kill because it cannot
+distinguish concurrent runs; it records remote node names for diagnostics but
+does not persist credentials.
 
 ## Key Design Decisions
 
@@ -302,7 +314,7 @@ flowchart LR
 - Safe file handling
 
 ### Environment Variables
-- SBK_JAVA_HOME set by tool
+- SBK_JAVA_HOME set only in validated SBK child environments
 - JAVA_HOME not modified
 - User environment respected
 

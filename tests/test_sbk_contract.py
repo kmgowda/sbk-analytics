@@ -1,3 +1,4 @@
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -6,8 +7,9 @@ from unittest import mock
 import yaml
 
 from analytics.config import load_config
+from analytics.policy import RUNTIME_POLICY
 from analytics.releases import ensure_sbk
-from analytics.runner import RunResult, _terminate_sbk_process
+from analytics.runner import RunResult, _sbk_env, _terminate_sbk_process
 from analytics.yaml_gen import generate_instance_yaml
 
 
@@ -115,6 +117,20 @@ class SbkContractResolutionTests(unittest.TestCase):
 
 
 class SbkContractLifecycleTests(unittest.TestCase):
+    def test_jdk_environment_is_built_once_without_mutating_parent(self):
+        java_home = RUNTIME_POLICY.environment.java_home
+        sbk_java_home = RUNTIME_POLICY.environment.sbk_java_home
+        with tempfile.TemporaryDirectory() as directory, mock.patch.dict(
+            os.environ,
+            {java_home: "/different/java", sbk_java_home: "/parent/java"},
+            clear=False,
+        ):
+            before = os.environ.copy()
+            child = _sbk_env(Path(directory))
+            self.assertEqual(child[sbk_java_home], directory)
+            self.assertNotIn(java_home, child)
+            self.assertEqual(os.environ, before)
+
     def test_nonzero_exit_is_failure_even_with_csv(self):
         with tempfile.TemporaryDirectory() as directory:
             csv = Path(directory) / "partial.csv"
@@ -126,21 +142,20 @@ class SbkContractLifecycleTests(unittest.TestCase):
         process = mock.Mock()
         process.poll.return_value = None
         process.wait.return_value = 143
-        with mock.patch("analytics.runner._kill_remote_sbk_clients") as remote:
-            _terminate_sbk_process(process, Path("job.yml"), is_gem=True)
+        _terminate_sbk_process(process, Path("job.yml"), is_gem=True)
         process.terminate.assert_called_once_with()
-        remote.assert_not_called()
 
-    def test_gem_interrupt_uses_remote_fallback_after_timeout(self):
+    def test_gem_interrupt_force_stays_scoped_to_local_owned_tree(self):
         process = mock.Mock()
         process.poll.return_value = None
         # subprocess.TimeoutExpired is required by the production handler.
         import subprocess
-        process.wait.side_effect = [subprocess.TimeoutExpired("gem", 30), 0]
-        with mock.patch("analytics.runner._kill_remote_sbk_clients") as remote, \
-                mock.patch("analytics.runner.terminate_process", return_value=0):
+        process.wait.side_effect = subprocess.TimeoutExpired("gem", 30)
+        with mock.patch(
+            "analytics.runner.terminate_process", return_value=0
+        ) as terminate:
             _terminate_sbk_process(process, Path("job.yml"), is_gem=True)
-        remote.assert_called_once_with(Path("job.yml"))
+        terminate.assert_called_once_with(process)
 
 
 if __name__ == "__main__":

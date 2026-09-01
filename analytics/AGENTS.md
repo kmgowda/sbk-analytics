@@ -10,7 +10,8 @@ This document provides comprehensive information for AI coding agents (GitHub Co
 - Automate SBK benchmark execution (serial or parallel modes)
 - Resolve and cache dependencies (JDK, SBK, sbk-charts)
 - Generate Excel reports with performance charts and AI analysis
-- Support both conda and venv environments
+- Keep the application and sbk-charts runtimes isolated while supporting
+  optional manual Conda/venv development hosts
 
 ## Project Structure
 
@@ -30,12 +31,14 @@ sbk-analytics/
 │   ├── releases.py              # Dependency resolution (JDK, SBK, sbk-charts)
 │   ├── runner.py                # SBK execution (serial/parallel)
 │   ├── processes.py             # Managed process trees and signal cleanup
+│   ├── lifecycle.py             # Durable ownership and stale-run reconciliation
 │   ├── _process_guard.py        # POSIX parent-death companion
 │   ├── system_info.py           # System information collection
 │   └── yaml_gen.py              # YAML generation for SBK instances
 ├── examples/                     # Example configuration files
 │   ├── file-rocksdb-write-60s.yml
 │   ├── file-rocksdb-write.yml
+│   ├── local-rocksdb-smoke-test.yml # Fast SBK 10.6+ RocksDB validation
 │   ├── config.yml
 │   └── local-smoke-test.yml      # Fast local end-to-end validation
 ├── sbk-config.env              # SBK configuration (versions, URLs, folders)
@@ -132,7 +135,9 @@ known-host handling.
 - `cache_root()`: environment cache selection and platform default
 
 Managed downloads use per-version locks, isolated staging directories,
-validated executables, `metadata.json`, and a final `.ok` marker. Publishing is
+validated executables, `metadata.json`, and a final `.ok` marker. JDK packages
+must match the upstream published SHA-256 and configured Java major;
+sbk-charts must pass a real command startup check before publication. Publishing is
 atomic and lock-coordinated. Archive extraction rejects
 traversal, links, devices, and FIFOs. GitHub SHA-256 asset digests are verified
 when the API supplies one.
@@ -153,7 +158,7 @@ artifact identities plus operational defaults shared by multiple subsystems.
   names, command options, cache filenames, and cache namespaces
 - GitHub, download, retry, pip trust, and dependency probe behavior
 - shared display geometry, units, diagnostic limits, and signal exit convention
-- process termination, SBK-native lifecycle, SSH fallback, and system-info timing
+- process termination, durable SBK-native lifecycle, SSH system-info, and timing
 - configuration defaults, accepted values, and CLI exit codes
 
 Version pins remain operator configuration in `sbk-config.env`; algorithm-local
@@ -199,13 +204,16 @@ sbk-analytics invocation
 **Key behavior**:
 - Starts each workload in an isolated POSIX session
 - Uses a POSIX liveness-pipe guard for cleanup after abrupt parent death
+- Treats guard/registry startup as mandatory and terminates a workload when
+  durable ownership cannot be established
+- Persists credential-free PID creation time, PGID, command, role, and GEM node
+  metadata; later benchmark/doctor invocations reconcile only verified stale
+  local groups and quarantine ambiguous records
 - Handles SIGINT, SIGTERM, SIGHUP, and SIGQUIT with a
   3-second graceful window
 - Registers an `atexit` fallback and escalates from tree TERM to tree KILL
-- Runner exception paths retain best-effort remote cleanup for sbk-gem jobs
-- Remote sbk-gem cleanup deliberately disables SSH host-key checking and uses
-  the broad `pkill -9 -f io.sbk.main` pattern; it must be treated as an
-  insecure operation for trusted, dedicated benchmark nodes only
+- SBK-GEM owns embedded SBM and remote-client cleanup. Analytics allows native
+  shutdown first and never issues a broad remote process-name kill
 
 ### 7. Charts Module (`charts.py`)
 **Purpose**: Invoke sbk-charts for analytics
@@ -357,7 +365,8 @@ selections never fall back to the network.
 
 ### Key Design Decisions
 
-1. **JDK Resolution**: SBK_JAVA_HOME is set (not JAVA_HOME) to avoid conflicts
+1. **JDK Resolution**: select and validate once, then set SBK_JAVA_HOME only in
+   the common SBK child environment without mutating the parent
 2. **Environment Isolation**: Never modifies an active conda/venv and always
    keeps sbk-charts separate from the application runtime
 3. **macOS Logging**: Special handling for Java output buffering
@@ -383,6 +392,9 @@ selections never fall back to the network.
     identity/layout belong in `analytics/policy.py`; do not duplicate them in
     resolver, runner, process, CLI, or system-info modules. Pre-Python launcher
     pre-Python Bash defaults belong in `sbk-bootstrap.env`
+12. **Durable ownership**: every long-lived local workload requires a mandatory
+    guard plus a lifecycle record. Never signal a recorded PID without matching
+    its creation time, PGID, and command; never persist GEM credentials
 
 ### Common Tasks
 
@@ -496,7 +508,7 @@ flowchart TB
 
 ### Environment Variables
 - `CONDA_PREFIX`: Detects conda environment
-- `SBK_JAVA_HOME`: Points to JDK for SBK (set by sbk-analytics)
+- `SBK_JAVA_HOME`: Optional JDK input; selected value is set only for SBK children
 - `JAVA_HOME`: User's JAVA_HOME (not modified by sbk-analytics)
 - `PYTHONUNBUFFERED`: For unbuffered Python output
 - `SBK_LOCAL_FOLDER`: Override the local SBK folder
@@ -510,6 +522,8 @@ flowchart TB
 - `SBK_ANALYTICS_UV_EXECUTABLE`: Trusted uv override for development/tests
 - `SBK_ANALYTICS_SOURCE_ROOT`: Internal launcher handoff preserving the cloned
   repository's `sbk-config.env` while executing the installed package
+- `SBK_ANALYTICS_LIFECYCLE_FOLDER`: Override durable workload registry location
+- `SBK_ANALYTICS_RUN_ID`: Internal run identity propagated to owned local children
 
 ### Exit Codes
 - `0`: Success
@@ -1022,7 +1036,7 @@ sbk-charts:
 
 - **1.26.9.1**: Current main version
   - JDK resolution with priority order
-  - Conda and venv support
+  - Isolated managed runtime plus optional manual Conda/venv development
   - macOS logging fixes
   - Excel output with system information
   - AI analytics integration

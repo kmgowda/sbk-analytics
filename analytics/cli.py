@@ -27,6 +27,7 @@ from . import __version__
 from .charts import run_sbk_charts
 from .config import load_config
 from .errors import ConfigurationError, DependencyResolutionError, SbkAnalyticsError
+from .lifecycle import inspect_records
 from .policy import APPLICATION, RUNTIME_POLICY, SBK_ARTIFACT, SBK_CHARTS_ARTIFACT
 from .properties import parse_properties
 from .processes import ProcessExit, child_process_cleanup
@@ -88,12 +89,6 @@ def _print_charts_resolution(install: ChartsInstall, version: str) -> None:
             flush=True,
         )
         print(f"  configured version: {version} (policy applies)", flush=True)
-    elif install.source is DependencySource.CONDA:
-        print(
-            f"  configured version: {version}; detected: "
-            f"{install.detected_version or 'unknown'}",
-            flush=True,
-        )
     else:
         print(f"  version          : {version}", flush=True)
 
@@ -384,6 +379,7 @@ def _dependency_summary(sbk, charts, versions) -> dict:
         },
         "downloads_folder": str(versions.downloads_folder) if versions.downloads_folder else None,
         "ssl_verify": versions.ssl_verify,
+        "lifecycle": inspect_records(),
     }
 
 
@@ -468,6 +464,7 @@ def _dependency_status(versions) -> dict:
             ).is_file(),
         },
         "ssl_verify": versions.ssl_verify,
+        "lifecycle": inspect_records(),
     }
     return status
 
@@ -525,6 +522,12 @@ def _print_dependency_status(status: dict) -> None:
     print(f"  managed cache    : {jdk['managed_cache']}")
     print(f"  cache complete   : {jdk['cache_complete']}")
     print(f"\nTLS verification  : {status['ssl_verify']}")
+    lifecycle = status["lifecycle"]
+    print("\nWorkload lifecycle:")
+    print(f"  registry         : {lifecycle['registry']}")
+    print(f"  active records   : {lifecycle['active']}")
+    print(f"  stale records    : {lifecycle['stale']}")
+    print(f"  unresolved       : {lifecycle['unresolved']}")
 
 
 def _init_local_config(output: Path) -> int:
@@ -898,7 +901,12 @@ def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
     machine_stdout = sys.stdout if args.json else None
     try:
-        with child_process_cleanup():
+        reconcile = (
+            args.command == "run"
+            or args.resolve_only
+            or (args.command == "deps" and args.subcommand == "doctor")
+        )
+        with child_process_cleanup(reconcile=reconcile):
             if machine_stdout is not None:
                 with redirect_stdout(sys.stderr):
                     return _execute(args, json_stream=machine_stdout)

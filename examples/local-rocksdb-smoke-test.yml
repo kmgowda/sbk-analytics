@@ -1,0 +1,19 @@
+# Fast end-to-end validation for local SBK 10.6+ and sbk-charts folders.
+mode: serial
+workdir: /tmp/sbk-analytics-rocksdb-smoke
+cleanup: never
+
+sbk:
+  seconds: 2
+  size: 100
+  writers: 1
+
+classes:
+  - class: rocksdb
+    # Keep the database directly below an existing parent so this remains
+    # valid when --work-dir overrides the YAML workdir.
+    rfile: /tmp/sbk-analytics-rocksdb-smoke.db
+
+sbk-charts:
+  output: local-rocksdb-smoke-test.xlsx
+  ai_model: noai

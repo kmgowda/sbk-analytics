@@ -74,7 +74,7 @@ class PolicyTests(unittest.TestCase):
             JDK_ARTIFACT.repository_url,
             "https://github.com/adoptium/temurin-binaries",
         )
-        self.assertIn("{version}", JDK_ARTIFACT.download_url_template)
+        self.assertIn("{version}", JDK_ARTIFACT.metadata_url_template)
 
     def test_platform_paths_come_from_the_host_runtime(self):
         self.assertEqual(RUNTIME_POLICY.ssh.known_hosts_file, os.devnull)
@@ -83,10 +83,27 @@ class PolicyTests(unittest.TestCase):
             os.path.join(tempfile.gettempdir(), APPLICATION.name),
         )
 
+    def test_lifecycle_registry_follows_application_state_override(self):
+        from analytics.lifecycle import registry_root
+
+        with tempfile.TemporaryDirectory() as directory, mock.patch.dict(
+            os.environ,
+            {
+                RUNTIME_POLICY.environment.application_state_home: directory,
+                RUNTIME_POLICY.environment.lifecycle_folder: "",
+            },
+        ):
+            self.assertEqual(
+                registry_root(),
+                Path(directory) / RUNTIME_POLICY.lifecycle.registry_directory,
+            )
+
     def test_runtime_ordering_constraints_are_valid(self):
         benchmark = RUNTIME_POLICY.benchmarks
         self.assertGreater(benchmark.gem_native_shutdown_grace_s, 0)
         self.assertGreater(RUNTIME_POLICY.processes.termination_grace_s, 0)
+        self.assertGreater(RUNTIME_POLICY.lifecycle.schema_version, 0)
+        self.assertGreater(RUNTIME_POLICY.lifecycle.identity_tolerance_s, 0)
         self.assertGreater(RUNTIME_POLICY.network.artifact_download_attempts, 0)
         self.assertGreater(
             RUNTIME_POLICY.dependencies.source_control_timeout_s, 0
@@ -196,6 +213,7 @@ class PolicyTests(unittest.TestCase):
         consumers = (
             "cli.py",
             "config.py",
+            "lifecycle.py",
             "processes.py",
             "properties.py",
             "releases.py",
@@ -215,6 +233,7 @@ class PolicyTests(unittest.TestCase):
             RUNTIME_POLICY.provenance.explicit_executable_layout,
             RUNTIME_POLICY.environment.sbk_java_home,
             RUNTIME_POLICY.environment.java_tool_options,
+            RUNTIME_POLICY.environment.lifecycle_run_id,
             RUNTIME_POLICY.sbk_interface.local_arguments_wrapper,
             RUNTIME_POLICY.sbk_interface.gem_arguments_wrapper,
         }

@@ -16,8 +16,8 @@ sbk-analytics lifetime:
 * POSIX children get a new session/process group.  A small independent guard
   watches a parent-owned pipe and terminates the group if the parent vanishes,
   including an uncatchable SIGKILL.
-* Catchable termination signals unwind Python normally, allowing runner-level
-  cleanup (including sbk-gem remote cleanup) before the registry escalates.
+* Catchable termination signals unwind Python normally, allowing SBK-GEM's
+  native shutdown before the registry escalates local process termination.
 """
 from __future__ import annotations
 
@@ -30,8 +30,17 @@ import subprocess
 import sys
 import threading
 import time
+from pathlib import Path
 from typing import Any, Iterator
 
+from .errors import LifecycleError
+from .lifecycle import (
+    current_run_id,
+    reconcile_stale_records,
+    record_path,
+    register_process,
+    unregister_process,
+)
 from .policy import RUNTIME_POLICY
 
 log = logging.getLogger(__name__)
@@ -59,10 +68,14 @@ class ManagedProcess:
         *,
         guard_write_fd: int | None = None,
         guard_process: subprocess.Popen | None = None,
+        lifecycle_record: os.PathLike[str] | None = None,
     ) -> None:
         self._process = process
         self._guard_write_fd = guard_write_fd
         self._guard_process = guard_process
+        self._lifecycle_record = (
+            os.fspath(lifecycle_record) if lifecycle_record is not None else None
+        )
         self._finished = False
         with _ACTIVE_LOCK:
             _ACTIVE.add(self)
@@ -149,16 +162,30 @@ class ManagedProcess:
                 except subprocess.TimeoutExpired:
                     guard.kill()
                     guard.wait()
+        if not _process_group_exists(self.pid):
+            unregister_process(
+                None
+                if self._lifecycle_record is None
+                else Path(self._lifecycle_record)
+            )
+        self._lifecycle_record = None
 
 
 def managed_popen(args, **kwargs: Any) -> ManagedProcess:
     """Start a workload whose complete descendant tree is lifecycle-managed."""
+    role = kwargs.pop("lifecycle_role", RUNTIME_POLICY.lifecycle.local_role)
+    metadata = kwargs.pop("lifecycle_metadata", None)
+    child_env = (
+        kwargs["env"].copy() if kwargs.get("env") is not None else os.environ.copy()
+    )
+    child_env[RUNTIME_POLICY.environment.lifecycle_run_id] = current_run_id()
+    kwargs["env"] = child_env
     kwargs["start_new_session"] = True
     process = subprocess.Popen(args, **kwargs)
-    managed = ManagedProcess(process)
     read_fd: int | None = None
     write_fd: int | None = None
     guard: subprocess.Popen | None = None
+    lifecycle_record = record_path(process.pid)
     try:
         read_fd, write_fd = os.pipe()
         guard = subprocess.Popen(
@@ -169,6 +196,7 @@ def managed_popen(args, **kwargs: Any) -> ManagedProcess:
                 str(read_fd),
                 str(process.pid),
                 str(PROCESS_POLICY.termination_grace_s),
+                str(lifecycle_record),
             ],
             pass_fds=(read_fd,),
             stdin=subprocess.DEVNULL,
@@ -178,8 +206,22 @@ def managed_popen(args, **kwargs: Any) -> ManagedProcess:
             close_fds=True,
         )
         os.close(read_fd)
+        read_fd = None
+        if process.poll() is None:
+            register_process(
+                process.pid,
+                args,
+                role=role,
+                metadata=metadata,
+                path=lifecycle_record,
+            )
+        else:
+            # Very short commands can finish between Popen and registration.
+            # Their already-running guard still owns any surviving process
+            # group descendants; there is no live PID identity to persist.
+            lifecycle_record = None
     except Exception as exc:
-        log.warning("could not start parent-death process guard: %s", exc)
+        log.error("could not establish durable workload ownership: %s", exc)
         if read_fd is not None:
             try:
                 os.close(read_fd)
@@ -190,11 +232,28 @@ def managed_popen(args, **kwargs: Any) -> ManagedProcess:
                 os.close(write_fd)
             except OSError:
                 pass
-        write_fd = None
-        guard = None
-    managed._guard_write_fd = write_fd
-    managed._guard_process = guard
-    return managed
+        _signal_posix_group(process.pid, signal.SIGKILL)
+        try:
+            process.wait(timeout=PROCESS_POLICY.guard_force_wait_s)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait()
+        if guard is not None:
+            try:
+                guard.wait(timeout=PROCESS_POLICY.guard_force_wait_s)
+            except subprocess.TimeoutExpired:
+                guard.kill()
+                guard.wait()
+        unregister_process(lifecycle_record)
+        raise LifecycleError(
+            "failed to start the mandatory workload lifecycle guard"
+        ) from exc
+    return ManagedProcess(
+        process,
+        guard_write_fd=write_fd,
+        guard_process=guard,
+        lifecycle_record=lifecycle_record,
+    )
 
 
 def terminate_process(
@@ -245,13 +304,13 @@ def terminate_all(
 
 
 @contextlib.contextmanager
-def child_process_cleanup() -> Iterator[None]:
+def child_process_cleanup(*, reconcile: bool = True) -> Iterator[None]:
     """Install CLI signal handling and always clean up registered workloads."""
     previous: dict[int, Any] = {}
 
     def _handle(signum, _frame) -> None:
-        # Raising allows runner.py to perform sbk-gem remote cleanup before the
-        # context's final registry sweep terminates any remaining local trees.
+        # Raising allows runner.py to request SBK-GEM's native cleanup before
+        # the context's final registry sweep terminates remaining local trees.
         raise ProcessExit(signum)
 
     if threading.current_thread() is threading.main_thread():
@@ -262,6 +321,10 @@ def child_process_cleanup() -> Iterator[None]:
             previous[signum] = signal.getsignal(signum)
             signal.signal(signum, _handle)
     try:
+        if reconcile:
+            summary = reconcile_stale_records()
+            if summary["cleaned"] or summary["expired"] or summary["unresolved"]:
+                log.info("lifecycle reconciliation: %s", summary)
         yield
     finally:
         terminate_all()
@@ -284,5 +347,15 @@ def _signal_posix_group(pgid: int, signum: int) -> None:
             signum,
             exc,
         )
+
+
+def _process_group_exists(pgid: int) -> bool:
+    try:
+        os.killpg(pgid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
 
 atexit.register(terminate_all)

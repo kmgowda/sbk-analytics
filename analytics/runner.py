@@ -31,7 +31,6 @@ from .processes import (
 
 log = logging.getLogger(__name__)
 BENCHMARK_POLICY = RUNTIME_POLICY.benchmarks
-SSH_POLICY = RUNTIME_POLICY.ssh
 ENVIRONMENT_POLICY = RUNTIME_POLICY.environment
 LAYOUT_POLICY = RUNTIME_POLICY.dependency_layout
 SBK_INTERFACE_POLICY = RUNTIME_POLICY.sbk_interface
@@ -179,135 +178,27 @@ def _expected_seconds(yml_path: Path) -> int | None:
     return secs if secs > 0 else None
 
 
-# ---- Emergency remote cleanup fallback (sbk-gem-yal only) ---------------
-
-
-def _remote_kill_pattern() -> str:
-    """A pattern to match the Java SBK process on a remote node.
-
-    Matches the SBK main classes used by both sbk(-yal) and sbk-gem-yal-spawned
-    remote sbk clients. Restricted to Java processes whose command line
-    mentions ``io.sbk.main.`` so we don't kill unrelated programs.
-    """
-    return BENCHMARK_POLICY.remote_process_pattern
-
-
-def _kill_remote_sbk_clients(yml_path: Path) -> None:
-    """Best-effort: SSH into every node listed in the gem-yal YAML and pkill
-    the remote SBK clients spawned by sbk-gem-yal.
-
-    Uses the same credentials sbk-gem-yal itself used: ``gemuser`` / ``gempass``
-    / ``gemport`` (default 22). Requires ``sshpass`` on PATH when ``gempass``
-    is supplied; without it we still try keys-only ssh. Failures are logged
-    and do not propagate. This is used only after SBK-GEM fails to complete
-    its own cleanup during the native shutdown grace period.
-    """
-    params, is_gem = _read_yml(yml_path)
-    if not is_gem:
-        return
-    nodes_raw = params.get(SBK_INTERFACE_POLICY.nodes_option)
-    if not nodes_raw:
-        return
-
-    # nodes can be a comma- or whitespace-separated string, or a list
-    if isinstance(nodes_raw, (list, tuple)):
-        nodes = [str(n).strip() for n in nodes_raw if str(n).strip()]
-    else:
-        s = str(nodes_raw)
-        for sep in (",", "\n", "\t"):
-            s = s.replace(sep, " ")
-        nodes = [n for n in s.split() if n]
-
-    if not nodes:
-        return
-
-    user = str(params.get(SBK_INTERFACE_POLICY.gem_user_option, "")).strip()
-    password = str(
-        params.get(SBK_INTERFACE_POLICY.gem_password_option, "")
-    ).strip()
-    try:
-        port = int(
-            params.get(
-                SBK_INTERFACE_POLICY.gem_port_option,
-                SSH_POLICY.default_port,
-            )
-        )
-    except (TypeError, ValueError):
-        port = SSH_POLICY.default_port
-
-    have_sshpass = bool(password) and _which("sshpass") is not None
-    if password and not have_sshpass:
-        log.warning(
-            "remote sbk kill: 'sshpass' not on PATH but gempass is set; "
-            "attempting key-based ssh which may fail"
-        )
-    log.warning(
-        "remote sbk kill is best effort and insecure: SSH host-key checking "
-        "is disabled, and every remote process matching %r will be killed",
-        _remote_kill_pattern(),
-    )
-
-    threads: list[threading.Thread] = []
-    for node in nodes:
-        t = threading.Thread(
-            target=_ssh_pkill_one,
-            args=(node, user, password, port, have_sshpass),
-            daemon=True,
-        )
-        t.start()
-        threads.append(t)
-    for t in threads:
-        t.join(timeout=BENCHMARK_POLICY.remote_kill_join_timeout_s)
-
-
-def _which(name: str) -> str | None:
-    from shutil import which
-    return which(name)
-
-
-def _ssh_pkill_one(node: str, user: str, password: str, port: int,
-                   have_sshpass: bool) -> None:
-    remote_cmd = (
-        f"pkill -{BENCHMARK_POLICY.remote_kill_signal} "
-        f"-f {_remote_kill_pattern()} || true"
-    )
-    target = f"{user}@{node}" if user else node
-    ssh_args = [
-        "ssh",
-        "-p", str(port),
-        *SSH_POLICY.host_key_arguments,
-        "-o", "BatchMode=" + ("no" if password else "yes"),
-        "-o", f"ConnectTimeout={SSH_POLICY.connect_timeout_s}",
-        target,
-        remote_cmd,
-    ]
-    if have_sshpass and password:
-        env = {**os.environ, "SSHPASS": password}
-        cmd = ["sshpass", "-e", *ssh_args]
-    else:
-        env = os.environ.copy()
-        cmd = ssh_args
-    try:
-        proc = subprocess.run(
-            cmd,
-            env=env,
-            capture_output=True,
-            text=True,
-            timeout=SSH_POLICY.remote_kill_command_timeout_s,
-        )
-        if proc.returncode == 0:
-            log.info("remote sbk kill: %s OK", node)
+def _lifecycle_metadata(
+    class_name: str, yml_path: Path, *, is_gem: bool
+) -> dict[str, object]:
+    """Return credential-free ownership details for durable diagnostics."""
+    metadata: dict[str, object] = {
+        "instance": class_name,
+        "yaml": str(yml_path),
+    }
+    if is_gem:
+        params, _ = _read_yml(yml_path)
+        nodes_raw = params.get(SBK_INTERFACE_POLICY.nodes_option)
+        if isinstance(nodes_raw, (list, tuple)):
+            nodes = [str(node).strip() for node in nodes_raw if str(node).strip()]
         else:
-            log.warning(
-                "remote sbk kill: %s failed rc=%s: %s",
-                node,
-                proc.returncode,
-                (proc.stderr or "").strip()[
-                    :DISPLAY_POLICY.remote_cleanup_tail_characters
-                ],
-            )
-    except (subprocess.TimeoutExpired, OSError) as e:
-        log.warning("remote sbk kill: %s error: %s", node, e)
+            value = str(nodes_raw or "")
+            for separator in (",", "\n", "\t"):
+                value = value.replace(separator, " ")
+            nodes = [node for node in value.split() if node]
+        metadata["remote_nodes"] = nodes
+        metadata["remote_cleanup_owner"] = RUNTIME_POLICY.lifecycle.gem_role
+    return metadata
 
 
 def _wait_for_native_completion(proc: ManagedProcess) -> int:
@@ -375,6 +266,13 @@ def _run_serial(
                 bufsize=1,  # Line buffered
                 text=True,
                 universal_newlines=True,
+                lifecycle_role=(
+                    RUNTIME_POLICY.lifecycle.gem_role
+                    if is_gem else RUNTIME_POLICY.lifecycle.local_role
+                ),
+                lifecycle_metadata=_lifecycle_metadata(
+                    class_name, yml_path, is_gem=is_gem
+                ),
             )
             # Forward output in real-time
             def forward_output():
@@ -396,6 +294,13 @@ def _run_serial(
                 env=env_unbuffered,
                 stdout=sys.stderr if output_to_stderr else None,
                 stderr=sys.stderr if output_to_stderr else None,
+                lifecycle_role=(
+                    RUNTIME_POLICY.lifecycle.gem_role
+                    if is_gem else RUNTIME_POLICY.lifecycle.local_role
+                ),
+                lifecycle_metadata=_lifecycle_metadata(
+                    class_name, yml_path, is_gem=is_gem
+                ),
             )
         try:
             rc = _wait_for_native_completion(proc)
@@ -469,6 +374,13 @@ def _run_parallel(
                 stdout=f,
                 stderr=subprocess.STDOUT,
                 env=env,
+                lifecycle_role=(
+                    RUNTIME_POLICY.lifecycle.gem_role
+                    if is_gem else RUNTIME_POLICY.lifecycle.local_role
+                ),
+                lifecycle_metadata=_lifecycle_metadata(
+                    class_name, yml_path, is_gem=is_gem
+                ),
             )
         finally:
             # Popen duplicates the descriptor for the child; the parent should
@@ -536,7 +448,7 @@ def _run_parallel(
 def _terminate_sbk_process(
     process: ManagedProcess, yml_path: Path, *, is_gem: bool
 ) -> None:
-    """Let SBK-GEM clean up natively, then use emergency remote cleanup."""
+    """Let SBK-GEM own remote cleanup before local force termination."""
     if process.poll() is not None:
         return
     if is_gem:
@@ -550,9 +462,10 @@ def _terminate_sbk_process(
             return
         except subprocess.TimeoutExpired:
             log.warning(
-                "SBK-GEM did not finish native cleanup; invoking emergency remote kill"
+                "SBK-GEM did not finish native cleanup; forcing only its locally "
+                "owned process group. Remote process-name killing is intentionally "
+                "disabled because it cannot distinguish concurrent SBK runs"
             )
-            _kill_remote_sbk_clients(yml_path)
     terminate_process(process)
 
 

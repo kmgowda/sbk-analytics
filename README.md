@@ -45,7 +45,7 @@ sbk-analytics --sbk-local /root/projects/SBK \
   -c examples/file-rocksdb-write-60s.yml
 ```
 
-The resolver prints `LOCAL`, `MANAGED_CACHE`, `DOWNLOADED`, or `CONDA` plus
+The resolver prints `LOCAL`, `MANAGED_CACHE`, or `DOWNLOADED` plus
 the exact executable selected. An explicitly selected invalid local folder is
 an error and never silently falls back to the network. `sbk-charts` is resolved
 only after a benchmark produces usable CSV input; use `deps doctor` to check it
@@ -153,7 +153,8 @@ sbk-analytics -c examples/file-rocksdb-write-60s.yml
 - **Configuration**: `sbk-config.env` (SBK versions, URLs, folders)
 - **Examples**: `examples/` directory
 - **Dependencies**: `requirements.txt` and `pyproject.toml`
-- **Key modules**: `cli.py`, `releases.py`, `runner.py`, `charts.py`, `yaml_gen.py`
+- **Key modules**: `cli.py`, `releases.py`, `runner.py`, `processes.py`,
+  `lifecycle.py`, `charts.py`, `yaml_gen.py`
 
 ## Additional Documentation
 
@@ -243,8 +244,8 @@ The stage-zero uv bootstrap is separate from this compatibility setting: it
 always requires HTTPS and verifies the pinned archive SHA-256 before execution.
 
 When TLS verification is disabled, dependency resolution also supplies the
-centralized trusted-host list to pip. Remote SBK-GEM cleanup and system-information probes
-likewise disable SSH host-key checking and use the operating system's null
+centralized trusted-host list to pip. Remote system-information probes likewise
+disable SSH host-key checking and use the operating system's null
 known-hosts file. Use those SSH features only with dedicated, trusted benchmark
 nodes unless the centralized SSH policy is hardened for your environment.
 
@@ -440,6 +441,8 @@ environment. It does not select or modify an active Conda or venv environment.
 - **Source**: the shipped configuration downloads a tag archive and verifies
   `sbk-charts.sha256`, avoiding a system Git requirement
 - **Cache**: version and source digest are validated before reuse
+- **Publication check**: the real `sbk-charts -h` command must start
+  successfully before `.ok` is written; `deps doctor` repeats this check
 - **Folder Structure** (default project-local):
   ```
   ./.sbk/
@@ -467,6 +470,8 @@ environment. It does not select or modify an active Conda or venv environment.
 - `SBK_ANALYTICS_BOOTSTRAP_OFFLINE=1`: prohibit bootstrap downloads
 - `SBK_ANALYTICS_UV_EXECUTABLE`: development/test override for a trusted uv
   executable; normal users should use the pinned verified artifact
+- `SBK_ANALYTICS_LIFECYCLE_FOLDER`: relocate credential-free workload ownership
+  records used for stale-run reconciliation
 
 ## macOS Logging Issues
 
@@ -677,27 +682,29 @@ by probing in the following order:
 2. **JAVA_HOME** (exported by the user)
    - If set and points to the required version, use it
    - If set but wrong version, proceed to next step
-   - When used, sets SBK_JAVA_HOME to this location
-   - Note: JAVA_HOME is explicitly unset in subprocess to prevent SBK from using wrong Java version
+   - The selected home becomes `SBK_JAVA_HOME` only in the SBK child environment
 
 3. **java on PATH**
    - If it reports the required version, use it
    - If wrong version, proceed to next step
-   - When used, sets SBK_JAVA_HOME to the JDK home location
-   - Note: JAVA_HOME is explicitly unset in subprocess to prevent SBK from using wrong Java version
+   - The selected home becomes `SBK_JAVA_HOME` only in the SBK child environment
 
 4. **Specified jdk folder** (if `sbk.jdk.folder` is set in sbk-config.env)
    - Check if cached version matches required version
    - If match, use it; otherwise proceed to download
-   - When used, sets SBK_JAVA_HOME to the JDK home location
-   - Note: JAVA_HOME is explicitly unset in subprocess to prevent SBK from using wrong Java version
+   - The selected home becomes `SBK_JAVA_HOME` only in the SBK child environment
 
 5. **Download Temurin** to specified folder or cache
-   - Download Temurin of the required major version from Adoptium API
+   - Resolve the Temurin package and published SHA-256 from the Adoptium API
+   - Reject a package whose downloaded SHA-256 differs
    - Extract to the specified folder (default: `./.jdk/<version>/extracted/`) or cache location
-   - Set SBK_JAVA_HOME to point to the downloaded JDK
-   - Note: JAVA_HOME is explicitly unset in subprocess to prevent SBK from using wrong Java version
+   - Execute `bin/java -version` and require the configured major before publishing `.ok`
    - Cache for future builds
+
+JDK resolution is performed once per analytics invocation. The runner builds
+one child environment for every SBK/SBK-GEM job, sets `SBK_JAVA_HOME`, removes
+any conflicting `JAVA_HOME`, and prepends the selected `bin` directory. The
+parent shell and Python process environment are not mutated.
 
 Recognised keys (case-insensitive; dots / underscores / dashes interchangeable):
 
@@ -737,7 +744,7 @@ or fall back to GitHub when validation fails. A selected sbk-charts source
 launcher remains responsible for maintaining its own isolated runtime.
 Relative paths are resolved against the directory containing `sbk-config.env`.
 
-Every run prints `LOCAL`, `MANAGED_CACHE`, `DOWNLOADED`, or `CONDA`, together
+Every run prints `LOCAL`, `MANAGED_CACHE`, or `DOWNLOADED`, together
 with the selection mode, layout, configured and resolved paths, exact
 executable, and detected version. Git checkouts also report their revision and
 whether tracked files are dirty; untracked files are excluded to keep normal
@@ -747,10 +754,11 @@ version policy is applied to a detected local version. Runtime behavior assumes
 that the selected local package implements the same command and lifecycle
 contract as the shipped baseline.
 
-`deps status --json` performs read-only path, layout, executable, cache, and
-provenance inspection without starting either dependency. `deps doctor`
-additionally starts the version/readiness commands. Neither command builds SBK
-or installs into a shared folder.
+`deps status --json` performs read-only path, layout, executable, cache,
+provenance, and lifecycle-registry inspection without starting either
+dependency or creating the registry. `deps doctor` additionally reconciles
+verified stale local workloads and starts version/readiness commands. Neither
+command builds SBK or installs into a shared folder.
 
 You don't need to pass `-p` / `--properties` — `sbk-analytics` automatically
 uses the bundled file. Pass `-p <path>` only if you want to override it
@@ -895,11 +903,11 @@ validated before a Java process starts.
 Analytics no longer measures a GEM timeout from local process launch. SBK-GEM
 may spend significant time provisioning nodes before its benchmark clock
 starts, and SBK reports readiness, idle timeout, failures, and cleanup itself.
-On a catchable interruption, analytics first gives SBK-GEM 30 seconds to clean
-up its remote clients. Only if that native shutdown does not finish does it use
-the broad SSH `pkill -9 -f io.sbk.main` emergency fallback. That fallback uses
-the configured GEM credentials, disables host-key checking, and must be used
-only on trusted, dedicated benchmark nodes.
+On a catchable interruption, analytics gives SBK-GEM 30 seconds to clean up its
+remote clients. If native shutdown does not finish, analytics force-stops only
+the locally owned SBK-GEM process group. It deliberately does not issue a broad
+remote process-name kill because that cannot distinguish concurrent SBK runs.
+SBK-GEM remains the authority for remote process and embedded-SBM cleanup.
 
 A result is successful only when SBK returns exit code zero and writes a
 non-empty CSV. Partial CSV output from a failed SBK process is preserved for
@@ -911,22 +919,44 @@ diagnosis but is not sent to sbk-charts.
 `sbk-analytics` receives Ctrl-C, SIGTERM, SIGHUP, or SIGQUIT,
 it asks every active tree to stop. Local SBK and charts trees get the standard
 3-second process grace; SBK-GEM gets 30 seconds for native remote cleanup
-before emergency fallback and force-kill. This applies in serial and parallel modes and includes
+before its local group is force-killed. This applies in serial and parallel modes and includes
 shells, JVMs, and other descendants created by the launched command.
 
 Abrupt parent death is covered too by an independent parent-liveness guard.
 Thus an uncatchable parent kill does not leave local SBK or sbk-charts
-descendants running. For `sbk-gem-yal`, catchable interruptions also perform the existing
-best-effort SSH cleanup of remote SBK clients. An uncatchable local kill cannot
-run new SSH commands, so remote-host cleanup in that specific case depends on
-the remote SBK/GEM connection lifecycle.
+descendants running. Guard startup and durable ownership registration are
+fail-closed: a workload is terminated if analytics cannot establish both.
+
+Each live workload also has a credential-free record under the per-user state
+directory (override with `SBK_ANALYTICS_LIFECYCLE_FOLDER`). A later benchmark or
+`deps doctor` invocation reconciles records whose controller disappeared, but
+signals a process group only after validating its PID creation time, group, and
+per-run ownership ID or command identity. Leaderless groups are cleaned only
+when every remaining live member carries that ownership ID; ambiguous records
+are quarantined instead of risking an unrelated process. `deps status` reports
+this registry without modifying it.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Registered: workload + mandatory guard started
+    Registered --> Running: PID/PGID identity persisted
+    Running --> Completed: normal exit and tree cleanup
+    Running --> Stale: controller disappears
+    Stale --> Reconciled: next invocation verifies ownership
+    Reconciled --> Completed: TERM then KILL if required
+    Stale --> Quarantined: identity is ambiguous
+```
+
+For `sbk-gem-yal`, remote-host cleanup still depends on SBK-GEM's native
+connection and lease lifecycle. Analytics records the node names for diagnosis,
+but does not store credentials or run unsafe global SSH cleanup commands.
 
 #### When the timeout does NOT apply
 
 If the instance does **not** set `seconds:` (or sets it to `0` / a negative
 value) — i.e. the benchmark is bounded by `records:` or runs forever —
 **no timeout applies at all**. `sbk-analytics` will not kill the local
-`sbk-yal` / `sbk-gem-yal` process, and will not run the remote `pkill`,
+`sbk-yal` / `sbk-gem-yal` process,
 even if the run hangs indefinitely. This matches the intent of `records:`:
 the benchmark stops when the configured number of records have been
 written/read, not on a wall-clock deadline.
@@ -1110,6 +1140,7 @@ sbk-analytics/
 ├── README.md
 ├── examples/
 │   ├── config.yml                  # generic multi-class example
+│   ├── local-rocksdb-smoke-test.yml # 2s shared-folder SBK 10.6+ smoke test
 │   └── file-rocksdb-write.yml      # 120s file + rocksdb single-writer example
 └── analytics/
     ├── cli.py                # argument parsing + orchestration
