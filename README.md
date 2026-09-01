@@ -603,6 +603,22 @@ What this does, step by step:
    flag taken from the YAML's `sbk-charts:` group.
 6. **Append the `system` sheet** to the xlsx (CPU, RAM, disks).
 
+### Runtime flow
+
+```mermaid
+flowchart LR
+    App["./sbk-analytics"] --> Bootstrap["Verified managed Python runtime"]
+    Bootstrap --> Config["Parse benchmark YAML<br/>and sbk-config.env"]
+    Config --> Resolve["Resolve JDK and SBK"]
+    Resolve --> Generate["Generate per-instance<br/>SBK YAML"]
+    Generate --> Run["Run sbk-yal or sbk-gem-yal"]
+    Run --> Result{"Successful non-empty CSV?"}
+    Result -->|Yes| Charts["Resolve and run sbk-charts once"]
+    Result -->|No, no other inputs| Stop["Skip charts and report failure"]
+    Charts --> System["Append system information"]
+    System --> Report["Final Excel report"]
+```
+
 ### Full end-to-end example
 
 ```bash

@@ -14,6 +14,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - Established SBK 10.6 as the configured baseline contract without embedding
   version checks or version-specific branches in runtime source.
+- Replaced text-rendered architecture and lifecycle flows with GitHub-rendered
+  Mermaid diagrams in the user, architecture, and agent documentation.
 - Delegated benchmark timing, fixed-record idle detection, GEM readiness,
   remote lifecycle, and failure status to SBK 10.6+. Emergency SSH cleanup now
   runs only when interrupted SBK-GEM does not finish native cleanup in time.
