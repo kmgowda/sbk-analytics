@@ -13,7 +13,7 @@ class PropertiesTests(unittest.TestCase):
             properties.write_text(
                 "\n".join(
                     [
-                        "sbk.version=10.4",
+                        "sbk.version=10.6",
                         "sbk-charts.version=4.26.7.1",
                         *extra_lines,
                     ]

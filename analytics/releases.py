@@ -362,8 +362,7 @@ def _gh_release(
     tag: str,
     ssl_verify: bool | str = DEPENDENCY_POLICY.default_ssl_verify,
 ) -> dict:
-    """Fetch release metadata from GitHub for a given tag."""
-    url = NETWORK_POLICY.github_api_url.format(repo=repo, tag=tag)
+    """Fetch GitHub release metadata, accepting plain and ``v``-prefixed tags."""
     headers = {
         "Accept": "application/vnd.github+json",
         "X-GitHub-Api-Version": NETWORK_POLICY.github_api_version,
@@ -380,17 +379,25 @@ def _gh_release(
     else:
         log.debug("SSL verification enabled (ssl.verify=true in sbk-config.env)")
     
-    log.info("fetching GitHub release metadata: %s@%s", repo, tag)
-    r = requests.get(
-        url,
-        headers=headers,
-        timeout=NETWORK_POLICY.github_metadata_timeout_s,
-        verify=ssl_verify,
-    )
-    if r.status_code == 404:
-        raise RuntimeError(f"GitHub release not found: {repo}@{tag}")
-    r.raise_for_status()
-    return r.json()
+    candidates = (tag,) if tag.lower().startswith("v") else (tag, f"v{tag}")
+    for candidate in candidates:
+        url = NETWORK_POLICY.github_api_url.format(repo=repo, tag=candidate)
+        log.info("fetching GitHub release metadata: %s@%s", repo, candidate)
+        response = requests.get(
+            url,
+            headers=headers,
+            timeout=NETWORK_POLICY.github_metadata_timeout_s,
+            verify=ssl_verify,
+        )
+        if response.status_code == 404:
+            continue
+        response.raise_for_status()
+        metadata = response.json()
+        if candidate != tag:
+            log.info("resolved configured release %s via GitHub tag %s", tag, candidate)
+        return metadata
+    attempted = ", ".join(f"{repo}@{candidate}" for candidate in candidates)
+    raise RuntimeError(f"GitHub release not found; attempted: {attempted}")
 
 
 def _download(
@@ -623,7 +630,8 @@ def _ensure_sbk_locked(
         if has_yal and has_required_gem:
             log.info("SBK %s already installed at %s (cache hit)", version, home)
             return SbkInstall(
-                home=home, source=DependencySource.MANAGED_CACHE
+                home=home, source=DependencySource.MANAGED_CACHE,
+                detected_version=version,
             )
         log.warning(
             "SBK %s cache marker exists but binaries missing at %s; re-installing",
@@ -734,7 +742,11 @@ def _ensure_sbk_locked(
         shutil.rmtree(cache)
     stage.replace(cache)
     log.info("SBK %s ready at %s", version, final_home)
-    return SbkInstall(home=final_home, source=DependencySource.DOWNLOADED)
+    return SbkInstall(
+        home=final_home,
+        source=DependencySource.DOWNLOADED,
+        detected_version=version,
+    )
 
 
 # ---------- sbk-charts ----------

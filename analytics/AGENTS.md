@@ -147,7 +147,7 @@ artifact identities plus operational defaults shared by multiple subsystems.
 - application, SBK, sbk-charts, and JDK metadata
 - cache marker/home/metadata filenames and cache namespaces
 - GitHub, download, retry, pip trust, and dependency probe behavior
-- process termination, benchmark watchdog, SSH, and system-info timing
+- process termination, SBK-native lifecycle, SSH fallback, and system-info timing
 - configuration defaults, accepted values, and CLI exit codes
 
 Version pins remain operator configuration in `sbk-config.env`; algorithm-local
@@ -166,7 +166,7 @@ to a consumer module.
 - `run_jobs()`: Main entry point for running SBK instances
 - `_run_serial()`: Execute instances one at a time
 - `_run_parallel()`: Execute instances concurrently
-- `_hung_jvm_watchdog()`: Monitor and kill hung JVM processes
+- `_wait_for_native_completion()`: Trust SBK's authoritative completion
 
 **Environment Configuration**:
 - Sets `SBK_JAVA_HOME` to resolved JDK location
@@ -228,7 +228,7 @@ sbk-analytics invocation
 **Key Settings**:
 ```
 sbk.url=https://github.com/kmgowda/SBK
-sbk.version=10.4
+sbk.version=10.6
 # sbk.local.folder=/root/projects/SBK
 downloads.folder=./.sbk
 sbk.jdk.version=25
@@ -444,32 +444,20 @@ sbk-analytics -c examples/config.yml
 
 ## Architecture Overview
 
-```
-User Input (YML)
-       ↓
-CLI (cli.py)
-       ↓
-Config Parser (config.py)
-       ↓
-Properties Parser (properties.py)
-       ↓
-Local/managed SBK Resolution (releases.py)
-       ↓
-JDK Resolution (releases.py)
-       ↓
-YAML Generation (yaml_gen.py)
-       ↓
-SBK Execution (runner.py)
-       ↓
-CSV Collection
-       ↓
-Lazy sbk-charts Resolution (releases.py)
-       ↓
-sbk-charts Invocation (charts.py)
-       ↓
-System Info Collection (system_info.py)
-       ↓
-Excel Output
+```mermaid
+flowchart TB
+    Input["Benchmark YAML + sbk-config.env"] --> CLI["CLI orchestration<br/>cli.py"]
+    CLI --> Config["Parse and validate configuration<br/>config.py + sbk_contract.py"]
+    CLI --> Properties["Parse dependency selection<br/>properties.py"]
+    Properties --> Resolver["Resolve SBK and JDK<br/>releases.py"]
+    Config --> Generator["Generate per-instance YAML<br/>yaml_gen.py"]
+    Resolver --> Runner["Execute SBK instances<br/>runner.py"]
+    Generator --> Runner
+    Runner --> CSV["Successful CSV collection"]
+    CSV --> ChartsResolver["Lazy sbk-charts resolution<br/>releases.py"]
+    ChartsResolver --> Charts["Generate charts and analysis<br/>charts.py"]
+    Charts --> System["Append system information<br/>system_info.py"]
+    System --> Output["Final Excel report"]
 ```
 
 ## Important Notes for AI Agents

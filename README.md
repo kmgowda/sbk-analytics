@@ -107,7 +107,7 @@ CLI so its editable `sbk-config.env` remains the default configuration.
 Runtime policy and artifact metadata are centralized in
 `analytics/policy.py`. This is the canonical source for dependency identities,
 repository defaults, managed-cache filenames, network/retry limits, process
-grace periods, benchmark watchdog timing, SSH behavior, configuration defaults,
+grace periods, native benchmark lifecycle, SSH behavior, configuration defaults,
 and application exit codes. Release version pins remain in `sbk-config.env` so
 operators can update them without changing Python code.
 
@@ -215,7 +215,8 @@ orchestrates need a working runtime on the host:
 | Tool | Required version | Notes |
 | --- | --- | --- |
 | Python    | not required | The launcher downloads and saves the pinned managed Python on first use. Python ≥3.9 is needed only for manual development installs. |
-| JDK       | ≥ matching SBK build (e.g. SBK 10.0 needs **JDK 25**) | Automatically resolved and cached by default. The SBK release archive ships `.class` files compiled with a specific JDK. |
+| SBK       | configured baseline or newer | The shipped release pin establishes the command and lifecycle contract; runtime code does not branch on an embedded version number. |
+| JDK       | matching configured SBK build | Automatically resolved and cached by default. The SBK release archive ships `.class` files compiled with a specific JDK. |
 | `curl` or `wget` | first Linux/macOS bootstrap only | Downloads the verified standalone runtime manager. |
 | Internet access | first run / cache miss | Not needed after the runtime, JDK, SBK, and sbk-charts caches are populated. |
 
@@ -591,16 +592,32 @@ What this does, step by step:
 3. **Generate per-instance YAMLs.** One YAML per `classes:` entry under
    `<work-dir>/yml/`, each forced to write CSV via `CSVLogger` to a unique
    `<work-dir>/csv/sbk-<instance>.csv`.
-4. **Run SBK.** Invokes `sbk-yal` (or `sbk-gem-yal` if any instance has
-   `nodes:`) once per instance. In `serial` mode (default) SBK output is
+4. **Run SBK.** Invokes `sbk-yal` for local instances and `sbk-gem-yal` for
+   instances with a non-empty `nodes:` value. In `serial` mode (default) SBK output is
    shown live; in `parallel` mode each instance writes to its own log file
-   and the orchestrator prints a heartbeat every 5 seconds. If any instance
-   exceeds `seconds + 5`, it is killed forcefully and the partial CSV is
-   still used.
+   and the orchestrator prints a heartbeat every 5 seconds. SBK owns
+   benchmark timing, fixed-record idle detection, GEM deployment/readiness,
+   remote cleanup, and its authoritative exit status.
 5. **Run sbk-charts once.** Feeds every produced CSV into a single
    `sbk-charts` invocation, with the output xlsx, AI backend, and `-chat`
    flag taken from the YAML's `sbk-charts:` group.
 6. **Append the `system` sheet** to the xlsx (CPU, RAM, disks).
+
+### Runtime flow
+
+```mermaid
+flowchart LR
+    App["./sbk-analytics"] --> Bootstrap["Verified managed Python runtime"]
+    Bootstrap --> Config["Parse benchmark YAML<br/>and sbk-config.env"]
+    Config --> Resolve["Resolve JDK and SBK"]
+    Resolve --> Generate["Generate per-instance<br/>SBK YAML"]
+    Generate --> Run["Run sbk-yal or sbk-gem-yal"]
+    Run --> Result{"Successful non-empty CSV?"}
+    Result -->|Yes| Charts["Resolve and run sbk-charts once"]
+    Result -->|No, no other inputs| Stop["Skip charts and report failure"]
+    Charts --> System["Append system information"]
+    System --> Report["Final Excel report"]
+```
 
 ### Full end-to-end example
 
@@ -633,7 +650,7 @@ carries both the **GitHub URL** and the **release tag** for each project:
 ```ini
 # sbk-config.env  (bundled at the project root)
 sbk.url=https://github.com/kmgowda/SBK
-sbk.version=10.0
+sbk.version=10.6
 # sbk.local.folder=/root/projects/SBK
 downloads.folder=./.sbk
 sbk.jdk.version=25
@@ -685,7 +702,7 @@ Recognised keys (case-insensitive; dots / underscores / dashes interchangeable):
 | Key | Required | Notes |
 | --- | --- | --- |
 | `sbk.url`        | no (defaults to `https://github.com/kmgowda/SBK`)        | Full URL `https://github.com/<owner>/<repo>` or `<owner>/<repo>` shorthand. |
-| `sbk.version`    | yes | Tag that exists on that repository's Releases page. |
+| `sbk.version`    | yes | Tag on that repository's Releases page. The shipped value defines the supported baseline contract. |
 | `sbk.local.folder` | no | Ready-to-run SBK distribution or built source checkout. Takes priority over cache and URL. |
 | `downloads.folder` | no (defaults to `./.sbk`) | Shared local folder for downloaded SBK and sbk-charts installations. Use `./.sbk` for a project-local cache. |
 | `sbk.jdk.version`| no (defaults to `25`) | Required JDK major version. |
@@ -717,8 +734,10 @@ fall back to GitHub when validation fails. Relative paths are resolved against
 the directory containing `sbk-config.env`.
 
 Every run prints `LOCAL`, `MANAGED_CACHE`, `DOWNLOADED`, or `CONDA`, together
-with the exact selected folder and executable. The configured remote version
-is informational and ignored for a local checkout.
+with the exact selected folder and executable. The configured version policy
+is applied to a detected local version. Runtime behavior assumes that the
+selected local package implements the same command and lifecycle contract as
+the shipped baseline.
 
 You don't need to pass `-p` / `--properties` — `sbk-analytics` automatically
 uses the bundled file. Pass `-p <path>` only if you want to override it
@@ -731,7 +750,7 @@ sbk-analytics -c my-run.yml -p /path/to/custom-sbk-config.env
 ```ini
 # my-fork-sbk-config.env
 sbk.url=https://github.com/your-org/SBK
-sbk.version=9.0-myfork
+sbk.version=10.6-myfork
 sbk-charts.url=kmgowda/sbk-charts
 sbk-charts.version=3.26.2.1
 ```
@@ -844,42 +863,42 @@ the shared `sbk:` block.
 You do **not** set `class`, `out`, or `csvfile` yourself — they are managed
 by `sbk-analytics`.
 
-### Hard timeout
+### SBK compatibility and lifecycle
 
-Hard kill timing is staged. All times are measured from the moment each
-instance starts and use `seconds` as resolved for that instance's YAML.
+`sbk-analytics` generates the supported `sbkArgs:` / `sbkGemArgs:` wrappers and
+invokes both launchers with `-f <yaml>`. It understands the distributed
+options `packagescleanup`, `fullcopy`, `hostkeycheck`, `knownhosts`, `sbmport`,
+`sbmsleepms`, `totalrecords`, and `totalthroughput`, plus the shared
+`idletimeoutseconds` option used by SBK and the embedded SBM. Standalone `sbm`
+is not launched by analytics; SBK-GEM embeds and configures it.
 
-| Stage | When (gem mode) | When (yal mode) | Action |
-| --- | --- | --- | --- |
-| 1. Remote kill | `seconds + 10` | n/a | SSH into every node in `nodes:` and run `pkill -9 -f io.sbk.main` so the remote sbk clients are killed first. |
-| 2. Local kill  | `seconds + 15` | `seconds + 15` | SIGTERM then SIGKILL the local `sbk-yal` / `sbk-gem-yal` process. |
+The old `runtimecleanup` key is migrated to `packagescleanup` with a warning.
+Removed deployment keys (`copyonlydrivers`, `compactruntimecopy`,
+`compactcopy`, `copy`, `deleteafter`, `delete`, `sbkcommand`, `sbkdir`,
+`javacopy`, and `javaversion`) fail early with migration guidance. Aggregate
+record/throughput conflicts and core boolean/integer values are also
+validated before a Java process starts.
 
-In gem mode the remote kill runs in a background thread so it can finish
-during the 5-second window between stage 1 and stage 2; the local kill then
-joins the remote-kill thread (up to 5 s) before terminating the local
-process, so the remote sbk clients are gone before the local sbk-gem-yal is
-torn down.
+Analytics no longer measures a GEM timeout from local process launch. SBK-GEM
+may spend significant time provisioning nodes before its benchmark clock
+starts, and SBK reports readiness, idle timeout, failures, and cleanup itself.
+On a catchable interruption, analytics first gives SBK-GEM 30 seconds to clean
+up its remote clients. Only if that native shutdown does not finish does it use
+the broad SSH `pkill -9 -f io.sbk.main` emergency fallback. That fallback uses
+the configured GEM credentials, disables host-key checking, and must be used
+only on trusted, dedicated benchmark nodes.
 
-Remote-kill credentials come from the instance's `gemuser` / `gempass` /
-`gemport` parameters. If `gempass:` is set, `sshpass` is preferred (and used
-if present on PATH); otherwise key-based SSH is attempted. Failures (e.g.
-unreachable nodes) are logged but do **not** fail the overall run.
-
-Remote cleanup is intentionally broad and best-effort: it disables SSH
-host-key checking and kills every process on each configured node whose command
-line matches `io.sbk.main`. Run only against trusted benchmark nodes that are
-not shared with unrelated SBK workloads. A warning is logged whenever this
-cleanup is attempted.
-
-Whatever CSV the instance had written up to the kill is preserved and fed
-into the single `sbk-charts` invocation at the end.
+A result is successful only when SBK returns exit code zero and writes a
+non-empty CSV. Partial CSV output from a failed SBK process is preserved for
+diagnosis but is not sent to sbk-charts.
 
 ### Interruption and forced-exit cleanup
 
 `sbk-yal`, `sbk-gem-yal`, and `sbk-charts` run in isolated process trees. If
 `sbk-analytics` receives Ctrl-C, SIGTERM, SIGHUP, or SIGQUIT,
-it asks every active tree to stop, waits up to 3 seconds, and then force-kills
-anything that remains. This applies in serial and parallel modes and includes
+it asks every active tree to stop. Local SBK and charts trees get the standard
+3-second process grace; SBK-GEM gets 30 seconds for native remote cleanup
+before emergency fallback and force-kill. This applies in serial and parallel modes and includes
 shells, JVMs, and other descendants created by the launched command.
 
 Abrupt parent death is covered too by an independent parent-liveness guard.
@@ -1047,16 +1066,15 @@ into those folders.
   download.
 
 - **`UnsupportedClassVersionError: ... class file version 69.0 ...`** — your
-  JDK is older than what the SBK release expects. SBK 10.0 needs JDK 25. The
+  JDK is older than what the configured SBK release expects. The
   orchestrator automatically resolves and downloads the correct JDK version by
   default. If you need to use a specific JDK, set `SBK_JAVA_HOME` to point to it.
 - **`SSL: CERTIFICATE_VERIFY_FAILED ...`** — TLS interception by a corporate
   proxy. Export `REQUESTS_CA_BUNDLE`, `SSL_CERT_FILE`, `PIP_CERT`, and
   `GIT_SSL_CAINFO` to the local CA bundle (see [Prerequisites](#prerequisites)).
-- **An SBK instance hangs after printing the `Total ...` line** — known
-  upstream issue (RocksDB driver and a few others don't release JVM threads
-  on shutdown). `sbk-analytics` kills the process at `seconds + 15` and uses
-  the CSV that has already been flushed.
+- **A fixed-record SBK instance stops making progress** — set
+  `idletimeoutseconds` (the shipped SBK baseline defaults to 600). SBK/SBM reports the idle
+  timeout and exits non-zero; analytics preserves its logs and marks the run failed.
 - **`sbk-charts` complains about a missing `banner.txt` or `images/sbk-logo.png`** —
   packaging quirks of some sbk-charts versions. `sbk-analytics` already supplies a
   stub `banner.txt` via a private cwd; the missing logo is harmless.
@@ -1085,7 +1103,7 @@ sbk-analytics/
     ├── config.py             # input YAML parser (sbk, classes, sbk-charts)
     ├── releases.py           # GitHub release download + cached install
     ├── yaml_gen.py           # per-instance sbkArgs/sbkGemArgs YAML generator
-    ├── runner.py             # serial / parallel SBK execution + watchdog
+    ├── runner.py             # serial/parallel SBK-native lifecycle execution
     ├── processes.py          # managed workload trees + signal cleanup
     ├── _process_guard.py     # POSIX parent-death companion
     ├── charts.py             # single sbk-charts invocation

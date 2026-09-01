@@ -194,13 +194,10 @@ class SshPolicy:
 
 @dataclass(frozen=True)
 class BenchmarkPolicy:
-    remote_kill_grace_s: float = 10.0
-    local_kill_grace_s: float = 15.0
-    watchdog_poll_interval_s: float = 0.5
+    process_poll_interval_s: float = 0.5
     heartbeat_interval_s: float = 5.0
     remote_kill_join_timeout_s: float = 15.0
-    remote_before_local_join_s: float = 5.0
-    local_terminate_wait_s: float = 2.0
+    gem_native_shutdown_grace_s: float = 30.0
     log_forward_join_s: float = 1.0
     remote_process_pattern: str = "io.sbk.main"
     remote_kill_signal: int = 9

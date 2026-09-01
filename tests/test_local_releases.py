@@ -14,6 +14,7 @@ from analytics.releases import (
     SbkInstall,
     ensure_sbk,
     ensure_sbk_charts,
+    _gh_release,
     resolve_local_sbk,
     resolve_local_sbk_charts,
 )
@@ -33,6 +34,19 @@ def _sbk_home(root: Path) -> Path:
 
 
 class LocalSbkResolutionTests(unittest.TestCase):
+    def test_release_lookup_accepts_v_prefixed_github_tag(self):
+        missing = mock.Mock(status_code=404)
+        found = mock.Mock(status_code=200)
+        found.json.return_value = {"tag_name": "v11.0", "assets": []}
+        with mock.patch(
+            "analytics.releases.requests.get", side_effect=(missing, found)
+        ) as request:
+            release = _gh_release("owner/repository", "11.0", ssl_verify=True)
+
+        self.assertEqual(release["tag_name"], "v11.0")
+        self.assertEqual(request.call_count, 2)
+        self.assertTrue(request.call_args_list[1].args[0].endswith("/v11.0"))
+
     def test_distribution_layout_is_used_without_mutation(self):
         with tempfile.TemporaryDirectory() as directory:
             root = _sbk_home(Path(directory))
@@ -72,20 +86,20 @@ class LocalSbkResolutionTests(unittest.TestCase):
             missing = Path(directory) / "missing"
             with mock.patch("analytics.releases._gh_release") as github:
                 with self.assertRaisesRegex(RuntimeError, "does not exist"):
-                    ensure_sbk("10.4", local_folder=missing)
+                    ensure_sbk("10.6", local_folder=missing)
             github.assert_not_called()
 
     def test_managed_cache_is_identified(self):
         with tempfile.TemporaryDirectory() as directory:
             downloads = Path(directory)
-            cache = downloads / "10.4"
+            cache = downloads / "10.6"
             home = _sbk_home(cache / "extracted" / "sbk")
             cache.mkdir(parents=True, exist_ok=True)
             (cache / ".home").write_text(str(home), encoding="utf-8")
             (cache / ".ok").touch()
 
             with mock.patch("analytics.releases._gh_release") as github:
-                install = ensure_sbk("10.4", downloads_folder=downloads)
+                install = ensure_sbk("10.6", downloads_folder=downloads)
 
             self.assertEqual(install.source, DependencySource.MANAGED_CACHE)
             github.assert_not_called()
@@ -105,8 +119,8 @@ class LocalSbkResolutionTests(unittest.TestCase):
             release = {
                 "assets": [
                     {
-                        "name": "sbk-10.4.tar",
-                        "browser_download_url": "https://example/sbk-10.4.tar",
+                        "name": "sbk-10.6.tar",
+                        "browser_download_url": "https://example/sbk-10.6.tar",
                         "digest": f"sha256:{'a' * 64}",
                     }
                 ]
@@ -114,19 +128,19 @@ class LocalSbkResolutionTests(unittest.TestCase):
             with mock.patch("analytics.releases._gh_release", return_value=release), \
                     mock.patch("analytics.releases._download", side_effect=fake_download), \
                     mock.patch("analytics.releases._extract", side_effect=fake_extract):
-                install = ensure_sbk("10.4", downloads_folder=downloads)
+                install = ensure_sbk("10.6", downloads_folder=downloads)
 
             self.assertEqual(install.source, DependencySource.DOWNLOADED)
-            self.assertTrue((downloads / "10.4" / ".ok").is_file())
-            self.assertTrue((downloads / "10.4" / "metadata.json").is_file())
-            self.assertFalse(list(downloads.glob(".10.4.install-*")))
+            self.assertTrue((downloads / "10.6" / ".ok").is_file())
+            self.assertTrue((downloads / "10.6" / "metadata.json").is_file())
+            self.assertFalse(list(downloads.glob(".10.6.install-*")))
 
     def test_release_digest_mismatch_is_rejected_before_extraction(self):
         with tempfile.TemporaryDirectory() as directory:
             downloads = Path(directory)
             release = {"assets": [{
-                "name": "sbk-10.4.tar",
-                "browser_download_url": "https://example/sbk-10.4.tar",
+                "name": "sbk-10.6.tar",
+                "browser_download_url": "https://example/sbk-10.6.tar",
                 "digest": f"sha256:{'a' * 64}",
             }]}
 
@@ -141,7 +155,7 @@ class LocalSbkResolutionTests(unittest.TestCase):
                 "analytics.releases._download", side_effect=fake_download
             ), mock.patch("analytics.releases._extract") as extract:
                 with self.assertRaisesRegex(RuntimeError, "checksum mismatch"):
-                    ensure_sbk("10.4", downloads_folder=downloads)
+                    ensure_sbk("10.6", downloads_folder=downloads)
             extract.assert_not_called()
 
 
@@ -312,7 +326,7 @@ class ResolutionOutputTests(unittest.TestCase):
         output = io.StringIO()
 
         with contextlib.redirect_stdout(output):
-            _print_sbk_resolution(sbk, "10.4")
+            _print_sbk_resolution(sbk, "10.6")
             _print_charts_resolution(charts, "4.26.7.1")
 
         text = output.getvalue()
@@ -323,7 +337,7 @@ class ResolutionOutputTests(unittest.TestCase):
         self.assertIn("/local/SBK/bin/sbk-yal", text)
         self.assertIn("/local/sbk-charts/sbk-charts", text)
         self.assertIn("detected version : unknown", text)
-        self.assertIn("configured version: 10.4 (policy applies)", text)
+        self.assertIn("configured version: 10.6 (policy applies)", text)
         self.assertIn("configured version: 4.26.7.1 (policy applies)", text)
 
 

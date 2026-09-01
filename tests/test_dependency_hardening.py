@@ -29,7 +29,7 @@ class PropertiesHardeningTests(unittest.TestCase):
     def _properties(self, root: Path, *extra: str):
         path = root / "sbk-config.env"
         path.write_text("\n".join((
-            "sbk.version=10.4", "sbk-charts.version=4.26.7.1", *extra,
+            "sbk.version=10.6", "sbk-charts.version=4.26.7.1", *extra,
         )))
         return parse_properties(path)
 
@@ -165,7 +165,7 @@ class CliFlowTests(unittest.TestCase):
             root = Path(directory)
             properties = root / "sbk-config.env"
             properties.write_text(
-                "sbk.version=10.4\nsbk-charts.version=4.26.7.1\n"
+                "sbk.version=10.6\nsbk-charts.version=4.26.7.1\n"
                 "sbk.jdk.folder=./jdk\n"
             )
             config = root / "input.yml"
@@ -249,7 +249,7 @@ class CliFlowTests(unittest.TestCase):
             root = Path(directory)
             properties = root / "sbk-config.env"
             properties.write_text(
-                "sbk.version=10.4\nsbk-charts.version=4.26.7.1\n"
+                "sbk.version=10.6\nsbk-charts.version=4.26.7.1\n"
                 "sbk.jdk.folder=./jdk\n"
             )
             config = root / "input.yml"
@@ -286,7 +286,7 @@ class CliFlowTests(unittest.TestCase):
             root = Path(directory)
             properties = root / "sbk-config.env"
             properties.write_text(
-                "sbk.version=10.4\nsbk-charts.version=4.26.7.1\n"
+                "sbk.version=10.6\nsbk-charts.version=4.26.7.1\n"
                 "sbk.jdk.folder=./jdk\n"
             )
             config = root / "input.yml"

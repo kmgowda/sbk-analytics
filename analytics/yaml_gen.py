@@ -32,7 +32,7 @@ def generate_instance_yaml(
 ) -> Path:
     """Write a YAML file for one SBK benchmark instance and return its path.
 
-    SBK 9.0's YML loader expects all arguments wrapped under a top-level key:
+    The supported SBK YML loaders expect arguments under a top-level key:
         sbkArgs:     for sbk-yal
         sbkGemArgs:  for sbk-gem-yal (i.e. when ``nodes`` is present)
 

@@ -85,10 +85,7 @@ class PolicyTests(unittest.TestCase):
 
     def test_runtime_ordering_constraints_are_valid(self):
         benchmark = RUNTIME_POLICY.benchmarks
-        self.assertLess(
-            benchmark.remote_kill_grace_s,
-            benchmark.local_kill_grace_s,
-        )
+        self.assertGreater(benchmark.gem_native_shutdown_grace_s, 0)
         self.assertGreater(RUNTIME_POLICY.processes.termination_grace_s, 0)
         self.assertGreater(RUNTIME_POLICY.network.artifact_download_attempts, 0)
 

@@ -23,120 +23,90 @@ The native launchers load their smaller pre-Python policy boundary from
 `sbk-bootstrap.env`, because `analytics.policy` cannot be imported until a
 compatible interpreter and environment exist.
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                        User Input                           │
-│                    (YAML Configuration)                     │
-└─────────────────────────┬───────────────────────────────────┘
-                          │
-                          ▼
-┌─────────────────────────────────────────────────────────────┐
-│                    CLI Module (cli.py)                      │
-│  - Argument parsing                                         │
-│  - Logging setup                                            │
-│  - Workflow orchestration                                   │
-└─────────────────────────┬───────────────────────────────────┘
-                          │
-                          ▼
-┌─────────────────────────────────────────────────────────────┐
-│                Configuration Module (config.py)              │
-│  - YAML parsing and validation                              │
-│  - Configuration object creation                             │
-└─────────────────────────┬───────────────────────────────────┘
-                          │
-                          ▼
-┌─────────────────────────────────────────────────────────────┐
-│              Properties Module (properties.py)               │
-│  - sbk-config.env parsing                                   │
-│  - Version and URL resolution                               │
-└─────────────────────────┬───────────────────────────────────┘
-                          │
-                          ▼
-┌─────────────────────────────────────────────────────────────┐
-│              Releases Module (releases.py)                  │
-│  - JDK resolution and caching                               │
-│  - SBK download and caching                                │
-│  - sbk-charts installation                                  │
-└─────────────────────────┬───────────────────────────────────┘
-                          │
-        ┌─────────────────┴─────────────────┐
-        │                                   │
-        ▼                                   ▼
-┌──────────────────┐              ┌──────────────────┐
-│ JDK Installation │              │ SBK Installation │
-│  (.jdk/)         │              │   (.sbk/)        │
-└──────────────────┘              └──────────────────┘
-        │                                   │
-        └─────────────────┬─────────────────┘
-                          │
-                          ▼
-┌─────────────────────────────────────────────────────────────┐
-│              YAML Generator (yaml_gen.py)                   │
-│  - Generate per-class YAML files                             │
-│  - Handle sbk-yal/sbk-gem-yal formats                        │
-└─────────────────────────┬───────────────────────────────────┘
-                          │
-                          ▼
-┌─────────────────────────────────────────────────────────────┐
-│                 Runner Module (runner.py)                   │
-│  - Serial/parallel execution                                │
-│  - Subprocess management                                    │
-│  - Log forwarding (macOS)                                   │
-│  - Hung JVM detection                                       │
-└─────────────────────────┬───────────────────────────────────┘
-                          │
-                          ▼
-┌─────────────────────────────────────────────────────────────┐
-│          Process Lifecycle Module (processes.py)             │
-│  - Isolated workload process trees                           │
-│  - Signal and parent-death cleanup                           │
-│  - POSIX liveness guard                                      │
-└─────────────────────────┬───────────────────────────────────┘
-                          │
-                          ▼
-┌─────────────────────────────────────────────────────────────┐
-│                    CSV Collection                           │
-│  - Collect successful CSV files                             │
-│  - Filter failed instances                                  │
-└─────────────────────────┬───────────────────────────────────┘
-                          │
-                          ▼
-┌─────────────────────────────────────────────────────────────┐
-│                 Charts Module (charts.py)                    │
-│  - sbk-charts invocation                                     │
-│  - AI parameter handling                                    │
-│  - Excel report generation                                   │
-└─────────────────────────┬───────────────────────────────────┘
-                          │
-                          ▼
-┌─────────────────────────────────────────────────────────────┐
-│             System Info Module (system_info.py)              │
-│  - CPU, RAM, OS collection                                   │
-│  - Hardware information                                     │
-└─────────────────────────┬───────────────────────────────────┘
-                          │
-                          ▼
-┌─────────────────────────────────────────────────────────────┐
-│                    Excel Output                              │
-│  - Performance charts                                       │
-│  - AI analytics                                             │
-│  - System information sheet                                 │
-└─────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TB
+    User["User input<br/>Benchmark YAML + sbk-config.env"]
+
+    subgraph Bootstrap["Self-bootstrapping application"]
+        Launcher["sbk-analytics<br/>Platform dispatch"]
+        Runtime["sbk-analytics.sh<br/>Verified uv + managed Python"]
+    end
+
+    subgraph Orchestration["Analytics orchestration"]
+        CLI["cli.py<br/>Arguments, logging, workflow"]
+        Config["config.py + sbk_contract.py<br/>Parse, normalize, validate"]
+        Properties["properties.py<br/>Release and local-package settings"]
+        Resolver["releases.py<br/>Resolve JDK, SBK, and sbk-charts"]
+        Generator["yaml_gen.py<br/>Generate sbkArgs / sbkGemArgs YAML"]
+        Runner["runner.py<br/>Serial or parallel SBK execution"]
+        Processes["processes.py<br/>Managed process trees"]
+        CSV["Successful CSV results<br/>Exit code 0 + non-empty file"]
+        Charts["charts.py<br/>Single sbk-charts invocation"]
+        SystemInfo["system_info.py<br/>Host and remote system data"]
+        Report["Excel report<br/>Charts, analysis, system sheet"]
+    end
+
+    subgraph Managed["Resolved dependencies"]
+        JDK["JDK<br/>Installed, cached, or downloaded"]
+        SBK["SBK<br/>Local or managed release"]
+        SBKCharts["sbk-charts<br/>Local or isolated managed environment"]
+    end
+
+    Policy["policy.py<br/>Immutable runtime policy and artifact metadata"]
+
+    User --> Launcher --> Runtime --> CLI
+    User --> Config
+    User --> Properties
+    CLI --> Config
+    CLI --> Properties --> Resolver
+    Config --> Generator
+    Resolver --> JDK
+    Resolver --> SBK
+    JDK --> Runner
+    SBK --> Runner
+    Generator --> Runner --> Processes --> CSV
+    CSV -->|At least one usable input| SBKCharts --> Charts
+    CSV --> Charts --> Report
+    SystemInfo --> Report
+    Policy -. shared policy .-> CLI
+    Policy -.-> Resolver
+    Policy -.-> Runner
+    Policy -.-> Processes
 ```
 
 ## Component Interactions
 
 ### 1. Configuration Flow
-```
-User YAML → cli.py → config.py → OrchestratorConfig
-sbk-config.env → properties.py → releases.py
+```mermaid
+flowchart LR
+    YAML["Benchmark YAML"] --> CLI["cli.py"] --> Config["config.py"]
+    Config --> Contract["sbk_contract.py"] --> Model["OrchestratorConfig"]
+    Env["sbk-config.env"] --> Properties["properties.py"] --> Versions["Versions"]
 ```
 
 ### 2. Dependency Resolution Flow
-```
-releases.py → ensure_sbk() → local SBK or locked/staged cache download
-releases.py → ensure_jdk() → installed JDK or locked/staged cache download
-usable CSVs → ensure_sbk_charts() → local, conda, or locked/staged cache
+```mermaid
+flowchart TB
+    Resolver["releases.py"]
+
+    Resolver --> EnsureSBK["ensure_sbk()"]
+    EnsureSBK --> LocalSBK{"Local SBK configured?"}
+    LocalSBK -->|Yes| ValidateSBK["Validate local executables"]
+    LocalSBK -->|No| CachedSBK{"Complete managed cache?"}
+    CachedSBK -->|Yes| ReuseSBK["Reuse cached SBK"]
+    CachedSBK -->|No| DownloadSBK["Lock, download, validate, publish"]
+
+    Resolver --> EnsureJDK["ensure_jdk()"]
+    EnsureJDK --> ExistingJDK{"Matching JDK available?"}
+    ExistingJDK -->|Yes| ReuseJDK["Use installed or cached JDK"]
+    ExistingJDK -->|No| DownloadJDK["Download and cache Temurin"]
+
+    CSV["At least one successful CSV"] --> EnsureCharts["ensure_sbk_charts()"]
+    EnsureCharts --> LocalCharts{"Local charts selected?"}
+    LocalCharts -->|Yes| ValidateCharts["Validate local command"]
+    LocalCharts -->|No| CachedCharts{"Complete charts cache?"}
+    CachedCharts -->|Yes| ReuseCharts["Reuse isolated environment"]
+    CachedCharts -->|No| InstallCharts["Verify source and install"]
 ```
 
 Explicit local SBK validation happens before JDK resolution. sbk-charts is
@@ -147,30 +117,57 @@ published only after executable validation and metadata creation. Directory
 publication is atomic and coordinated by a per-version lock.
 
 ### 3. Execution Flow
-```
-OrchestratorConfig → yaml_gen.py → SBK YAML files
-SBK YAML files → runner.py → SBK instances
-SBK instances → CSV files
-CSV files → charts.py → sbk-charts → Excel report
+```mermaid
+flowchart LR
+    Config["OrchestratorConfig"] --> Generator["yaml_gen.py"]
+    Generator --> Jobs["Per-instance SBK YAML"]
+    Jobs --> Runner["runner.py"]
+    Runner --> Local["sbk-yal"]
+    Runner --> Gem["sbk-gem-yal"]
+    Local --> Results["RunResult collection"]
+    Gem --> Results
+    Results --> Filter{"Exit code 0 and<br/>non-empty CSV?"}
+    Filter -->|Yes| CSV["Usable CSV inputs"]
+    Filter -->|No| Diagnostics["Preserve logs and partial files<br/>Mark instance failed"]
+    CSV --> Charts["charts.py → sbk-charts"] --> Excel["Excel report"]
 ```
 
 ### 4. Post-Processing Flow
-```
-Excel report → system_info.py → System sheet
-System sheet → Final Excel output
+```mermaid
+flowchart LR
+    Excel["sbk-charts Excel report"] --> Collector["system_info.py"]
+    Local["Local host details"] --> Collector
+    Remote["Configured remote-node details"] --> Collector
+    Collector --> Sheet["System sheet"] --> Final["Final Excel output"]
 ```
 
 ### 5. Process Lifecycle Flow
-```
-cli.py signal context → runner.py / charts.py → managed process tree
-catchable signal → workload-specific cleanup → TERM → 3 s grace → KILL
-parent death → liveness-pipe EOF → independent guard → TERM/KILL group
+```mermaid
+flowchart TB
+    CLI["cli.py signal context"] --> Workload["runner.py / charts.py"]
+    Workload --> Managed["Managed process group"]
+    Managed --> Normal{"How does execution end?"}
+
+    Normal -->|Normal completion| Status["Trust native exit status<br/>Remove remaining descendants"]
+    Normal -->|Catchable signal| Kind{"SBK-GEM?"}
+    Kind -->|No| Term["TERM process group"] --> Grace["Standard grace"] --> Force{"Still running?"}
+    Kind -->|Yes| GemTerm["TERM SBK-GEM group"] --> Native["Allow native remote cleanup<br/>30-second grace"] --> GemRunning{"Still running?"}
+    GemRunning -->|No| Done["Cleanup complete"]
+    GemRunning -->|Yes| Emergency["Emergency SSH cleanup"] --> Kill["KILL local process group"]
+    Force -->|No| Done
+    Force -->|Yes| Kill
+
+    ParentDeath["Uncatchable parent death"] --> EOF["Liveness pipe closes"]
+    EOF --> Guard["Independent process guard"] --> GuardTerm["TERM, then KILL process group"]
 ```
 
 Every SBK and sbk-charts invocation is registered until its complete process
 tree exits. Normal wrapper exit also triggers removal of any remaining
-descendants in its workload group. Catchable sbk-gem interruptions retain best-effort remote SSH
-cleanup; no local mechanism can initiate new remote cleanup after SIGKILL.
+descendants in its workload group. SBK-GEM owns normal deployment,
+benchmark timing, failure reporting, and remote cleanup. Catchable GEM
+interruptions allow native cleanup first and use broad remote SSH cleanup only
+as an emergency fallback; no local mechanism can initiate new remote cleanup
+after SIGKILL.
 
 ## Key Design Decisions
 
@@ -223,28 +220,40 @@ cleanup; no local mechanism can initiate new remote cleanup after SIGKILL.
 
 ## Data Flow
 
-### Configuration Data
-```
-YAML config → OrchestratorConfig object
-sbk-config.env → Properties dict
-```
+```mermaid
+flowchart LR
+    subgraph Inputs
+        ConfigYAML["Benchmark YAML"]
+        PropertiesFile["sbk-config.env"]
+    end
 
-### Execution Data
-```
-YAML files → SBK instances → CSV files
-CSV files → sbk-charts → Excel report
-```
+    subgraph RuntimeModels["Validated runtime models"]
+        ConfigModel["OrchestratorConfig"]
+        VersionsModel["Versions"]
+    end
 
-### System Data
-```
-System info → System sheet → Excel report
+    subgraph BenchmarkData["Benchmark data"]
+        GeneratedYAML["Generated SBK YAML"]
+        SBKRun["SBK instances"]
+        CSV["Successful CSV files"]
+    end
+
+    subgraph ReportData["Report data"]
+        Charts["Performance charts and analysis"]
+        System["System information"]
+        Excel["Final Excel report"]
+    end
+
+    ConfigYAML --> ConfigModel --> GeneratedYAML --> SBKRun --> CSV --> Charts --> Excel
+    PropertiesFile --> VersionsModel --> SBKRun
+    System --> Excel
 ```
 
 ## Error Handling Strategy
 
 ### Graceful Degradation
 - Failed SBK instances don't stop execution
-- Partial CSV collection still triggers sbk-charts
+- Only successful, non-empty CSV results are sent to sbk-charts
 - Missing dependencies trigger auto-download
 
 ### Error Propagation
@@ -271,8 +280,8 @@ System info → System sheet → Excel report
 - Single sbk-charts invocation
 
 ### Resource Management
-- Hung JVM detection and cleanup
-- Process monitoring
+- SBK-native benchmark lifecycle and authoritative completion status
+- Managed process-tree and parent-death cleanup
 - Resource cleanup on exit
 
 ## Security Considerations
