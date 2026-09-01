@@ -36,6 +36,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   grace before analytics force-stops only its owned local process group.
 - Made workload guard/registry establishment fail-closed and propagated a
   per-invocation run ID to every locally owned child process.
+- Added debug diagnostics for restricted process-environment inspection and
+  documented fail-closed registry availability and schema quarantine behavior.
 - Kept managed sbk-charts isolated from application and active Conda/venv
   environments, and removed the unused Conda dependency-source status.
 - Require both exit code zero and a non-empty CSV before charting an SBK run.

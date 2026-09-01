@@ -174,10 +174,15 @@ def _identity_matches(
                     ) == run_id
                 ):
                     return True
-            except (psutil.Error, OSError):
+            except (psutil.Error, OSError) as exc:
                 # Same-user environment inspection may still be restricted on
                 # hardened hosts; retain the recorded command fallback.
-                pass
+                log.debug(
+                    "could not read lifecycle run ID for pid=%s; using "
+                    "recorded command identity: %s",
+                    pid,
+                    exc,
+                )
         if command:
             expected = Path(command[0]).name
             actual = process.cmdline()
@@ -237,8 +242,15 @@ def _group_run_identity_matches(pgid: int, run_id: str) -> bool:
                 != run_id
             ):
                 return False
-        except (psutil.Error, OSError):
+        except (psutil.Error, OSError) as exc:
             # Ambiguous ownership must never result in a signal.
+            log.debug(
+                "could not verify lifecycle run ID for process-group "
+                "member pid=%s pgid=%s; leaving the group untouched: %s",
+                process.pid,
+                pgid,
+                exc,
+            )
             return False
     return matched
 

@@ -938,6 +938,12 @@ when every remaining live member carries that ownership ID; ambiguous records
 are quarantined instead of risking an unrelated process. `deps status` reports
 this registry without modifying it.
 
+Lifecycle record schemas are deliberately not migrated automatically. After a
+future schema change, records written by an unsupported schema are quarantined
+as `.unresolved` because they may not contain enough identity evidence for safe
+termination. Environment-inspection restrictions are visible with `-vv`; they
+cause ambiguous leaderless groups to be preserved, never signalled.
+
 ```mermaid
 stateDiagram-v2
     [*] --> Registered: workload + mandatory guard started

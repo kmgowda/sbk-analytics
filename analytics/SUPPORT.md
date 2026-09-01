@@ -90,6 +90,15 @@ If you're new to sbk-analytics, start with:
   run global remote `pkill` commands because they can stop unrelated workloads
 - Set `SBK_ANALYTICS_LIFECYCLE_FOLDER` only when the default per-user state
   directory is unsuitable; the folder contains no GEM credentials
+- The lifecycle registry is a required safety dependency. A full filesystem,
+  an unavailable mount, or an unwritable registry directory aborts workload
+  startup so SBK or sbk-charts never runs without durable ownership tracking.
+  Restore free space and write access, or point
+  `SBK_ANALYTICS_LIFECYCLE_FOLDER` to a private writable directory
+- Unsupported lifecycle-record schemas are quarantined as `.unresolved`
+  rather than migrated or used to signal a possibly unrelated process. Use
+  `-vv` to distinguish restricted process-environment inspection from an
+  actual ownership mismatch
 
 **Problem**: `cleanup: on-success` did not remove benchmark data
 - Cleanup intentionally supports only `class: file` and its `file`/`fname`

@@ -20,8 +20,15 @@ system-info collector. Immutable typed policy groups centralize values that
 cross module boundaries, including dependency layouts/provenance, executable
 and environment names, configuration aliases, SBK option contracts,
 cache/lifecycle/diagnostic schemas, native command interfaces, units, status
-vocabulary, and timeouts. `sbk-config.env` remains the operator-controlled source for release
-version pins and local dependency selections.
+vocabulary, and timeouts. `sbk-config.env` remains the operator-controlled
+source for release version pins and local dependency selections.
+
+Lifecycle schemas intentionally fail closed. Records from unsupported schema
+versions are quarantined instead of migrated automatically, because an older
+record may lack the process identity evidence required for safe termination.
+Restricted access to a process environment is logged at debug level and leaves
+ambiguous leaderless groups untouched.
+
 The native launchers load their smaller pre-Python policy boundary from
 `sbk-bootstrap.env`, because `analytics.policy` cannot be imported until a
 compatible interpreter and environment exist.

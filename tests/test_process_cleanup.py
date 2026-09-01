@@ -15,7 +15,13 @@ import psutil
 from analytics.charts import run_sbk_charts
 from analytics.config import OrchestratorConfig
 from analytics.errors import LifecycleError
-from analytics.lifecycle import current_run_id, inspect_records, reconcile_stale_records
+from analytics.lifecycle import (
+    _group_run_identity_matches,
+    _identity_matches,
+    current_run_id,
+    inspect_records,
+    reconcile_stale_records,
+)
 from analytics.policy import RUNTIME_POLICY
 from analytics.processes import (
     ProcessExit,
@@ -175,6 +181,42 @@ class ForcedParentExitTests(unittest.TestCase):
 
 
 class ManagedProcessTests(unittest.TestCase):
+    def test_identity_environment_denial_logs_command_fallback(self):
+        process = mock.Mock()
+        process.is_running.return_value = True
+        process.status.return_value = psutil.STATUS_RUNNING
+        process.create_time.return_value = 123.0
+        process.environ.side_effect = psutil.AccessDenied(pid=4321)
+        process.cmdline.return_value = ["/opt/sbk/bin/sbk-yal", "-f", "run.yml"]
+        with mock.patch(
+            "analytics.lifecycle.psutil.Process", return_value=process
+        ), self.assertLogs("analytics.lifecycle", level="DEBUG") as logs:
+            matched = _identity_matches(
+                4321,
+                123.0,
+                command=["/opt/sbk/bin/sbk-yal", "-f", "run.yml"],
+                run_id="recorded-run",
+            )
+        self.assertTrue(matched)
+        self.assertIn("using recorded command identity", "\n".join(logs.output))
+
+    def test_group_environment_denial_logs_ambiguous_ownership(self):
+        process = mock.Mock()
+        process.pid = 4321
+        process.info = {
+            RUNTIME_POLICY.lifecycle.process_status_attribute:
+                psutil.STATUS_RUNNING,
+        }
+        process.environ.side_effect = psutil.AccessDenied(pid=process.pid)
+        with mock.patch(
+            "analytics.lifecycle.psutil.process_iter", return_value=[process]
+        ), mock.patch(
+            "analytics.lifecycle.os.getpgid", return_value=9876
+        ), self.assertLogs("analytics.lifecycle", level="DEBUG") as logs:
+            matched = _group_run_identity_matches(9876, "recorded-run")
+        self.assertFalse(matched)
+        self.assertIn("leaving the group untouched", "\n".join(logs.output))
+
     def test_guard_start_failure_is_fail_closed(self):
         child = subprocess.Popen(
             [sys.executable, "-c", "import time; time.sleep(60)"],
@@ -415,6 +457,29 @@ class ManagedProcessTests(unittest.TestCase):
             finally:
                 os.killpg(process.pid, signal.SIGKILL)
                 process.wait(timeout=5)
+
+    def test_unsupported_registry_schema_is_quarantined(self):
+        with tempfile.TemporaryDirectory() as directory:
+            registry = Path(directory) / "runs"
+            record = registry / "old-schema.json"
+            registry.mkdir(parents=True)
+            record.write_text(
+                json.dumps({
+                    RUNTIME_POLICY.lifecycle.schema_field:
+                        RUNTIME_POLICY.lifecycle.schema_version + 1,
+                }),
+                encoding="utf-8",
+            )
+            with mock.patch.dict(
+                os.environ,
+                {RUNTIME_POLICY.environment.lifecycle_folder: str(registry)},
+            ):
+                summary = reconcile_stale_records()
+            self.assertEqual(summary["unresolved"], 1)
+            self.assertFalse(record.exists())
+            self.assertTrue(
+                record.with_suffix(".json.unresolved").is_file()
+            )
 
     def test_permission_error_during_group_signal_is_best_effort(self):
         with mock.patch(
