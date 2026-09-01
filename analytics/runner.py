@@ -182,9 +182,10 @@ def _lifecycle_metadata(
     class_name: str, yml_path: Path, *, is_gem: bool
 ) -> dict[str, object]:
     """Return credential-free ownership details for durable diagnostics."""
+    lifecycle = RUNTIME_POLICY.lifecycle
     metadata: dict[str, object] = {
-        "instance": class_name,
-        "yaml": str(yml_path),
+        lifecycle.instance_metadata_field: class_name,
+        lifecycle.yaml_metadata_field: str(yml_path),
     }
     if is_gem:
         params, _ = _read_yml(yml_path)
@@ -196,8 +197,8 @@ def _lifecycle_metadata(
             for separator in (",", "\n", "\t"):
                 value = value.replace(separator, " ")
             nodes = [node for node in value.split() if node]
-        metadata["remote_nodes"] = nodes
-        metadata["remote_cleanup_owner"] = RUNTIME_POLICY.lifecycle.gem_role
+        metadata[lifecycle.remote_nodes_metadata_field] = nodes
+        metadata[lifecycle.remote_owner_metadata_field] = lifecycle.gem_role
     return metadata
 
 

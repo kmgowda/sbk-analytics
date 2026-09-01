@@ -323,7 +323,12 @@ def child_process_cleanup(*, reconcile: bool = True) -> Iterator[None]:
     try:
         if reconcile:
             summary = reconcile_stale_records()
-            if summary["cleaned"] or summary["expired"] or summary["unresolved"]:
+            lifecycle = RUNTIME_POLICY.lifecycle
+            if (
+                summary[lifecycle.cleaned_field]
+                or summary[lifecycle.expired_field]
+                or summary[lifecycle.unresolved_field]
+            ):
                 log.info("lifecycle reconciliation: %s", summary)
         yield
     finally:

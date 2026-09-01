@@ -158,7 +158,10 @@ def load_config(path: str | Path) -> OrchestratorConfig:
         raise ValueError(f"{p}: expected top-level mapping, got {type(raw).__name__}")
 
     mode = str(
-        _first(raw, "mode", default=CONFIGURATION_POLICY.default_mode)
+        _first(
+            raw, *CONFIGURATION_POLICY.mode_keys,
+            default=CONFIGURATION_POLICY.default_mode,
+        )
     ).strip().lower() or CONFIGURATION_POLICY.default_mode
     if mode not in CONFIGURATION_POLICY.valid_modes:
         raise ValueError(
@@ -167,12 +170,15 @@ def load_config(path: str | Path) -> OrchestratorConfig:
 
     workdir = str(
         _first(
-            raw, "workdir", "work_dir", "work-dir",
+            raw, *CONFIGURATION_POLICY.workdir_keys,
             default=CONFIGURATION_POLICY.default_workdir,
         )
     ).strip() or CONFIGURATION_POLICY.default_workdir
     cleanup = str(
-        _first(raw, "cleanup", default=CONFIGURATION_POLICY.default_cleanup)
+        _first(
+            raw, *CONFIGURATION_POLICY.cleanup_keys,
+            default=CONFIGURATION_POLICY.default_cleanup,
+        )
     ).strip().lower()
     if cleanup not in CONFIGURATION_POLICY.valid_cleanup:
         raise ValueError(
@@ -180,18 +186,22 @@ def load_config(path: str | Path) -> OrchestratorConfig:
             f"got {cleanup!r}"
         )
 
-    sbk_params = _first(raw, "sbk", "sbk_params", "sbk-params", default={}) or {}
+    sbk_params = _first(
+        raw, *CONFIGURATION_POLICY.sbk_group_keys, default={}
+    ) or {}
     if not isinstance(sbk_params, dict):
         raise ValueError("'sbk' must be a mapping of SBK parameters")
 
-    classes = _first(raw, "classes", "class_list", "class-list", default=[]) or []
+    classes = _first(
+        raw, *CONFIGURATION_POLICY.classes_keys, default=[]
+    ) or []
     if isinstance(classes, str):
         classes = [c.strip() for c in classes.split(",") if c.strip()]
     if not classes:
         raise ValueError("'classes' must list at least one storage class")
 
     class_params = (
-        _first(raw, "class_params", "class-params", "classparams", default={}) or {}
+        _first(raw, *CONFIGURATION_POLICY.class_params_keys, default={}) or {}
     )
     if not isinstance(class_params, dict):
         raise ValueError("'class_params' must be a mapping of class -> params")
@@ -238,10 +248,11 @@ def _parse_sbk_charts_group(
     import logging
     _log = logging.getLogger(__name__)
 
-    group = _first(raw, "sbk-charts", "sbk_charts", "sbkcharts", default=None)
+    group = _first(
+        raw, *CONFIGURATION_POLICY.charts_group_keys, default=None
+    )
 
-    legacy_keys = ("output", "ai_model", "ai-model", "ai_params", "ai-params",
-                   "chat", "chat_mode")
+    legacy_keys = CONFIGURATION_POLICY.charts_legacy_keys
     has_legacy = any(k in raw for k in legacy_keys)
 
     if group is not None and not isinstance(group, dict):
@@ -260,7 +271,7 @@ def _parse_sbk_charts_group(
     group = group or {}
 
     # reject input-csv specifications -- those are managed by the orchestrator
-    forbidden = ("ifiles", "ifile", "input", "inputs", "-i", "i")
+    forbidden = CONFIGURATION_POLICY.charts_forbidden_input_keys
     for k in forbidden:
         if k in group:
             raise ValueError(
@@ -269,13 +280,15 @@ def _parse_sbk_charts_group(
             )
 
     output = str(
-        _first(group, "output", "ofile", "output_excel", "excel",
-               default=CONFIGURATION_POLICY.default_output)
+        _first(
+            group, *CONFIGURATION_POLICY.charts_output_keys,
+            default=CONFIGURATION_POLICY.default_output,
+        )
     )
 
     ai_model = str(
         _first(
-            group, "ai_model", "ai-model", "ai",
+            group, *CONFIGURATION_POLICY.charts_ai_model_keys,
             default=CONFIGURATION_POLICY.default_ai_model,
         )
     ).strip().lower()
@@ -285,16 +298,20 @@ def _parse_sbk_charts_group(
             f"{CONFIGURATION_POLICY.valid_ai_models}, got {ai_model!r}"
         )
 
-    ai_params = _first(group, "ai_params", "ai-params", "ai_model_params", default={}) or {}
+    ai_params = _first(
+        group, *CONFIGURATION_POLICY.charts_ai_params_keys, default={}
+    ) or {}
     if not isinstance(ai_params, dict):
         raise ValueError("'sbk-charts.ai_params' must be a mapping")
 
     chat = _parse_bool(
-        _first(group, "chat", "chat_mode", "chat-mode", default=False),
+        _first(group, *CONFIGURATION_POLICY.charts_chat_keys, default=False),
         "sbk-charts.chat",
     )
 
-    use_files_raw = _first(group, "use_files", "use-files", "usefiles", default=None)
+    use_files_raw = _first(
+        group, *CONFIGURATION_POLICY.charts_use_files_keys, default=None
+    )
     if use_files_raw is None:
         use_files: list[str] = []
     elif isinstance(use_files_raw, str):
@@ -349,20 +366,30 @@ def _build_instances(
             params.update(class_params.get(class_name, {}) or {})
             name = _unique(_sanitise_name(class_name))
         elif isinstance(entry, dict):
-            class_name = entry.get("class") or entry.get("class_name")
+            class_name = next(
+                (
+                    entry.get(key)
+                    for key in CONFIGURATION_POLICY.instance_class_keys
+                    if entry.get(key)
+                ),
+                None,
+            )
             if not class_name:
                 raise ValueError(
                     f"classes[{idx}]: dict entry must have a 'class:' key"
                 )
             class_name = str(class_name).strip()
             # explicit name overrides auto-numbering
-            explicit_name = entry.get("name")
+            explicit_name = entry.get(CONFIGURATION_POLICY.instance_name_key)
             params = dict(sbk_params)
             # also apply class_params[class] as a base layer if provided
             params.update(class_params.get(class_name, {}) or {})
             # then the entry's own params (everything except 'class'/'name')
             for k, v in entry.items():
-                if k in ("class", "class_name", "name"):
+                if k in (
+                    *CONFIGURATION_POLICY.instance_class_keys,
+                    CONFIGURATION_POLICY.instance_name_key,
+                ):
                     continue
                 params[k] = v
             name = (

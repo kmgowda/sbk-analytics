@@ -115,8 +115,10 @@ def run_sbk_charts(
         stderr=sys.stderr if output_to_stderr else None,
         lifecycle_role=RUNTIME_POLICY.lifecycle.charts_role,
         lifecycle_metadata={
-            "output": str(output_xlsx),
-            "input_count": len(csv_paths),
+            RUNTIME_POLICY.lifecycle.charts_output_metadata_field:
+                str(output_xlsx),
+            RUNTIME_POLICY.lifecycle.charts_input_count_metadata_field:
+                len(csv_paths),
         },
     )
     try:

@@ -116,17 +116,18 @@ def register_process(
     target = path or record_path(pid)
     command = _command_list(args)
     payload = {
-        "schema": LIFECYCLE_POLICY.schema_version,
-        "run_id": _RUN_ID,
-        "controller_pid": os.getpid(),
-        "controller_create_time": _process_create_time(os.getpid()),
-        "pid": pid,
-        "process_create_time": _process_create_time(pid),
-        "pgid": os.getpgid(pid),
-        "role": role,
-        "command": command,
-        "metadata": metadata or {},
-        "created_at": time.time(),
+        LIFECYCLE_POLICY.schema_field: LIFECYCLE_POLICY.schema_version,
+        LIFECYCLE_POLICY.run_id_field: _RUN_ID,
+        LIFECYCLE_POLICY.controller_pid_field: os.getpid(),
+        LIFECYCLE_POLICY.controller_create_time_field:
+            _process_create_time(os.getpid()),
+        LIFECYCLE_POLICY.process_pid_field: pid,
+        LIFECYCLE_POLICY.process_create_time_field: _process_create_time(pid),
+        LIFECYCLE_POLICY.process_group_field: os.getpgid(pid),
+        LIFECYCLE_POLICY.role_field: role,
+        LIFECYCLE_POLICY.command_field: command,
+        LIFECYCLE_POLICY.metadata_field: metadata or {},
+        LIFECYCLE_POLICY.created_at_field: time.time(),
     }
     _atomic_write(target, payload)
     return target
@@ -141,7 +142,10 @@ def _read_record(path: Path) -> dict[str, Any]:
     value = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(value, dict):
         raise ValueError("lifecycle record is not an object")
-    if value.get("schema") != LIFECYCLE_POLICY.schema_version:
+    if (
+        value.get(LIFECYCLE_POLICY.schema_field)
+        != LIFECYCLE_POLICY.schema_version
+    ):
         raise ValueError("unsupported lifecycle record schema")
     return value
 
@@ -195,11 +199,15 @@ def _group_exists(pgid: int) -> bool:
     # workload and cannot be affected by another signal. Treat it as gone so
     # records do not remain unresolved solely because an init process has not
     # reaped a terminated descendant yet.
-    for process in psutil.process_iter(("pid", "status")):
+    for process in psutil.process_iter((
+        LIFECYCLE_POLICY.process_id_attribute,
+        LIFECYCLE_POLICY.process_status_attribute,
+    )):
         try:
             if (
                 os.getpgid(process.pid) == pgid
-                and process.info["status"] != psutil.STATUS_ZOMBIE
+                and process.info[LIFECYCLE_POLICY.process_status_attribute]
+                != psutil.STATUS_ZOMBIE
             ):
                 return True
         except (psutil.NoSuchProcess, ProcessLookupError):
@@ -212,11 +220,15 @@ def _group_exists(pgid: int) -> bool:
 def _group_run_identity_matches(pgid: int, run_id: str) -> bool:
     """Confirm every visible member of a leaderless group belongs to one run."""
     matched = False
-    for process in psutil.process_iter(("pid", "status")):
+    for process in psutil.process_iter((
+        LIFECYCLE_POLICY.process_id_attribute,
+        LIFECYCLE_POLICY.process_status_attribute,
+    )):
         try:
             if (
                 os.getpgid(process.pid) != pgid
-                or process.info["status"] == psutil.STATUS_ZOMBIE
+                or process.info[LIFECYCLE_POLICY.process_status_attribute]
+                == psutil.STATUS_ZOMBIE
             ):
                 continue
             matched = True
@@ -273,111 +285,136 @@ def inspect_records() -> dict[str, Any]:
             try:
                 record = _read_record(path)
                 controller_active = _identity_matches(
-                    int(record["controller_pid"]),
-                    float(record["controller_create_time"]),
+                    int(record[LIFECYCLE_POLICY.controller_pid_field]),
+                    float(record[LIFECYCLE_POLICY.controller_create_time_field]),
                 )
                 process_active = _identity_matches(
-                    int(record["pid"]),
-                    float(record["process_create_time"]),
-                    pgid=int(record["pgid"]),
-                    command=record.get("command"),
-                    run_id=record.get("run_id"),
+                    int(record[LIFECYCLE_POLICY.process_pid_field]),
+                    float(record[LIFECYCLE_POLICY.process_create_time_field]),
+                    pgid=int(record[LIFECYCLE_POLICY.process_group_field]),
+                    command=record.get(LIFECYCLE_POLICY.command_field),
+                    run_id=record.get(LIFECYCLE_POLICY.run_id_field),
                 )
-                group_active = _group_exists(int(record["pgid"]))
+                group_active = _group_exists(
+                    int(record[LIFECYCLE_POLICY.process_group_field])
+                )
                 records.append({
-                    "run_id": record.get("run_id"),
-                    "role": record.get("role"),
-                    "pid": record.get("pid"),
-                    "pgid": record.get("pgid"),
-                    "controller_pid": record.get("controller_pid"),
-                    "controller_active": controller_active,
-                    "process_active": process_active,
-                    "group_active": group_active,
-                    "metadata": record.get("metadata") or {},
+                    LIFECYCLE_POLICY.run_id_field:
+                        record.get(LIFECYCLE_POLICY.run_id_field),
+                    LIFECYCLE_POLICY.role_field:
+                        record.get(LIFECYCLE_POLICY.role_field),
+                    LIFECYCLE_POLICY.process_pid_field:
+                        record.get(LIFECYCLE_POLICY.process_pid_field),
+                    LIFECYCLE_POLICY.process_group_field:
+                        record.get(LIFECYCLE_POLICY.process_group_field),
+                    LIFECYCLE_POLICY.controller_pid_field:
+                        record.get(LIFECYCLE_POLICY.controller_pid_field),
+                    LIFECYCLE_POLICY.controller_active_field: controller_active,
+                    LIFECYCLE_POLICY.process_active_field: process_active,
+                    LIFECYCLE_POLICY.group_active_field: group_active,
+                    LIFECYCLE_POLICY.metadata_field:
+                        record.get(LIFECYCLE_POLICY.metadata_field) or {},
                 })
             except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError) as exc:
-                records.append({"record": str(path), "error": str(exc)})
+                records.append({
+                    LIFECYCLE_POLICY.record_field: str(path),
+                    LIFECYCLE_POLICY.error_field: str(exc),
+                })
     unresolved = (
         len(list(root.glob(f"*{LIFECYCLE_POLICY.unresolved_suffix}")))
         if root.is_dir() else 0
     )
     return {
-        "registry": str(root),
-        "records": records,
-        "active": sum(1 for item in records if item.get("controller_active")),
-        "stale": sum(
+        LIFECYCLE_POLICY.registry_field: str(root),
+        LIFECYCLE_POLICY.records_field: records,
+        LIFECYCLE_POLICY.active_field: sum(
             1 for item in records
-            if not item.get("controller_active")
-            and (item.get("process_active") or item.get("group_active"))
+            if item.get(LIFECYCLE_POLICY.controller_active_field)
         ),
-        "unresolved": unresolved,
+        LIFECYCLE_POLICY.stale_field: sum(
+            1 for item in records
+            if not item.get(LIFECYCLE_POLICY.controller_active_field)
+            and (
+                item.get(LIFECYCLE_POLICY.process_active_field)
+                or item.get(LIFECYCLE_POLICY.group_active_field)
+            )
+        ),
+        LIFECYCLE_POLICY.unresolved_field: unresolved,
     }
 
 
 def reconcile_stale_records() -> dict[str, int]:
     """Clean only verified workloads whose recorded controller has vanished."""
     root = registry_root()
-    summary = {"active": 0, "cleaned": 0, "expired": 0, "unresolved": 0}
+    summary = {
+        LIFECYCLE_POLICY.active_field: 0,
+        LIFECYCLE_POLICY.cleaned_field: 0,
+        LIFECYCLE_POLICY.expired_field: 0,
+        LIFECYCLE_POLICY.unresolved_field: 0,
+    }
     if not root.is_dir():
         return summary
     for path in sorted(root.glob(f"*{LIFECYCLE_POLICY.record_suffix}")):
         try:
             record = _read_record(path)
             if _identity_matches(
-                int(record["controller_pid"]),
-                float(record["controller_create_time"]),
+                int(record[LIFECYCLE_POLICY.controller_pid_field]),
+                float(record[LIFECYCLE_POLICY.controller_create_time_field]),
             ):
-                summary["active"] += 1
+                summary[LIFECYCLE_POLICY.active_field] += 1
                 continue
-            pid = int(record["pid"])
-            pgid = int(record["pgid"])
+            pid = int(record[LIFECYCLE_POLICY.process_pid_field])
+            pgid = int(record[LIFECYCLE_POLICY.process_group_field])
             if not psutil.pid_exists(pid):
                 if _group_exists(pgid):
-                    run_id = str(record.get("run_id") or "")
+                    run_id = str(
+                        record.get(LIFECYCLE_POLICY.run_id_field) or ""
+                    )
                     if run_id and _group_run_identity_matches(pgid, run_id):
                         log.warning(
                             "reconciling leaderless stale %s workload "
                             "run=%s pgid=%s",
-                            record.get("role"), run_id, pgid,
+                            record.get(LIFECYCLE_POLICY.role_field), run_id, pgid,
                         )
                         if _terminate_group(pgid):
                             path.unlink(missing_ok=True)
-                            summary["cleaned"] += 1
+                            summary[LIFECYCLE_POLICY.cleaned_field] += 1
                         else:
                             _quarantine(path, "verified process group survived SIGKILL")
-                            summary["unresolved"] += 1
+                            summary[LIFECYCLE_POLICY.unresolved_field] += 1
                     else:
                         _quarantine(
                             path,
                             "recorded leader exited and remaining group ownership "
                             "could not be verified",
                         )
-                        summary["unresolved"] += 1
+                        summary[LIFECYCLE_POLICY.unresolved_field] += 1
                 else:
                     path.unlink(missing_ok=True)
-                    summary["expired"] += 1
+                    summary[LIFECYCLE_POLICY.expired_field] += 1
                 continue
             if not _identity_matches(
                 pid,
-                float(record["process_create_time"]),
+                float(record[LIFECYCLE_POLICY.process_create_time_field]),
                 pgid=pgid,
-                command=record.get("command"),
-                run_id=record.get("run_id"),
+                command=record.get(LIFECYCLE_POLICY.command_field),
+                run_id=record.get(LIFECYCLE_POLICY.run_id_field),
             ):
                 _quarantine(path, "PID, process-group, or command identity changed")
-                summary["unresolved"] += 1
+                summary[LIFECYCLE_POLICY.unresolved_field] += 1
                 continue
             log.warning(
                 "reconciling stale %s workload run=%s pid=%s pgid=%s",
-                record.get("role"), record.get("run_id"), pid, pgid,
+                record.get(LIFECYCLE_POLICY.role_field),
+                record.get(LIFECYCLE_POLICY.run_id_field), pid, pgid,
             )
             if _terminate_group(pgid):
                 path.unlink(missing_ok=True)
-                summary["cleaned"] += 1
+                summary[LIFECYCLE_POLICY.cleaned_field] += 1
             else:
                 _quarantine(path, "verified process group survived SIGKILL")
-                summary["unresolved"] += 1
+                summary[LIFECYCLE_POLICY.unresolved_field] += 1
         except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError) as exc:
             _quarantine(path, str(exc))
-            summary["unresolved"] += 1
+            summary[LIFECYCLE_POLICY.unresolved_field] += 1
     return summary

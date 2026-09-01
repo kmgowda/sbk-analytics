@@ -63,6 +63,7 @@ from .policy import RUNTIME_POLICY, SBK_ARTIFACT, SBK_CHARTS_ARTIFACT
 DEPENDENCY_POLICY = RUNTIME_POLICY.dependencies
 CACHE_POLICY = RUNTIME_POLICY.cache
 CONFIGURATION_POLICY = RUNTIME_POLICY.configuration
+PROPERTIES_POLICY = RUNTIME_POLICY.properties
 LAYOUT_POLICY = RUNTIME_POLICY.dependency_layout
 
 
@@ -176,47 +177,49 @@ def parse_properties(path: str | Path) -> Versions:
         return None
 
     sbk_url_raw = _get(
-        "sbk.url", "sbk_url", default=SBK_ARTIFACT.repository_url
+        *PROPERTIES_POLICY.sbk_url_keys,
+        default=SBK_ARTIFACT.repository_url,
     )
     sbk_charts_url_raw = _get(
-        "sbk.charts.url", "sbk_charts_url", "sbkcharts.url",
+        *PROPERTIES_POLICY.charts_url_keys,
         default=SBK_CHARTS_ARTIFACT.repository_url,
     )
     sbk_jdk = _get(
-        "sbk.jdk.version", "sbk_jdk_version", "jdk.version", "jdk_version",
+        *PROPERTIES_POLICY.jdk_version_keys,
         default=DEPENDENCY_POLICY.default_jdk_version,
     ).strip()
     
     downloads_folder_raw = _get_optional(
-        "downloads.folder", "downloads_folder"
+        *PROPERTIES_POLICY.downloads_folder_keys
     )
     sbk_local_folder_raw = _get_optional(
-        "sbk.local.folder", "sbk_local_folder"
+        *PROPERTIES_POLICY.sbk_local_folder_keys
     )
     sbk_charts_local_folder_raw = _get_optional(
-        "sbk.charts.local.folder", "sbk_charts_local_folder",
-        "sbkcharts.local.folder",
+        *PROPERTIES_POLICY.charts_local_folder_keys,
     )
     sbk_charts_local_executable_raw = _get_optional(
-        "sbk.charts.local.executable", "sbk_charts_local_executable",
-        "sbkcharts.local.executable",
+        *PROPERTIES_POLICY.charts_local_executable_keys,
     )
     sbk_charts_sha256 = _get_optional(
-        "sbk.charts.sha256", "sbk_charts_sha256", "sbkcharts.sha256",
+        *PROPERTIES_POLICY.charts_sha256_keys,
     )
     if sbk_charts_sha256 is not None:
         sbk_charts_sha256 = sbk_charts_sha256.strip().lower()
-        if not re.fullmatch(r"[0-9a-f]{64}", sbk_charts_sha256):
+        if not re.fullmatch(
+            RUNTIME_POLICY.cache_metadata.sha256_pattern,
+            sbk_charts_sha256,
+        ):
             raise ValueError(
                 "sbk-charts.sha256 must contain exactly 64 hexadecimal characters"
             )
     jdk_folder_raw = _get(
-        "sbk.jdk.folder", "sbk_jdk_folder", "jdk.folder", "jdk_folder",
+        *PROPERTIES_POLICY.jdk_folder_keys,
         default=CACHE_POLICY.default_jdk_folder,
     )
     
     ssl_verify_raw = _get(
-        "ssl.verify", "ssl_verify", "verify", "verify.ssl",
+        *PROPERTIES_POLICY.ssl_verify_keys,
         default=str(DEPENDENCY_POLICY.default_ssl_verify).lower(),
     )
     bool_values = {
@@ -229,7 +232,7 @@ def parse_properties(path: str | Path) -> Versions:
         raise ValueError(
             f"ssl.verify must be true or false, got {ssl_verify_raw!r}"
         ) from exc
-    ssl_ca_bundle_raw = _get_optional("ssl.ca.bundle", "ssl_ca_bundle")
+    ssl_ca_bundle_raw = _get_optional(*PROPERTIES_POLICY.ssl_ca_bundle_keys)
 
     def _policy(*aliases: str) -> str:
         value = _get(
@@ -245,9 +248,9 @@ def parse_properties(path: str | Path) -> Versions:
     return Versions(
         # Versions are conditionally required by the CLI only for managed
         # resolution. This permits a minimal local-only file or CLI overrides.
-        sbk=_get("sbk.version", "sbk_version", default=""),
+        sbk=_get(*PROPERTIES_POLICY.sbk_version_keys, default=""),
         sbk_charts=_get(
-            "sbk.charts.version", "sbk_charts_version", "sbkcharts.version",
+            *PROPERTIES_POLICY.charts_version_keys,
             default="",
         ),
         sbk_charts_sha256=sbk_charts_sha256,
@@ -278,6 +281,10 @@ def parse_properties(path: str | Path) -> Versions:
             _resolve_folder(ssl_ca_bundle_raw, p)
             if ssl_ca_bundle_raw is not None else None
         ),
-        sbk_version_policy=_policy("sbk.version.policy"),
-        sbk_charts_version_policy=_policy("sbk.charts.version.policy"),
+        sbk_version_policy=_policy(
+            *PROPERTIES_POLICY.sbk_version_policy_keys
+        ),
+        sbk_charts_version_policy=_policy(
+            *PROPERTIES_POLICY.charts_version_policy_keys
+        ),
     )

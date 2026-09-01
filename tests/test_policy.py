@@ -130,6 +130,43 @@ class PolicyTests(unittest.TestCase):
             "nodes",
         )
 
+    def test_cross_subsystem_schemas_are_centralized(self):
+        lifecycle = RUNTIME_POLICY.lifecycle
+        lifecycle_fields = {
+            lifecycle.schema_field,
+            lifecycle.run_id_field,
+            lifecycle.controller_pid_field,
+            lifecycle.process_pid_field,
+            lifecycle.process_group_field,
+            lifecycle.metadata_field,
+            lifecycle.active_field,
+            lifecycle.stale_field,
+            lifecycle.unresolved_field,
+        }
+        self.assertEqual(len(lifecycle_fields), 9)
+        self.assertEqual(
+            len(RUNTIME_POLICY.system_info.columns),
+            len(RUNTIME_POLICY.system_info.column_widths),
+        )
+        self.assertIn(
+            RUNTIME_POLICY.sbk_contract.cleanup_option,
+            RUNTIME_POLICY.sbk_contract.gem_only_options,
+        )
+        self.assertIn(
+            RUNTIME_POLICY.properties.sbk_url_keys[0],
+            (ROOT / "sbk-config.env").read_text(),
+        )
+        self.assertEqual(
+            RUNTIME_POLICY.cli.commands,
+            ("run", "deps", "config"),
+        )
+        self.assertEqual(RUNTIME_POLICY.ssh.ssh_command, "ssh")
+        self.assertEqual(RUNTIME_POLICY.ssh.sshpass_environment, "SSHPASS")
+        self.assertEqual(
+            RUNTIME_POLICY.system_info.linux_platform,
+            "Linux",
+        )
+
     def test_shipped_configuration_matches_canonical_metadata(self):
         root_config = parse_properties(ROOT / "sbk-config.env")
         bundled_config = parse_properties(
@@ -211,6 +248,7 @@ class PolicyTests(unittest.TestCase):
 
     def test_policy_consumers_do_not_reintroduce_cross_cutting_literals(self):
         consumers = (
+            "charts.py",
             "cli.py",
             "config.py",
             "lifecycle.py",
@@ -218,6 +256,7 @@ class PolicyTests(unittest.TestCase):
             "properties.py",
             "releases.py",
             "runner.py",
+            "sbk_contract.py",
             "system_info.py",
         )
         forbidden_strings = {
@@ -236,7 +275,63 @@ class PolicyTests(unittest.TestCase):
             RUNTIME_POLICY.environment.lifecycle_run_id,
             RUNTIME_POLICY.sbk_interface.local_arguments_wrapper,
             RUNTIME_POLICY.sbk_interface.gem_arguments_wrapper,
+            RUNTIME_POLICY.environment.source_root,
+            RUNTIME_POLICY.environment.downloads_folder,
+            RUNTIME_POLICY.environment.legacy_cache_folder,
+            RUNTIME_POLICY.environment.sbk_local_folder,
+            RUNTIME_POLICY.environment.charts_local_folder,
+            RUNTIME_POLICY.environment.charts_local_executable,
+            RUNTIME_POLICY.cache_metadata.source_url,
+            RUNTIME_POLICY.cache_metadata.asset,
+            RUNTIME_POLICY.cache_metadata.sha256,
+            RUNTIME_POLICY.cache_metadata.source_sha256,
+            RUNTIME_POLICY.cache_metadata.executables,
+            RUNTIME_POLICY.cache_metadata.detected_major,
+            RUNTIME_POLICY.cache_metadata.installed_at,
+            *RUNTIME_POLICY.configuration.workdir_keys,
+            *RUNTIME_POLICY.configuration.sbk_group_keys,
+            *RUNTIME_POLICY.configuration.classes_keys,
+            *RUNTIME_POLICY.configuration.class_params_keys,
+            *RUNTIME_POLICY.configuration.charts_group_keys,
+            *RUNTIME_POLICY.properties.sbk_url_keys,
+            *RUNTIME_POLICY.properties.charts_url_keys,
+            *RUNTIME_POLICY.properties.jdk_version_keys,
+            *RUNTIME_POLICY.properties.downloads_folder_keys,
+            *RUNTIME_POLICY.properties.sbk_local_folder_keys,
+            *RUNTIME_POLICY.properties.charts_local_folder_keys,
+            *RUNTIME_POLICY.properties.charts_local_executable_keys,
+            *RUNTIME_POLICY.properties.charts_sha256_keys,
+            *RUNTIME_POLICY.properties.jdk_folder_keys,
+            *RUNTIME_POLICY.properties.ssl_verify_keys,
+            *RUNTIME_POLICY.properties.ssl_ca_bundle_keys,
+            *RUNTIME_POLICY.properties.sbk_version_keys,
+            *RUNTIME_POLICY.properties.charts_version_keys,
+            *(
+                option
+                for option, _guidance
+                in RUNTIME_POLICY.sbk_contract.removed_gem_options
+            ),
+            *RUNTIME_POLICY.sbk_contract.gem_only_options,
+            *RUNTIME_POLICY.system_info.columns,
+            RUNTIME_POLICY.ssh.ssh_command,
+            RUNTIME_POLICY.ssh.sshpass_command,
+            RUNTIME_POLICY.ssh.sshpass_environment,
+            RUNTIME_POLICY.system_info.cpu_info_file,
+            RUNTIME_POLICY.system_info.process_cgroup_file,
+            RUNTIME_POLICY.system_info.self_cgroup_file,
+            RUNTIME_POLICY.system_info.docker_environment_file,
+            RUNTIME_POLICY.system_info.kubernetes_service_environment,
         }
+        forbidden_strings.update(
+            value
+            for value in dataclasses.astuple(RUNTIME_POLICY.lifecycle)
+            if isinstance(value, str)
+        )
+        forbidden_strings.update(
+            value
+            for value in dataclasses.astuple(RUNTIME_POLICY.diagnostics)
+            if isinstance(value, str)
+        )
         violations = []
         for filename in consumers:
             tree = ast.parse((ROOT / "analytics" / filename).read_text())

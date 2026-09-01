@@ -18,29 +18,7 @@ from .policy import RUNTIME_POLICY
 
 log = logging.getLogger(__name__)
 SBK_INTERFACE_POLICY = RUNTIME_POLICY.sbk_interface
-
-_REMOVED_GEM_OPTIONS = {
-    "copyonlydrivers": "use 'fullcopy: false' for compact driver-scoped provisioning",
-    "compactruntimecopy": "use 'fullcopy' with the former value inverted",
-    "compactcopy": "use 'fullcopy' with the former value inverted",
-    "copy": "runtime content is now provisioned automatically",
-    "deleteafter": "use 'packagescleanup' to control stale managed packages",
-    "delete": "invalid managed runtimes are repaired automatically",
-    "sbkcommand": "SBK-GEM now selects the standard launcher itself",
-    "sbkdir": "SBK-GEM now receives its application home from its launcher",
-    "javacopy": "SBK-GEM now provisions or reuses Java automatically",
-    "javaversion": "configure sbk.jdk.version in sbk-config.env instead",
-}
-_GEM_ONLY_OPTIONS = {
-    "gemuser", "gempass", "hostkeycheck", "knownhosts", "gemport", "javadir",
-    "packagescleanup", "fullcopy", "localhost", "sbmport", "sbmsleepms",
-    "totalrecords", "totalthroughput",
-}
-_BOOLEAN_OPTIONS = {"hostkeycheck", "packagescleanup", "fullcopy"}
-_POSITIVE_INTEGER_OPTIONS = {
-    "idletimeoutseconds", "gemport", "sbmport", "totalrecords",
-}
-_NONNEGATIVE_INTEGER_OPTIONS = {"sbmsleepms"}
+SBK_CONTRACT_POLICY = RUNTIME_POLICY.sbk_contract
 
 
 def _key_map(params: dict[str, Any]) -> dict[str, str]:
@@ -101,20 +79,23 @@ def normalize_sbk_params(params: dict[str, Any], *, context: str) -> dict[str, A
     """Return parameters validated against the supported SBK contract."""
     normalized = dict(params)
     keys = _key_map(normalized)
-    if "runtimecleanup" in keys:
-        old_key = keys["runtimecleanup"]
-        if "packagescleanup" in keys:
+    deprecated_cleanup = SBK_CONTRACT_POLICY.deprecated_cleanup_option
+    cleanup = SBK_CONTRACT_POLICY.cleanup_option
+    if deprecated_cleanup in keys:
+        old_key = keys[deprecated_cleanup]
+        if cleanup in keys:
             raise ValueError(
-                f"{context}: use only 'packagescleanup'; 'runtimecleanup' was renamed"
+                f"{context}: use only '{cleanup}'; "
+                f"'{deprecated_cleanup}' was renamed"
             )
-        normalized["packagescleanup"] = normalized.pop(old_key)
+        normalized[cleanup] = normalized.pop(old_key)
         log.warning(
-            "%s: migrated deprecated SBK option 'runtimecleanup' to 'packagescleanup'",
-            context,
+            "%s: migrated deprecated SBK option '%s' to '%s'",
+            context, deprecated_cleanup, cleanup,
         )
         keys = _key_map(normalized)
 
-    for option, guidance in _REMOVED_GEM_OPTIONS.items():
+    for option, guidance in SBK_CONTRACT_POLICY.removed_gem_options:
         if option in keys:
             raise ValueError(
                 f"{context}: SBK removed option '{keys[option]}'; {guidance}"
@@ -130,38 +111,37 @@ def normalize_sbk_params(params: dict[str, Any], *, context: str) -> dict[str, A
     else:
         is_gem = nodes is not None and bool(str(nodes).strip())
     if not is_gem:
-        invalid = sorted(option for option in _GEM_ONLY_OPTIONS if option in keys)
+        invalid = sorted(
+            option for option in SBK_CONTRACT_POLICY.gem_only_options
+            if option in keys
+        )
         if invalid:
             raise ValueError(
                 f"{context}: SBK-GEM option(s) {', '.join(invalid)} require a non-empty 'nodes' value"
             )
 
-    for option in _BOOLEAN_OPTIONS:
+    for option in SBK_CONTRACT_POLICY.boolean_options:
         if option in keys:
             _parse_bool(normalized[keys[option]], option)
-    for option in _POSITIVE_INTEGER_OPTIONS:
+    for option in SBK_CONTRACT_POLICY.positive_integer_options:
         if option in keys:
             _positive_integer(normalized[keys[option]], option)
-    for option in _NONNEGATIVE_INTEGER_OPTIONS:
+    for option in SBK_CONTRACT_POLICY.nonnegative_integer_options:
         if option in keys:
             _nonnegative_integer(normalized[keys[option]], option)
-    if "totalthroughput" in keys:
-        _positive_decimal(normalized[keys["totalthroughput"]], "totalthroughput")
+    for option in SBK_CONTRACT_POLICY.positive_decimal_options:
+        if option in keys:
+            _positive_decimal(normalized[keys[option]], option)
 
-    conflicts = (
-        ("totalrecords", "records"),
-        ("totalrecords", "throughput"),
-        ("totalthroughput", "throughput"),
-    )
-    for left, right in conflicts:
+    for left, right in SBK_CONTRACT_POLICY.mutually_exclusive_options:
         if left in keys and right in keys:
             raise ValueError(
                 f"{context}: SBK options '{left}' and '{right}' are mutually exclusive"
             )
     seconds_option = SBK_INTERFACE_POLICY.seconds_option
     if (
-        "totalrecords" in keys
-        and "totalthroughput" in keys
+        SBK_CONTRACT_POLICY.total_records_option in keys
+        and SBK_CONTRACT_POLICY.total_throughput_option in keys
         and seconds_option in keys
     ):
         try:
@@ -170,6 +150,8 @@ def normalize_sbk_params(params: dict[str, Any], *, context: str) -> dict[str, A
             timed = False
         if timed:
             raise ValueError(
-                f"{context}: 'totalrecords' and 'totalthroughput' cannot both be used with 'seconds'"
+                f"{context}: '{SBK_CONTRACT_POLICY.total_records_option}' and "
+                f"'{SBK_CONTRACT_POLICY.total_throughput_option}' cannot both "
+                f"be used with '{seconds_option}'"
             )
     return normalized

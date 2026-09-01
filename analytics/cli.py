@@ -54,6 +54,12 @@ PROVENANCE_POLICY = RUNTIME_POLICY.provenance
 SBK_INTERFACE_POLICY = RUNTIME_POLICY.sbk_interface
 DISPLAY_POLICY = RUNTIME_POLICY.display
 SSH_POLICY = RUNTIME_POLICY.ssh
+SYSTEM_INFO_POLICY = RUNTIME_POLICY.system_info
+ENVIRONMENT_POLICY = RUNTIME_POLICY.environment
+LIFECYCLE_POLICY = RUNTIME_POLICY.lifecycle
+CACHE_METADATA_POLICY = RUNTIME_POLICY.cache_metadata
+CLI_POLICY = RUNTIME_POLICY.cli
+DIAGNOSTIC_FIELDS = RUNTIME_POLICY.diagnostics
 
 
 def _print_sbk_resolution(install: SbkInstall, version: str) -> None:
@@ -68,7 +74,11 @@ def _print_sbk_resolution(install: SbkInstall, version: str) -> None:
         local_action=PROVENANCE_POLICY.sbk_local_action,
     )
     if install.source is DependencySource.LOCAL:
-        print(f"  detected version : {install.detected_version or 'unknown'}", flush=True)
+        print(
+            "  detected version : "
+            f"{install.detected_version or DISPLAY_POLICY.unknown_value}",
+            flush=True,
+        )
         print(f"  configured version: {version} (policy applies)", flush=True)
     else:
         print(f"  version          : {version}", flush=True)
@@ -85,7 +95,8 @@ def _print_charts_resolution(install: ChartsInstall, version: str) -> None:
     )
     if install.source is DependencySource.LOCAL:
         print(
-            f"  detected version : {install.detected_version or 'unknown'}",
+            "  detected version : "
+            f"{install.detected_version or DISPLAY_POLICY.unknown_value}",
             flush=True,
         )
         print(f"  configured version: {version} (policy applies)", flush=True)
@@ -200,18 +211,25 @@ def _build_system_sources(succeeded) -> list[dict]:
         for node in nodes:
             key = (node, user, port)
             entry = remote_map.setdefault(key, {
-                "kind": "remote",
-                "node": node,
-                "user": user,
-                "password": password,
-                "port": port,
-                "instances": [],
+                SYSTEM_INFO_POLICY.source_kind_field:
+                    SYSTEM_INFO_POLICY.remote_source,
+                SYSTEM_INFO_POLICY.source_node_field: node,
+                SYSTEM_INFO_POLICY.source_user_field: user,
+                SYSTEM_INFO_POLICY.source_password_field: password,
+                SYSTEM_INFO_POLICY.source_port_field: port,
+                SYSTEM_INFO_POLICY.source_instances_field: [],
             })
-            entry["instances"].append(r.class_name)
+            entry[SYSTEM_INFO_POLICY.source_instances_field].append(
+                r.class_name
+            )
 
     sources: list[dict] = []
     if local_instances:
-        sources.append({"kind": "local", "instances": local_instances})
+        sources.append({
+            SYSTEM_INFO_POLICY.source_kind_field:
+                SYSTEM_INFO_POLICY.local_source,
+            SYSTEM_INFO_POLICY.source_instances_field: local_instances,
+        })
     sources.extend(remote_map.values())
     return sources
 
@@ -221,7 +239,7 @@ def _bundled_versions_file() -> Path:
 
     The file lives at the repository root (`<project>/sbk-config.env`).
     """
-    launcher_root = os.environ.get("SBK_ANALYTICS_SOURCE_ROOT")
+    launcher_root = os.environ.get(ENVIRONMENT_POLICY.source_root)
     if launcher_root:
         launcher_file = Path(launcher_root) / "sbk-config.env"
         if launcher_file.is_file():
@@ -246,11 +264,14 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         version=f"{APPLICATION.name} {__version__}",
     )
     p.add_argument(
-        "command", nargs="?", choices=("run", "deps", "config"), default="run",
+        CLI_POLICY.command_destination,
+        nargs="?", choices=CLI_POLICY.commands,
+        default=CLI_POLICY.run_command,
         help="run benchmarks (default), inspect dependencies, or create config",
     )
     p.add_argument(
-        "subcommand", nargs="?", choices=("doctor", "status", "init"),
+        CLI_POLICY.subcommand_destination,
+        nargs="?", choices=CLI_POLICY.subcommands,
         help="deps: doctor/status; config: init",
     )
     p.add_argument(
@@ -291,11 +312,12 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     )
     p.add_argument("--json", action="store_true", help="Also print a JSON summary")
     p.add_argument(
-        "--output", type=Path, default=Path("sbk-config.local.env"),
+        "--output", type=Path, default=Path(CLI_POLICY.local_config_filename),
         help="Output path for 'config init'",
     )
     p.add_argument(
-        "--profile", choices=("local",), default="local",
+        "--profile", choices=(CLI_POLICY.local_profile,),
+        default=CLI_POLICY.local_profile,
         help="Configuration profile for 'config init' (default: local)",
     )
     p.add_argument(
@@ -328,14 +350,19 @@ def _env_path(name: str) -> Path | None:
 
 def _apply_overrides(versions, args):
     """Apply the documented CLI > environment > properties precedence."""
-    sbk_local = args.sbk_local or _env_path("SBK_LOCAL_FOLDER") or versions.sbk_local_folder
+    sbk_local = (
+        args.sbk_local
+        or _env_path(ENVIRONMENT_POLICY.sbk_local_folder)
+        or versions.sbk_local_folder
+    )
     charts_local = (
-        args.sbk_charts_local or _env_path("SBK_CHARTS_LOCAL_FOLDER")
+        args.sbk_charts_local
+        or _env_path(ENVIRONMENT_POLICY.charts_local_folder)
         or versions.sbk_charts_local_folder
     )
     charts_executable = (
         args.sbk_charts_executable
-        or _env_path("SBK_CHARTS_LOCAL_EXECUTABLE")
+        or _env_path(ENVIRONMENT_POLICY.charts_local_executable)
         or versions.sbk_charts_local_executable
     )
     # An explicitly configured properties value intentionally wins over the
@@ -363,33 +390,41 @@ def _tls_verify(versions) -> bool | str:
 
 def _dependency_summary(sbk, charts, versions) -> dict:
     return {
-        "sbk": {"source": sbk.source.value, "home": str(sbk.home),
-                "executable": str(sbk.sbk_yal),
-                "detected_version": sbk.detected_version,
-                "provenance": (
+        DIAGNOSTIC_FIELDS.sbk: {
+                DIAGNOSTIC_FIELDS.source: sbk.source.value,
+                DIAGNOSTIC_FIELDS.home: str(sbk.home),
+                DIAGNOSTIC_FIELDS.executable: str(sbk.sbk_yal),
+                DIAGNOSTIC_FIELDS.detected_version: sbk.detected_version,
+                DIAGNOSTIC_FIELDS.provenance: (
                     sbk.provenance.as_dict() if sbk.provenance else None
                 )},
-        "sbk_charts": {
-            "source": charts.source.value, "home": str(charts.venv_dir),
-            "executable": str(charts.cli),
-            "detected_version": charts.detected_version,
-            "provenance": (
+        DIAGNOSTIC_FIELDS.charts: {
+            DIAGNOSTIC_FIELDS.source: charts.source.value,
+            DIAGNOSTIC_FIELDS.home: str(charts.venv_dir),
+            DIAGNOSTIC_FIELDS.executable: str(charts.cli),
+            DIAGNOSTIC_FIELDS.detected_version: charts.detected_version,
+            DIAGNOSTIC_FIELDS.provenance: (
                 charts.provenance.as_dict() if charts.provenance else None
             ),
         },
-        "downloads_folder": str(versions.downloads_folder) if versions.downloads_folder else None,
-        "ssl_verify": versions.ssl_verify,
-        "lifecycle": inspect_records(),
+        DIAGNOSTIC_FIELDS.downloads_folder: (
+            str(versions.downloads_folder)
+            if versions.downloads_folder else None
+        ),
+        DIAGNOSTIC_FIELDS.ssl_verify: versions.ssl_verify,
+        DIAGNOSTIC_FIELDS.lifecycle: inspect_records(),
     }
 
 
 def _dependency_summary_sbk(sbk) -> dict:
     return {
-        "source": sbk.source.value,
-        "home": str(sbk.home),
-        "executable": str(sbk.sbk_yal),
-        "detected_version": sbk.detected_version,
-        "provenance": sbk.provenance.as_dict() if sbk.provenance else None,
+        DIAGNOSTIC_FIELDS.source: sbk.source.value,
+        DIAGNOSTIC_FIELDS.home: str(sbk.home),
+        DIAGNOSTIC_FIELDS.executable: str(sbk.sbk_yal),
+        DIAGNOSTIC_FIELDS.detected_version: sbk.detected_version,
+        DIAGNOSTIC_FIELDS.provenance: (
+            sbk.provenance.as_dict() if sbk.provenance else None
+        ),
     }
 
 
@@ -420,51 +455,55 @@ def _dependency_status(versions) -> dict:
         ) else None
     )
     status = {
-        "sbk": {
-            "selection": (
+        DIAGNOSTIC_FIELDS.sbk: {
+            DIAGNOSTIC_FIELDS.selection: (
                 PROVENANCE_POLICY.shared_folder_mode
                 if sbk_shared is not None
                 else PROVENANCE_POLICY.github_release_mode
             ),
-            "configured_local": str(versions.sbk_local_folder)
+            DIAGNOSTIC_FIELDS.configured_local: str(versions.sbk_local_folder)
             if versions.sbk_local_folder else None,
-            "shared_folder": sbk_shared,
-            "repository_url": versions.sbk_url,
-            "release_tag": versions.sbk,
-            "managed_cache": str(sbk_cache),
-            "cache_complete": (
+            DIAGNOSTIC_FIELDS.shared_folder: sbk_shared,
+            DIAGNOSTIC_FIELDS.repository_url: versions.sbk_url,
+            DIAGNOSTIC_FIELDS.release_tag: versions.sbk,
+            DIAGNOSTIC_FIELDS.managed_cache: str(sbk_cache),
+            DIAGNOSTIC_FIELDS.cache_complete: (
                 sbk_cache / CACHE_POLICY.completion_marker
             ).is_file(),
-            "cache_metadata": sbk_metadata or None,
+            DIAGNOSTIC_FIELDS.cache_metadata: sbk_metadata or None,
         },
-        "sbk_charts": {
-            "selection": (
+        DIAGNOSTIC_FIELDS.charts: {
+            DIAGNOSTIC_FIELDS.selection: (
                 PROVENANCE_POLICY.shared_folder_mode
                 if charts_shared is not None
                 else PROVENANCE_POLICY.github_release_mode
             ),
-            "configured_local": str(versions.sbk_charts_local_folder)
+            DIAGNOSTIC_FIELDS.configured_local: str(versions.sbk_charts_local_folder)
             if versions.sbk_charts_local_folder else None,
-            "configured_executable": str(versions.sbk_charts_local_executable)
+            DIAGNOSTIC_FIELDS.configured_executable: str(
+                versions.sbk_charts_local_executable
+            )
             if versions.sbk_charts_local_executable else None,
-            "shared_folder": charts_shared,
-            "repository_url": versions.sbk_charts_url,
-            "release_tag": versions.sbk_charts,
-            "managed_cache": str(charts_cache),
-            "cache_complete": (
+            DIAGNOSTIC_FIELDS.shared_folder: charts_shared,
+            DIAGNOSTIC_FIELDS.repository_url: versions.sbk_charts_url,
+            DIAGNOSTIC_FIELDS.release_tag: versions.sbk_charts,
+            DIAGNOSTIC_FIELDS.managed_cache: str(charts_cache),
+            DIAGNOSTIC_FIELDS.cache_complete: (
                 charts_cache / CACHE_POLICY.completion_marker
             ).is_file(),
-            "cache_metadata": charts_metadata or None,
+            DIAGNOSTIC_FIELDS.cache_metadata: charts_metadata or None,
         },
-        "jdk": {
-            "managed_cache": str(versions.jdk_folder / versions.sbk_jdk),
-            "cache_complete": (
+        DIAGNOSTIC_FIELDS.jdk: {
+            DIAGNOSTIC_FIELDS.managed_cache: str(
+                versions.jdk_folder / versions.sbk_jdk
+            ),
+            DIAGNOSTIC_FIELDS.cache_complete: (
                 versions.jdk_folder / versions.sbk_jdk /
                 CACHE_POLICY.completion_marker
             ).is_file(),
         },
-        "ssl_verify": versions.ssl_verify,
-        "lifecycle": inspect_records(),
+        DIAGNOSTIC_FIELDS.ssl_verify: versions.ssl_verify,
+        DIAGNOSTIC_FIELDS.lifecycle: inspect_records(),
     }
     return status
 
@@ -477,29 +516,57 @@ def _emit_json(stream, payload: dict) -> None:
 def _print_dependency_status(status: dict) -> None:
     """Render the read-only dependency report without opaque nested dicts."""
     print("Dependency status (read-only; use 'deps doctor' for readiness):")
-    for key, label in (("sbk", "SBK"), ("sbk_charts", "sbk-charts")):
+    for key, label in (
+        (DIAGNOSTIC_FIELDS.sbk, SBK_ARTIFACT.display_name),
+        (DIAGNOSTIC_FIELDS.charts, SBK_CHARTS_ARTIFACT.display_name),
+    ):
         item = status[key]
         print(f"\n{label}:")
-        print(f"  selection        : {item['selection']}")
-        if item["selection"] == PROVENANCE_POLICY.shared_folder_mode:
-            shared = item.get("shared_folder") or {}
-            print(f"  configured path  : {shared.get('configured_location')}")
-            print(f"  valid            : {shared.get('valid', False)}")
-            if shared.get("layout"):
-                print(f"  layout           : {shared['layout']}")
-            if shared.get("resolved_location"):
-                print(f"  resolved path    : {shared['resolved_location']}")
-            executable = shared.get("sbk_yal") or shared.get("executable")
+        print(f"  selection        : {item[DIAGNOSTIC_FIELDS.selection]}")
+        if (
+            item[DIAGNOSTIC_FIELDS.selection]
+            == PROVENANCE_POLICY.shared_folder_mode
+        ):
+            shared = item.get(DIAGNOSTIC_FIELDS.shared_folder) or {}
+            print(
+                "  configured path  : "
+                f"{shared.get(DIAGNOSTIC_FIELDS.configured_location)}"
+            )
+            print(
+                "  valid            : "
+                f"{shared.get(DIAGNOSTIC_FIELDS.valid, False)}"
+            )
+            if shared.get(DIAGNOSTIC_FIELDS.layout):
+                print(
+                    "  layout           : "
+                    f"{shared[DIAGNOSTIC_FIELDS.layout]}"
+                )
+            if shared.get(DIAGNOSTIC_FIELDS.resolved_location):
+                print(
+                    "  resolved path    : "
+                    f"{shared[DIAGNOSTIC_FIELDS.resolved_location]}"
+                )
+            executable = (
+                shared.get(DIAGNOSTIC_FIELDS.sbk_yal)
+                or shared.get(DIAGNOSTIC_FIELDS.executable)
+            )
             if executable:
                 print(f"  executable       : {executable}")
-            if shared.get("revision"):
+            if shared.get(DIAGNOSTIC_FIELDS.revision):
                 state = (
                     PROVENANCE_POLICY.dirty_state
-                    if shared.get("dirty") else PROVENANCE_POLICY.clean_state
+                    if shared.get(DIAGNOSTIC_FIELDS.dirty)
+                    else PROVENANCE_POLICY.clean_state
                 )
-                print(f"  Git revision     : {shared['revision']} ({state})")
-            if shared.get("error"):
-                print(f"  error            : {shared['error']}")
+                print(
+                    "  Git revision     : "
+                    f"{shared[DIAGNOSTIC_FIELDS.revision]} ({state})"
+                )
+            if shared.get(DIAGNOSTIC_FIELDS.error):
+                print(
+                    "  error            : "
+                    f"{shared[DIAGNOSTIC_FIELDS.error]}"
+                )
             action = (
                 PROVENANCE_POLICY.sbk_status_action
                 if key == SBK_ARTIFACT.key
@@ -507,27 +574,55 @@ def _print_dependency_status(status: dict) -> None:
             )
             print(f"  status action    : {action}")
         else:
-            print(f"  repository       : {item['repository_url']}")
-            print(f"  release tag      : {item['release_tag']}")
-        print(f"  managed cache    : {item['managed_cache']}")
-        print(f"  cache complete   : {item['cache_complete']}")
-        metadata = item.get("cache_metadata") or {}
-        if metadata.get("asset"):
-            print(f"  cached asset     : {metadata['asset']}")
-        digest = metadata.get("sha256") or metadata.get("source_sha256")
+            print(
+                "  repository       : "
+                f"{item[DIAGNOSTIC_FIELDS.repository_url]}"
+            )
+            print(
+                "  release tag      : "
+                f"{item[DIAGNOSTIC_FIELDS.release_tag]}"
+            )
+        print(
+            "  managed cache    : "
+            f"{item[DIAGNOSTIC_FIELDS.managed_cache]}"
+        )
+        print(
+            "  cache complete   : "
+            f"{item[DIAGNOSTIC_FIELDS.cache_complete]}"
+        )
+        metadata = item.get(DIAGNOSTIC_FIELDS.cache_metadata) or {}
+        asset_field = CACHE_METADATA_POLICY.asset
+        if metadata.get(asset_field):
+            print(f"  cached asset     : {metadata[asset_field]}")
+        digest = (
+            metadata.get(CACHE_METADATA_POLICY.sha256)
+            or metadata.get(CACHE_METADATA_POLICY.source_sha256)
+        )
         if digest:
             print(f"  cached SHA-256   : {digest}")
-    jdk = status["jdk"]
+    jdk = status[DIAGNOSTIC_FIELDS.jdk]
     print("\nJDK:")
-    print(f"  managed cache    : {jdk['managed_cache']}")
-    print(f"  cache complete   : {jdk['cache_complete']}")
-    print(f"\nTLS verification  : {status['ssl_verify']}")
-    lifecycle = status["lifecycle"]
+    print(
+        "  managed cache    : "
+        f"{jdk[DIAGNOSTIC_FIELDS.managed_cache]}"
+    )
+    print(
+        "  cache complete   : "
+        f"{jdk[DIAGNOSTIC_FIELDS.cache_complete]}"
+    )
+    print(
+        "\nTLS verification  : "
+        f"{status[DIAGNOSTIC_FIELDS.ssl_verify]}"
+    )
+    lifecycle = status[DIAGNOSTIC_FIELDS.lifecycle]
     print("\nWorkload lifecycle:")
-    print(f"  registry         : {lifecycle['registry']}")
-    print(f"  active records   : {lifecycle['active']}")
-    print(f"  stale records    : {lifecycle['stale']}")
-    print(f"  unresolved       : {lifecycle['unresolved']}")
+    print(f"  registry         : {lifecycle[LIFECYCLE_POLICY.registry_field]}")
+    print(f"  active records   : {lifecycle[LIFECYCLE_POLICY.active_field]}")
+    print(f"  stale records    : {lifecycle[LIFECYCLE_POLICY.stale_field]}")
+    print(
+        "  unresolved       : "
+        f"{lifecycle[LIFECYCLE_POLICY.unresolved_field]}"
+    )
 
 
 def _init_local_config(output: Path) -> int:
@@ -593,18 +688,33 @@ def _execute(args: argparse.Namespace, json_stream=None) -> int:
     _print_banner()
     _setup_logging(args.verbose)
 
-    if args.command == "config":
-        if args.subcommand != "init":
+    if args.command == CLI_POLICY.configuration_command:
+        if args.subcommand != CLI_POLICY.initialize_subcommand:
             raise ConfigurationError("config requires the 'init' subcommand")
         rc = _init_local_config(args.output)
         _emit_json(json_stream, {
-            "status": "ok", "command": "config init",
-            "output": str(args.output), "exit_code": rc,
+            DIAGNOSTIC_FIELDS.status: CLI_POLICY.success_status,
+            DIAGNOSTIC_FIELDS.command: (
+                f"{CLI_POLICY.configuration_command} "
+                f"{CLI_POLICY.initialize_subcommand}"
+            ),
+            DIAGNOSTIC_FIELDS.output: str(args.output),
+            DIAGNOSTIC_FIELDS.exit_code: rc,
         })
         return rc
-    if args.command == "deps" and args.subcommand not in ("doctor", "status"):
+    if (
+        args.command == CLI_POLICY.dependencies_command
+        and args.subcommand not in (
+            CLI_POLICY.doctor_subcommand,
+            CLI_POLICY.status_subcommand,
+        )
+    ):
         raise ConfigurationError("deps requires the 'doctor' or 'status' subcommand")
-    if args.command == "run" and args.config is None and not args.resolve_only:
+    if (
+        args.command == CLI_POLICY.run_command
+        and args.config is None
+        and not args.resolve_only
+    ):
         raise ConfigurationError("run requires -c / --config")
 
     properties_path = args.properties or _bundled_versions_file()
@@ -626,7 +736,10 @@ def _execute(args: argparse.Namespace, json_stream=None) -> int:
         )
     verify = _tls_verify(versions)
     log.info("using properties file: %s", properties_path)
-    if args.command == "deps" and args.subcommand == "status":
+    if (
+        args.command == CLI_POLICY.dependencies_command
+        and args.subcommand == CLI_POLICY.status_subcommand
+    ):
         status = _dependency_status(versions)
         if json_stream is not None:
             _emit_json(json_stream, status)
@@ -707,7 +820,7 @@ def _execute(args: argparse.Namespace, json_stream=None) -> int:
     log.info("JDK %s home: %s", versions.sbk_jdk, jdk.home)
     print(f"[ok] JDK {versions.sbk_jdk} ready at {jdk.home}", flush=True)
 
-    if args.command == "deps" or args.resolve_only:
+    if args.command == CLI_POLICY.dependencies_command or args.resolve_only:
         charts = ensure_sbk_charts(
             versions.sbk_charts, repo_url=versions.sbk_charts_url,
             source_sha256=versions.sbk_charts_sha256,
@@ -715,12 +828,15 @@ def _execute(args: argparse.Namespace, json_stream=None) -> int:
             local_folder=versions.sbk_charts_local_folder,
             local_executable=versions.sbk_charts_local_executable,
             version_policy=versions.sbk_charts_version_policy,
-            preflight=args.command == "deps" and args.subcommand == "doctor",
+            preflight=(
+                args.command == CLI_POLICY.dependencies_command
+                and args.subcommand == CLI_POLICY.doctor_subcommand
+            ),
         )
         _print_charts_resolution(charts, versions.sbk_charts)
         summary = _dependency_summary(sbk, charts, versions)
-        summary["status"] = "ok"
-        summary["exit_code"] = EXIT_CODES.success
+        summary[DIAGNOSTIC_FIELDS.status] = CLI_POLICY.success_status
+        summary[DIAGNOSTIC_FIELDS.exit_code] = EXIT_CODES.success
         _emit_json(json_stream, summary)
         print("\nDependency check passed.", flush=True)
         return EXIT_CODES.success
@@ -795,11 +911,14 @@ def _execute(args: argparse.Namespace, json_stream=None) -> int:
             flush=True,
         )
         _emit_json(json_stream, {
-            "status": "failed", "exit_code": EXIT_CODES.no_usable_csv,
-            "reason": "no usable CSV input",
-            "sbk": _dependency_summary_sbk(sbk),
-            "successful_instances": [],
-            "failed_instances": [r.class_name for r in failed],
+            DIAGNOSTIC_FIELDS.status: CLI_POLICY.failed_status,
+            DIAGNOSTIC_FIELDS.exit_code: EXIT_CODES.no_usable_csv,
+            DIAGNOSTIC_FIELDS.reason: "no usable CSV input",
+            DIAGNOSTIC_FIELDS.sbk: _dependency_summary_sbk(sbk),
+            DIAGNOSTIC_FIELDS.successful_instances: [],
+            DIAGNOSTIC_FIELDS.failed_instances: [
+                r.class_name for r in failed
+            ],
         })
         return EXIT_CODES.no_usable_csv
 
@@ -843,16 +962,18 @@ def _execute(args: argparse.Namespace, json_stream=None) -> int:
         log.error("sbk-charts exited with rc=%s", rc)
         _emit_json(json_stream, {
             **_dependency_summary(sbk, charts, versions),
-            "status": "failed", "exit_code": rc,
-            "reason": "sbk-charts failed",
+            DIAGNOSTIC_FIELDS.status: CLI_POLICY.failed_status,
+            DIAGNOSTIC_FIELDS.exit_code: rc,
+            DIAGNOSTIC_FIELDS.reason: "sbk-charts failed",
         })
         return rc
     if not output_xlsx.exists():
         log.error("sbk-charts did not produce expected output: %s", output_xlsx)
         _emit_json(json_stream, {
             **_dependency_summary(sbk, charts, versions),
-            "status": "failed", "exit_code": EXIT_CODES.missing_output,
-            "reason": "expected output was not produced",
+            DIAGNOSTIC_FIELDS.status: CLI_POLICY.failed_status,
+            DIAGNOSTIC_FIELDS.exit_code: EXIT_CODES.missing_output,
+            DIAGNOSTIC_FIELDS.reason: "expected output was not produced",
         })
         return EXIT_CODES.missing_output
 
@@ -865,30 +986,36 @@ def _execute(args: argparse.Namespace, json_stream=None) -> int:
         log.error("failed to append system sheet: %s", e)
         _emit_json(json_stream, {
             **_dependency_summary(sbk, charts, versions),
-            "status": "failed", "exit_code": EXIT_CODES.system_info_failure,
-            "reason": "failed to append system sheet",
+            DIAGNOSTIC_FIELDS.status: CLI_POLICY.failed_status,
+            DIAGNOSTIC_FIELDS.exit_code: EXIT_CODES.system_info_failure,
+            DIAGNOSTIC_FIELDS.reason: "failed to append system sheet",
         })
         return EXIT_CODES.system_info_failure
 
     summary = {
             **_dependency_summary(sbk, charts, versions),
-            "status": "ok",
-            "exit_code": EXIT_CODES.success,
-            "output": str(output_xlsx),
-            "successful_instances": [r.class_name for r in succeeded],
-            "failed_instances": [r.class_name for r in failed],
+            DIAGNOSTIC_FIELDS.status: CLI_POLICY.success_status,
+            DIAGNOSTIC_FIELDS.exit_code: EXIT_CODES.success,
+            DIAGNOSTIC_FIELDS.output: str(output_xlsx),
+            DIAGNOSTIC_FIELDS.successful_instances: [
+                r.class_name for r in succeeded
+            ],
+            DIAGNOSTIC_FIELDS.failed_instances: [
+                r.class_name for r in failed
+            ],
     }
     removed: list[Path] = []
-    if cfg.cleanup == "on-success":
+    cleanup_on_success = RUNTIME_POLICY.configuration.cleanup_on_success
+    if cfg.cleanup == cleanup_on_success:
         removed = _cleanup_benchmark_data(cfg, work)
         print(f"Cleanup on success: removed {len(removed)} benchmark data path(s).")
     usage = shutil.disk_usage(work)
-    summary["cleanup"] = {
-        "policy": cfg.cleanup,
-        "removed_paths": [str(path) for path in removed]
-        if cfg.cleanup == "on-success" else [],
+    summary[DIAGNOSTIC_FIELDS.cleanup] = {
+        DIAGNOSTIC_FIELDS.cleanup_policy: cfg.cleanup,
+        DIAGNOSTIC_FIELDS.removed_paths: [str(path) for path in removed]
+        if cfg.cleanup == cleanup_on_success else [],
     }
-    summary["filesystem_free_bytes_after"] = usage.free
+    summary[DIAGNOSTIC_FIELDS.filesystem_free_bytes_after] = usage.free
     _emit_json(json_stream, summary)
     gibibyte = DISPLAY_POLICY.bytes_per_kibibyte ** 3
     print(f"Filesystem free space after run: {usage.free / gibibyte:.2f} GiB")
@@ -902,9 +1029,12 @@ def main(argv: list[str] | None = None) -> int:
     machine_stdout = sys.stdout if args.json else None
     try:
         reconcile = (
-            args.command == "run"
+            args.command == CLI_POLICY.run_command
             or args.resolve_only
-            or (args.command == "deps" and args.subcommand == "doctor")
+            or (
+                args.command == CLI_POLICY.dependencies_command
+                and args.subcommand == CLI_POLICY.doctor_subcommand
+            )
         )
         with child_process_cleanup(reconcile=reconcile):
             if machine_stdout is not None:
@@ -916,9 +1046,11 @@ def main(argv: list[str] | None = None) -> int:
         message = f"terminated by signal {exc.signum}"
         print(f"ERROR: {message}", file=sys.stderr)
         _emit_json(machine_stdout, {
-            "status": "error", "exit_code": exit_code,
-            "error": message, "error_type": exc.__class__.__name__,
-            "signal": exc.signum,
+            DIAGNOSTIC_FIELDS.status: CLI_POLICY.error_status,
+            DIAGNOSTIC_FIELDS.exit_code: exit_code,
+            DIAGNOSTIC_FIELDS.error: message,
+            DIAGNOSTIC_FIELDS.error_type: exc.__class__.__name__,
+            DIAGNOSTIC_FIELDS.signal: exc.signum,
         })
         return exit_code
     except (SbkAnalyticsError, OSError, KeyError, ValueError, RuntimeError,
@@ -930,8 +1062,10 @@ def main(argv: list[str] | None = None) -> int:
             print(f"ERROR: {exc}", file=sys.stderr)
             print("Run with -vv for a traceback.", file=sys.stderr)
         _emit_json(machine_stdout, {
-            "status": "error", "exit_code": EXIT_CODES.handled_error,
-            "error": str(exc), "error_type": exc.__class__.__name__,
+            DIAGNOSTIC_FIELDS.status: CLI_POLICY.error_status,
+            DIAGNOSTIC_FIELDS.exit_code: EXIT_CODES.handled_error,
+            DIAGNOSTIC_FIELDS.error: str(exc),
+            DIAGNOSTIC_FIELDS.error_type: exc.__class__.__name__,
         })
         return EXIT_CODES.handled_error
 

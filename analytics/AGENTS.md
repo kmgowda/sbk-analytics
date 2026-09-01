@@ -155,10 +155,13 @@ artifact identities plus operational defaults shared by multiple subsystems.
 **Centralized policy groups**:
 - application, SBK, sbk-charts, and JDK metadata
 - dependency source/layout vocabulary, executable paths, environment variable
-  names, command options, cache filenames, and cache namespaces
+  names, command options, cache filenames, cache namespaces, and metadata keys
+- CLI/JSON/lifecycle schemas, YAML and properties aliases, and the supported
+  SBK option/migration contract
 - GitHub, download, retry, pip trust, and dependency probe behavior
 - shared display geometry, units, diagnostic limits, and signal exit convention
-- process termination, durable SBK-native lifecycle, SSH system-info, and timing
+- process termination, durable SBK-native lifecycle, SSH/native probes, and
+  timing
 - configuration defaults, accepted values, and CLI exit codes
 
 Version pins remain operator configuration in `sbk-config.env`; algorithm-local

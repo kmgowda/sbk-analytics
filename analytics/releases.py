@@ -30,7 +30,7 @@ import venv
 import zipfile
 from contextlib import contextmanager
 from datetime import datetime, timezone
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from enum import Enum
 from http import HTTPStatus
 from pathlib import Path
@@ -55,6 +55,9 @@ LAYOUT_POLICY = RUNTIME_POLICY.dependency_layout
 PROVENANCE_POLICY = RUNTIME_POLICY.provenance
 ENVIRONMENT_POLICY = RUNTIME_POLICY.environment
 DISPLAY_POLICY = RUNTIME_POLICY.display
+CACHE_METADATA_POLICY = RUNTIME_POLICY.cache_metadata
+DIAGNOSTIC_FIELDS = RUNTIME_POLICY.diagnostics
+ARCHIVE_POLICY = RUNTIME_POLICY.archives
 
 
 def _pip_trusted_host_args() -> list[str]:
@@ -91,8 +94,8 @@ def _run_pip(cmd: list[str], pip_env: dict[str, str]) -> None:
 
 def cache_root() -> Path:
     """Return the environment-selected cache, then the platform default."""
-    root = os.environ.get("SBK_ANALYTICS_DOWNLOADS_FOLDER") or os.environ.get(
-        "SBK_ANALYTICS_CACHE"
+    root = os.environ.get(ENVIRONMENT_POLICY.downloads_folder) or os.environ.get(
+        ENVIRONMENT_POLICY.legacy_cache_folder
     )
     if root:
         return Path(root)
@@ -146,18 +149,7 @@ class SourceProvenance:
     dirty: bool | None = None
 
     def as_dict(self) -> dict[str, str | bool | None]:
-        return {
-            "mode": self.mode,
-            "layout": self.layout,
-            "configured_location": self.configured_location,
-            "resolved_location": self.resolved_location,
-            "repository_url": self.repository_url,
-            "release_tag": self.release_tag,
-            "asset": self.asset,
-            "sha256": self.sha256,
-            "revision": self.revision,
-            "dirty": self.dirty,
-        }
+        return asdict(self)
 
 
 @dataclass
@@ -394,8 +386,11 @@ def _release_provenance(
         resolved_location=str(resolved),
         repository_url=repository_url,
         release_tag=version,
-        asset=values.get("asset"),
-        sha256=values.get("sha256") or values.get("source_sha256"),
+        asset=values.get(CACHE_METADATA_POLICY.asset),
+        sha256=(
+            values.get(CACHE_METADATA_POLICY.sha256)
+            or values.get(CACHE_METADATA_POLICY.source_sha256)
+        ),
     )
 
 
@@ -416,7 +411,8 @@ def _command_version(command: Path, args: list[str], pattern: str) -> str | None
 def _charts_version(cli: Path, *, require_ready: bool = False) -> str | None:
     try:
         result = subprocess.run(
-            [str(cli), "-h"], capture_output=True, text=True,
+            [str(cli), *SBK_CHARTS_ARTIFACT.version_arguments],
+            capture_output=True, text=True,
             timeout=DEPENDENCY_POLICY.charts_readiness_timeout_s,
         )
     except subprocess.TimeoutExpired as exc:
@@ -431,7 +427,7 @@ def _charts_version(cli: Path, *, require_ready: bool = False) -> str | None:
         stderr = result.stderr if isinstance(result.stderr, str) else ""
         output = stdout + stderr
         match = re.search(
-            r"Sbk Charts Version\s*:\s*(\d+(?:\.\d+)+)",
+            SBK_CHARTS_ARTIFACT.version_pattern or "",
             output,
             re.I,
         )
@@ -450,10 +446,11 @@ def _charts_version(cli: Path, *, require_ready: bool = False) -> str | None:
         python,
         [
             "-c",
-            "import importlib.metadata as m; "
-            f"print(m.version('{SBK_CHARTS_ARTIFACT.distribution_name}'))",
+            DEPENDENCY_POLICY.python_metadata_script_template.format(
+                distribution=SBK_CHARTS_ARTIFACT.distribution_name
+            ),
         ],
-        r"(\d+(?:\.\d+)+)",
+        DEPENDENCY_POLICY.generic_version_pattern,
     )
 
 
@@ -464,7 +461,7 @@ def _check_version(name: str, detected: str | None, expected: str, policy: str) 
         return
     message = (
         f"{name} version mismatch: configured {expected!r}, "
-        f"detected {detected or 'unknown'!r}"
+        f"detected {detected or DISPLAY_POLICY.unknown_value!r}"
     )
     if policy == DEPENDENCY_POLICY.exact_version_policy:
         raise LocalPackageError(message)
@@ -482,7 +479,7 @@ def resolve_local_sbk(
     The bounded list deliberately avoids selecting stale artifacts via a
     recursive filesystem search.
     """
-    root = _local_directory(folder, "SBK")
+    root = _local_directory(folder, SBK_ARTIFACT.display_name)
     candidates = _sbk_local_candidates(root)
     for home, layout, sbk_yal, sbk_gem_yal in candidates:
         if not sbk_yal.is_file():
@@ -493,18 +490,28 @@ def resolve_local_sbk(
         elif require_gem:
             _require_executable(
                 sbk_gem_yal,
-                f"SBK {SBK_ARTIFACT.additional_executables[0]}",
+                f"{SBK_ARTIFACT.display_name} "
+                f"{SBK_ARTIFACT.additional_executables[0]}",
             )
         detected = _command_version(
-            sbk_yal, ["-help"], r"SBK(?:-YAL)?\s+Version:\s*([^\s]+)"
+            sbk_yal,
+            list(SBK_ARTIFACT.version_arguments),
+            SBK_ARTIFACT.version_pattern or "",
         )
         if expected_version:
-            _check_version("SBK", detected, expected_version, version_policy)
+            _check_version(
+                SBK_ARTIFACT.display_name,
+                detected,
+                expected_version,
+                version_policy,
+            )
         return SbkInstall(
             home=home,
             source=DependencySource.LOCAL,
             _sbk_yal=_require_executable(
-                sbk_yal, f"SBK {SBK_ARTIFACT.primary_executable}"
+                sbk_yal,
+                f"{SBK_ARTIFACT.display_name} "
+                f"{SBK_ARTIFACT.primary_executable}",
             ),
             _sbk_gem_yal=resolved_gem,
             detected_version=detected,
@@ -577,15 +584,15 @@ def resolve_local_sbk_charts(
 def inspect_shared_sbk(folder: Path, *, require_gem: bool = False) -> dict:
     """Describe a shared SBK selection without executing or modifying it."""
     result: dict = {
-        "configured_location": str(folder),
-        "read_only": True,
-        "build_performed": False,
-        "valid": False,
+        DIAGNOSTIC_FIELDS.configured_location: str(folder),
+        DIAGNOSTIC_FIELDS.read_only: True,
+        DIAGNOSTIC_FIELDS.build_performed: False,
+        DIAGNOSTIC_FIELDS.valid: False,
     }
     try:
-        root = _local_directory(folder, "SBK")
+        root = _local_directory(folder, SBK_ARTIFACT.display_name)
     except LocalPackageError as exc:
-        result["error"] = str(exc)
+        result[DIAGNOSTIC_FIELDS.error] = str(exc)
         return result
     for home, layout, sbk_yal, sbk_gem_yal in _sbk_local_candidates(root):
         if not sbk_yal.is_file():
@@ -594,25 +601,28 @@ def inspect_shared_sbk(folder: Path, *, require_gem: bool = False) -> dict:
         gem_ready = sbk_gem_yal.is_file() and os.access(sbk_gem_yal, os.X_OK)
         provenance = _shared_provenance(root, home, layout)
         result.update({
-            "valid": yal_ready and (gem_ready or not require_gem),
-            "layout": layout,
-            "resolved_location": str(home),
-            "sbk_yal": str(sbk_yal),
-            "sbk_yal_executable": yal_ready,
-            "sbk_gem_yal": str(sbk_gem_yal),
-            "sbk_gem_yal_executable": gem_ready,
-            "revision": provenance.revision,
-            "dirty": provenance.dirty,
+            DIAGNOSTIC_FIELDS.valid:
+                yal_ready and (gem_ready or not require_gem),
+            DIAGNOSTIC_FIELDS.layout: layout,
+            DIAGNOSTIC_FIELDS.resolved_location: str(home),
+            DIAGNOSTIC_FIELDS.sbk_yal: str(sbk_yal),
+            DIAGNOSTIC_FIELDS.sbk_yal_executable: yal_ready,
+            DIAGNOSTIC_FIELDS.sbk_gem_yal: str(sbk_gem_yal),
+            DIAGNOSTIC_FIELDS.sbk_gem_yal_executable: gem_ready,
+            DIAGNOSTIC_FIELDS.revision: provenance.revision,
+            DIAGNOSTIC_FIELDS.dirty: provenance.dirty,
         })
         if require_gem and not gem_ready:
-            result["error"] = "GEM workload requires executable sbk-gem-yal"
+            result[DIAGNOSTIC_FIELDS.error] = (
+                "GEM workload requires executable sbk-gem-yal"
+            )
         elif not yal_ready:
-            result["error"] = (
+            result[DIAGNOSTIC_FIELDS.error] = (
                 f"SBK {SBK_ARTIFACT.primary_executable} executable is not "
                 f"executable: {sbk_yal}"
             )
         return result
-    result["error"] = (
+    result[DIAGNOSTIC_FIELDS.error] = (
         "no executable sbk-yal in the distribution root or "
         "build/install/sbk; sbk-analytics does not build shared SBK folders"
     )
@@ -625,10 +635,12 @@ def inspect_shared_sbk_charts(
     """Describe shared sbk-charts paths without starting or modifying them."""
     configured = executable or folder
     result: dict = {
-        "configured_location": str(configured) if configured is not None else None,
-        "read_only": True,
-        "install_performed": False,
-        "valid": False,
+        DIAGNOSTIC_FIELDS.configured_location: (
+            str(configured) if configured is not None else None
+        ),
+        DIAGNOSTIC_FIELDS.read_only: True,
+        DIAGNOSTIC_FIELDS.install_performed: False,
+        DIAGNOSTIC_FIELDS.valid: False,
     }
     try:
         if executable is not None:
@@ -645,7 +657,7 @@ def inspect_shared_sbk_charts(
                 "sbk-charts local folder or executable is required"
             )
     except (LocalPackageError, OSError, RuntimeError) as exc:
-        result["error"] = str(exc)
+        result[DIAGNOSTIC_FIELDS.error] = str(exc)
         return result
     for cli, layout in candidates:
         if not cli.is_file():
@@ -653,21 +665,23 @@ def inspect_shared_sbk_charts(
         ready = os.access(cli, os.X_OK)
         revision, dirty = _git_details(provenance_root)
         result.update({
-            "valid": ready,
-            "layout": layout,
-            "resolved_location": str(root),
-            "executable": str(cli),
-            "executable_ready": ready,
-            "revision": revision,
-            "dirty": dirty,
+            DIAGNOSTIC_FIELDS.valid: ready,
+            DIAGNOSTIC_FIELDS.layout: layout,
+            DIAGNOSTIC_FIELDS.resolved_location: str(root),
+            DIAGNOSTIC_FIELDS.executable: str(cli),
+            DIAGNOSTIC_FIELDS.executable_ready: ready,
+            DIAGNOSTIC_FIELDS.revision: revision,
+            DIAGNOSTIC_FIELDS.dirty: dirty,
         })
         if not ready:
-            result["error"] = (
+            result[DIAGNOSTIC_FIELDS.error] = (
                 f"{SBK_CHARTS_ARTIFACT.display_name} executable is not "
                 f"executable: {cli}"
             )
         return result
-    result["error"] = "no supported executable sbk-charts command found"
+    result[DIAGNOSTIC_FIELDS.error] = (
+        "no supported executable sbk-charts command found"
+    )
     return result
 
 
@@ -862,8 +876,10 @@ def _cache_lock(lock_path: Path):
         handle.close()
 
 
-def _write_metadata(path: Path, **values) -> None:
-    values["installed_at"] = datetime.now(timezone.utc).isoformat()
+def _write_metadata(path: Path, values: dict[str, Any]) -> None:
+    values[CACHE_METADATA_POLICY.installed_at] = (
+        datetime.now(timezone.utc).isoformat()
+    )
     path.write_text(json.dumps(values, indent=2, sort_keys=True) + "\n")
 
 
@@ -878,15 +894,15 @@ def _extract(archive: Path, dest: Path) -> Path:
         if candidate != destination and destination not in candidate.parents:
             raise CacheError(f"unsafe archive path rejected: {member_name}")
 
-    if name.endswith(".zip"):
+    if name.endswith(ARCHIVE_POLICY.zip_suffix):
         with zipfile.ZipFile(archive) as zf:
             for member in zf.infolist():
                 safe(member.filename)
-                mode = member.external_attr >> 16
+                mode = member.external_attr >> ARCHIVE_POLICY.member_mode_shift
                 if stat.S_IFMT(mode) == stat.S_IFLNK:
                     raise CacheError(f"archive symlink rejected: {member.filename}")
             zf.extractall(dest)
-    elif name.endswith((".tar", ".tar.gz", ".tgz", ".tar.bz2")):
+    elif name.endswith(ARCHIVE_POLICY.tar_suffixes):
         with tarfile.open(archive) as tf:
             for member in tf.getmembers():
                 safe(member.name)
@@ -991,30 +1007,32 @@ def _ensure_sbk_locked(
 
     log.info("fetching SBK release metadata: %s@%s", repo, version)
     rel = _gh_release(repo, version, ssl_verify=ssl_verify)
-    assets = rel.get("assets") or []
+    assets = rel.get(NETWORK_POLICY.release_assets_field) or []
     # Prefer a top-level distribution asset named like 'sbk-<ver>.tar' (not sbk-gem-yal-*)
     candidates = []
     for a in assets:
-        n = a["name"].lower()
-        if not n.startswith("sbk"):
+        n = a[NETWORK_POLICY.release_asset_name_field].lower()
+        if not n.startswith(SBK_ARTIFACT.key):
             continue
-        if not n.endswith((".tar", ".tar.gz", ".tgz", ".zip")):
+        if not n.endswith(ARCHIVE_POLICY.release_suffixes):
             continue
         # de-prioritise sub-distros like sbk-gem-yal-X.tar
         score = 0 if n.startswith(("sbk-" + version.lower(), f"sbk-{version}")) else 1
         if "gem" in n or "yal" in n or "sbm" in n:
-            score += 10
+            score += ARCHIVE_POLICY.secondary_asset_penalty
         candidates.append((score, a))
 
     if not candidates:
         raise RuntimeError(
             f"no SBK distribution archive found in release {version}; "
-            f"assets: {[a['name'] for a in assets]}"
+            "assets: "
+            f"{[a[NETWORK_POLICY.release_asset_name_field] for a in assets]}"
         )
     candidates.sort(key=lambda x: x[0])
     asset = candidates[0][1]
-    url = asset["browser_download_url"]
-    log.info("selected SBK asset: %s", asset["name"])
+    url = asset[NETWORK_POLICY.release_asset_url_field]
+    asset_name = asset[NETWORK_POLICY.release_asset_name_field]
+    log.info("selected SBK asset: %s", asset_name)
 
     archive = stage / Path(urlparse(url).path).name
     if not archive.exists():
@@ -1023,12 +1041,14 @@ def _ensure_sbk_locked(
         checksum = None
     # GitHub.com exposes `digest` for release assets. Older GitHub Enterprise
     # versions may omit it, in which case metadata still records our checksum.
-    expected_digest = asset.get("digest")
-    if expected_digest and expected_digest.startswith("sha256:"):
+    expected_digest = asset.get(NETWORK_POLICY.release_asset_digest_field)
+    if expected_digest and expected_digest.startswith(
+        NETWORK_POLICY.sha256_digest_prefix
+    ):
         expected_sha256 = expected_digest.split(":", 1)[1].lower()
         if checksum != expected_sha256:
             raise CacheError(
-                f"SBK asset checksum mismatch for {asset['name']}: "
+                f"SBK asset checksum mismatch for {asset_name}: "
                 f"expected {expected_sha256}, got {checksum}"
             )
 
@@ -1052,7 +1072,9 @@ def _ensure_sbk_locked(
     if bindir.is_dir():
         for f in bindir.iterdir():
             try:
-                f.chmod(f.stat().st_mode | 0o111)
+                f.chmod(
+                    f.stat().st_mode | ARCHIVE_POLICY.executable_mode_mask
+                )
             except OSError:
                 pass
 
@@ -1073,13 +1095,18 @@ def _ensure_sbk_locked(
     (stage / CACHE_POLICY.home_pointer).write_text(str(final_home.resolve()))
     _write_metadata(
         stage / CACHE_POLICY.metadata_filename,
-        dependency=SBK_ARTIFACT.key, version=version,
-        source_url=url, asset=asset["name"], sha256=checksum,
-        executables={
-            executable: str(
-                final_home / LAYOUT_POLICY.executable_directory / executable
-            )
-            for executable in SBK_ARTIFACT.executables
+        {
+            CACHE_METADATA_POLICY.dependency: SBK_ARTIFACT.key,
+            CACHE_METADATA_POLICY.version: version,
+            CACHE_METADATA_POLICY.source_url: url,
+            CACHE_METADATA_POLICY.asset: asset_name,
+            CACHE_METADATA_POLICY.sha256: checksum,
+            CACHE_METADATA_POLICY.executables: {
+                executable: str(
+                    final_home / LAYOUT_POLICY.executable_directory / executable
+                )
+                for executable in SBK_ARTIFACT.executables
+            },
         },
     )
     # Free disk: the ~1+ GB archive is no longer needed once extracted.
@@ -1105,7 +1132,10 @@ def _ensure_sbk_locked(
             ),
             version=version,
             resolved=final_home,
-            metadata={"asset": asset["name"], "sha256": checksum},
+            metadata={
+                CACHE_METADATA_POLICY.asset: asset_name,
+                CACHE_METADATA_POLICY.sha256: checksum,
+            },
         ),
     )
 
@@ -1171,7 +1201,7 @@ def _ensure_sbk_charts_locked(
     if marker.exists() and install.cli.exists() and install.python.exists():
         metadata_path = cache / CACHE_POLICY.metadata_filename
         metadata = _read_metadata(metadata_path)
-        cached_digest = metadata.get("source_sha256")
+        cached_digest = metadata.get(CACHE_METADATA_POLICY.source_sha256)
         if source_sha256 is None or cached_digest == source_sha256:
             log.info(
                 "sbk-charts %s already installed at %s (cache hit)",
@@ -1302,9 +1332,14 @@ def _ensure_sbk_charts_locked(
     final_python = cache / relative_python
     _write_metadata(
         stage / CACHE_POLICY.metadata_filename,
-        dependency=SBK_CHARTS_ARTIFACT.key, version=version,
-        source_url=source_url, executable=str(final_cli),
-        source_sha256=source_sha256, spec=spec,
+        {
+            CACHE_METADATA_POLICY.dependency: SBK_CHARTS_ARTIFACT.key,
+            CACHE_METADATA_POLICY.version: version,
+            CACHE_METADATA_POLICY.source_url: source_url,
+            CACHE_METADATA_POLICY.executable: str(final_cli),
+            CACHE_METADATA_POLICY.source_sha256: source_sha256,
+            CACHE_METADATA_POLICY.install_specification: spec,
+        },
     )
     (stage / CACHE_POLICY.completion_marker).touch()
     if cache.exists():
@@ -1320,14 +1355,14 @@ def _ensure_sbk_charts_locked(
             repository_url=repo_url,
             version=version,
             resolved=final_cli,
-            metadata={"source_sha256": source_sha256},
+            metadata={CACHE_METADATA_POLICY.source_sha256: source_sha256},
         ),
     )
 
 
 # ---------- JDK (Adoptium / Temurin) ----------
 
-_JDK_VERSION_RE = re.compile(r'(?:openjdk|java)\s+version\s+"([^"]+)"')
+_JDK_VERSION_RE = re.compile(JDK_ARTIFACT.version_pattern or "")
 
 
 def _java_major_version(java_path: Path) -> int | None:
@@ -1339,7 +1374,7 @@ def _java_major_version(java_path: Path) -> int | None:
     """
     try:
         proc = subprocess.run(
-            [str(java_path), "-version"],
+            [str(java_path), *JDK_ARTIFACT.version_arguments],
             capture_output=True, text=True,
             timeout=DEPENDENCY_POLICY.java_version_timeout_s,
         )
@@ -1465,7 +1500,7 @@ def _jdk_asset(
         raise DependencyResolutionError(
             f"could not resolve checksum-verified Temurin JDK {version} metadata"
         ) from exc
-    if not re.fullmatch(r"[0-9a-f]{64}", checksum):
+    if not re.fullmatch(CACHE_METADATA_POLICY.sha256_pattern, checksum):
         raise DependencyResolutionError(
             f"Temurin JDK {version} metadata contains an invalid SHA-256"
         )
@@ -1641,10 +1676,14 @@ def _install_jdk_locked(
     (stage / CACHE_POLICY.home_pointer).write_text(str(final_home.resolve()))
     _write_metadata(
         stage / CACHE_POLICY.metadata_filename,
-        dependency=JDK_ARTIFACT.key, version=version,
-        source_url=url, sha256=checksum,
-        executable=str(_jdk_executable(final_home)),
-        detected_major=actual_major,
+        {
+            CACHE_METADATA_POLICY.dependency: JDK_ARTIFACT.key,
+            CACHE_METADATA_POLICY.version: version,
+            CACHE_METADATA_POLICY.source_url: url,
+            CACHE_METADATA_POLICY.sha256: checksum,
+            CACHE_METADATA_POLICY.executable: str(_jdk_executable(final_home)),
+            CACHE_METADATA_POLICY.detected_major: actual_major,
+        },
     )
     try:
         archive.unlink()

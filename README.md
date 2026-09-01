@@ -108,8 +108,10 @@ Runtime policy and artifact metadata are centralized in
 `analytics/policy.py`. This is the canonical source for dependency identities,
 repository defaults, dependency source/layout vocabulary, executable and
 environment names, managed-cache filenames, command-line contracts,
-network/retry limits, display units, process grace periods, native benchmark
-lifecycle, SSH behavior, configuration defaults, and application exit codes.
+YAML/property aliases, diagnostic and lifecycle record schemas, SBK option
+contracts, native probe commands, network/retry limits, display units, process
+grace periods, native benchmark lifecycle, SSH behavior, configuration
+defaults, and application exit codes.
 Release version pins and operator choices remain in `sbk-config.env` so they can
 be updated without changing Python code.
 

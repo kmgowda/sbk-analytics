@@ -76,6 +76,12 @@ all uv artifact checksums when changing the pinned uv version. The same file
 owns the uv release root, runtime metadata names/schema, and bootstrap lock
 timing; do not duplicate those values in the launcher.
 
+Persistent JSON keys, CLI diagnostic keys, YAML/property aliases, environment
+variable names, SBK option contracts, and native command names are runtime
+interfaces. Define them in the appropriate frozen policy group, even when a
+single consumer currently uses them, so future consumers cannot silently
+diverge.
+
 ## Common Tasks
 
 ### Validate process cleanup

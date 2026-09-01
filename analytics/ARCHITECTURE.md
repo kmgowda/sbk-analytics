@@ -18,8 +18,9 @@ build rather than accepting a cached wheel. Bash replaces itself with safe-path 
 configuration parser, resolver, runner, process manager, charts adapter, and
 system-info collector. Immutable typed policy groups centralize values that
 cross module boundaries, including dependency layouts/provenance, executable
-and environment names, command interfaces, units, status vocabulary, and
-timeouts. `sbk-config.env` remains the operator-controlled source for release
+and environment names, configuration aliases, SBK option contracts,
+cache/lifecycle/diagnostic schemas, native command interfaces, units, status
+vocabulary, and timeouts. `sbk-config.env` remains the operator-controlled source for release
 version pins and local dependency selections.
 The native launchers load their smaller pre-Python policy boundary from
 `sbk-bootstrap.env`, because `analytics.policy` cannot be imported until a

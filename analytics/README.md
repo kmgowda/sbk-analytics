@@ -35,8 +35,10 @@ Parses .env-style configuration files (like sbk-config.env). Handles case-insens
 ### policy.py
 Defines immutable application/artifact metadata and cross-cutting runtime
 policy for dependency layouts and provenance, executable/environment names,
-command interfaces, cache/network operations, display units, process and
-benchmark timing, SSH behavior, configuration defaults, and exit codes.
+command interfaces, configuration/property aliases, persistent metadata and
+diagnostic schemas, cache/network operations, display units, process and
+benchmark timing, SSH/native probe behavior, configuration defaults, and exit
+codes.
 
 ### releases.py
 Resolves and caches external dependencies:
