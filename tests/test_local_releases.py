@@ -78,6 +78,24 @@ class LocalSbkResolutionTests(unittest.TestCase):
             self.assertEqual(install.provenance.configured_location, str(root.resolve()))
             self.assertEqual(install.provenance.resolved_location, str(home.resolve()))
 
+    def test_shared_provenance_canonicalizes_configured_symlink(self):
+        with tempfile.TemporaryDirectory() as directory:
+            parent = Path(directory)
+            real_root = _sbk_home(parent / "real-sbk")
+            configured = parent / "shared-sbk"
+            configured.symlink_to(real_root, target_is_directory=True)
+
+            install = resolve_local_sbk(configured)
+
+            self.assertEqual(
+                install.provenance.configured_location,
+                str(real_root.resolve()),
+            )
+            self.assertEqual(
+                install.provenance.resolved_location,
+                str(real_root.resolve()),
+            )
+
     def test_shared_status_is_read_only_and_never_builds(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

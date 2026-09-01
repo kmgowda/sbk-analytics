@@ -359,8 +359,8 @@ def _charts_local_candidates(
 def _shared_provenance(
     configured: Path, resolved: Path, layout: str
 ) -> SourceProvenance:
-    configured_path = configured.expanduser().absolute()
-    revision, dirty = _git_details(configured_path.resolve())
+    configured_path = configured.expanduser().resolve()
+    revision, dirty = _git_details(configured_path)
     return SourceProvenance(
         mode=PROVENANCE_POLICY.shared_folder_mode,
         layout=layout,
