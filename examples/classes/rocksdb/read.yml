@@ -1,0 +1,30 @@
+# Measure the databases created by rocksdb/write.yml. Run write.yml first.
+mode: serial
+workdir: /tmp/sbk-analytics/classes/rocksdb
+
+# Preserve the prepared RocksDB databases. The write workflow owns data reset.
+cleanup_before_run: false
+
+sbk:
+  time: ns
+  idletimeoutseconds: 120
+
+classes:
+  - name: rocksdb-read-4k
+    class: rocksdb
+    readers: 1
+    size: 4096
+    records: 65536
+    rfile: /tmp/sbk-analytics/classes/rocksdb/rocksdb-4k
+
+  - name: rocksdb-read-64k
+    class: rocksdb
+    readers: 1
+    size: 65536
+    records: 4096
+    rfile: /tmp/sbk-analytics/classes/rocksdb/rocksdb-64k
+
+sbk-charts:
+  output: rocksdb-read.xlsx
+  ai_model: noai
+  chat: false

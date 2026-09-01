@@ -92,6 +92,45 @@ def _run_pip(cmd: list[str], pip_env: dict[str, str]) -> None:
     )
 
 
+def _entrypoint_interpreter_ready(command: Path) -> bool:
+    """Return whether an absolute interpreter named by a script exists."""
+    try:
+        with command.open("rb") as stream:
+            first_line = stream.readline()
+    except OSError:
+        return False
+    if not first_line.startswith(b"#!"):
+        return True
+    interpreter = first_line[2:].strip().split(maxsplit=1)[0]
+    if not interpreter or not os.path.isabs(os.fsdecode(interpreter)):
+        return True
+    return Path(os.fsdecode(interpreter)).is_file()
+
+
+def _relocate_venv_scripts(venv_dir: Path, final_venv_dir: Path) -> None:
+    """Rewrite absolute venv paths before an atomically staged publication."""
+    old_prefix = os.fsencode(venv_dir)
+    new_prefix = os.fsencode(final_venv_dir)
+    bindir = venv_dir / LAYOUT_POLICY.executable_directory
+    for command in bindir.iterdir():
+        if not command.is_file():
+            continue
+        try:
+            with command.open("rb") as stream:
+                first_line = stream.readline()
+        except OSError:
+            continue
+        if not first_line.startswith(b"#!" + old_prefix):
+            continue
+        content = command.read_bytes()
+        command.write_bytes(content.replace(old_prefix, new_prefix, 1))
+
+    configuration = venv_dir / LAYOUT_POLICY.virtual_environment_configuration
+    if configuration.is_file():
+        content = configuration.read_bytes()
+        configuration.write_bytes(content.replace(old_prefix, new_prefix))
+
+
 def cache_root() -> Path:
     """Return the environment-selected cache, then the platform default."""
     root = os.environ.get(ENVIRONMENT_POLICY.downloads_folder) or os.environ.get(
@@ -1198,7 +1237,12 @@ def _ensure_sbk_charts_locked(
     install = ChartsInstall(
         venv_dir=venv_dir, source=DependencySource.MANAGED_CACHE
     )
-    if marker.exists() and install.cli.exists() and install.python.exists():
+    if (
+        marker.exists()
+        and install.cli.exists()
+        and install.python.exists()
+        and _entrypoint_interpreter_ready(install.cli)
+    ):
         metadata_path = cache / CACHE_POLICY.metadata_filename
         metadata = _read_metadata(metadata_path)
         cached_digest = metadata.get(CACHE_METADATA_POLICY.source_sha256)
@@ -1330,6 +1374,8 @@ def _ensure_sbk_charts_locked(
     relative_python = install.python.relative_to(stage)
     final_cli = cache / relative_cli
     final_python = cache / relative_python
+    final_venv = cache / LAYOUT_POLICY.virtual_environment_directory
+    _relocate_venv_scripts(stage_venv, final_venv)
     _write_metadata(
         stage / CACHE_POLICY.metadata_filename,
         {
@@ -1341,10 +1387,11 @@ def _ensure_sbk_charts_locked(
             CACHE_METADATA_POLICY.install_specification: spec,
         },
     )
-    (stage / CACHE_POLICY.completion_marker).touch()
     if cache.exists():
         shutil.rmtree(cache)
     stage.replace(cache)
+    _charts_version(final_cli, require_ready=True)
+    (cache / CACHE_POLICY.completion_marker).touch()
     log.info("sbk-charts %s installed successfully", version)
     return ChartsInstall(
         venv_dir=cache / LAYOUT_POLICY.virtual_environment_directory,

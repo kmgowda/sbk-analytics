@@ -1,0 +1,30 @@
+# Measure the datasets created by file/write.yml. Run write.yml first.
+mode: serial
+workdir: /tmp/sbk-analytics/classes/file
+
+# Preserve the prepared files. The write workflow owns data reset.
+cleanup_before_run: false
+
+sbk:
+  time: ns
+  idletimeoutseconds: 120
+
+classes:
+  - name: file-read-4k
+    class: file
+    readers: 1
+    size: 4096
+    records: 65536
+    file: /tmp/sbk-analytics/classes/file/file-4k.dat
+
+  - name: file-read-64k
+    class: file
+    readers: 1
+    size: 65536
+    records: 4096
+    file: /tmp/sbk-analytics/classes/file/file-64k.dat
+
+sbk-charts:
+  output: file-read.xlsx
+  ai_model: noai
+  chat: false

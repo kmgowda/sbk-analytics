@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Added a persistent per-class example catalog with paired multi-instance file
+  and RocksDB write/read benchmarking workflows and continuous render tests.
 - Added top-level YAML `cleanup_before_run` (default `false`) to empty a safely
   validated workdir immediately before SBK/SBK-GEM benchmarking.
 - SBK 10.6+ option compatibility, including validation for its GEM/SBM
@@ -45,6 +47,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Require both exit code zero and a non-empty CSV before charting an SBK run.
 
 ### Fixed
+- Relocate absolute virtual-environment paths when publishing a staged managed
+  sbk-charts installation, validate the final console command, and repair cache
+  entries whose shebang still points to a removed staging directory.
 - Resolve configured plain release versions such as `10.6` against upstream
   GitHub tags that use the conventional `v` prefix, such as `v10.6`.
 - Prevented analytics from killing SBK-GEM while 10.6 is still provisioning

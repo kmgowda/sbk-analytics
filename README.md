@@ -154,6 +154,8 @@ sbk-analytics -c examples/file-rocksdb-write-60s.yml
 - **Entry point**: `analytics/cli.py:main()`
 - **Configuration**: `sbk-config.env` (SBK versions, URLs, folders)
 - **Examples**: `examples/` directory
+- **Per-class workflows**: `examples/classes/` contains persistent write/read
+  benchmark pairs grouped by SBK driver
 - **Dependencies**: `requirements.txt` and `pyproject.toml`
 - **Key modules**: `cli.py`, `releases.py`, `runner.py`, `processes.py`,
   `lifecycle.py`, `charts.py`, `yaml_gen.py`
@@ -168,6 +170,23 @@ sbk-analytics -c examples/file-rocksdb-write-60s.yml
 - **[analytics/AGENTS.md](analytics/AGENTS.md)** - Comprehensive AI agent documentation
 
 ## File Path Configuration
+
+### Storage class workflow catalog
+
+Driver-specific persistent examples live under [`examples/classes/`](examples/classes/README.md).
+The initial catalog includes file-system and RocksDB write/read workflow pairs,
+each with two named record-size instances and a combined sbk-charts report:
+
+```bash
+./sbk-analytics -c examples/classes/file/write.yml
+./sbk-analytics -c examples/classes/file/read.yml
+
+./sbk-analytics -c examples/classes/rocksdb/write.yml
+./sbk-analytics -c examples/classes/rocksdb/read.yml
+```
+
+Always run a class's write workflow before its read workflow. See the README in
+each class directory for dataset size, cleanup, and storage-specific guidance.
 
 ### Work Directory
 

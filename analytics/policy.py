@@ -153,6 +153,7 @@ class DependencyLayoutPolicy:
 
     executable_directory: str = "bin"
     virtual_environment_directory: str = "venv"
+    virtual_environment_configuration: str = "pyvenv.cfg"
     python_executable: str = "python"
     extracted_directory: str = "extracted"
     sbk_gradle_install_path: tuple[str, ...] = ("build", "install", "sbk")

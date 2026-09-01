@@ -380,11 +380,52 @@ class LocalChartsResolutionTests(unittest.TestCase):
                 )
 
             self.assertEqual(install.source, DependencySource.DOWNLOADED)
-            self.assertEqual(run.call_count, 4)
+            # Two pip calls plus readiness/version probes before and after
+            # publishing the relocated virtual environment.
+            self.assertEqual(run.call_count, 6)
             cache = downloads / "sbk-charts" / "4.26.7.1"
             self.assertTrue((cache / ".ok").is_file())
             self.assertTrue((cache / "metadata.json").is_file())
             self.assertFalse(list(cache.parent.glob(".4.26.7.1.install-*")))
+
+    def test_new_install_rewrites_staged_venv_entrypoint(self):
+        with tempfile.TemporaryDirectory() as directory:
+            downloads = Path(directory)
+
+            class FakeVenvBuilder:
+                def __init__(self, **_kwargs):
+                    pass
+
+                def create(self, venv_dir):
+                    venv_path = Path(venv_dir)
+                    _executable(venv_path / "bin" / "python")
+                    cli = _executable(venv_path / "bin" / "sbk-charts")
+                    cli.write_text(
+                        f"#!{venv_path / 'bin' / 'python'}\n",
+                        encoding="utf-8",
+                    )
+                    (venv_path / "pyvenv.cfg").write_text(
+                        f"command = python -m venv {venv_path}\n",
+                        encoding="utf-8",
+                    )
+
+            with mock.patch.dict(os.environ, {}, clear=True), mock.patch(
+                "analytics.releases.venv.EnvBuilder", FakeVenvBuilder
+            ), mock.patch(
+                "analytics.releases.subprocess.run",
+                return_value=mock.Mock(returncode=0, stdout="", stderr=""),
+            ):
+                install = ensure_sbk_charts(
+                    "4.26.7.1", downloads_folder=downloads
+                )
+
+            stage_fragment = ".4.26.7.1.install-"
+            self.assertNotIn(stage_fragment, install.cli.read_text())
+            self.assertNotIn(
+                stage_fragment,
+                (install.venv_dir / "pyvenv.cfg").read_text(),
+            )
+            self.assertIn(str(install.python), install.cli.read_text())
 
     def test_managed_charts_uses_its_own_venv_from_conda_or_venv_hosts(self):
         for active_name in ("CONDA_PREFIX", "VIRTUAL_ENV"):
