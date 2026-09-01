@@ -113,6 +113,13 @@ def run_sbk_charts(
         cmd, cwd=str(cwd),
         stdout=sys.stderr if output_to_stderr else None,
         stderr=sys.stderr if output_to_stderr else None,
+        lifecycle_role=RUNTIME_POLICY.lifecycle.charts_role,
+        lifecycle_metadata={
+            RUNTIME_POLICY.lifecycle.charts_output_metadata_field:
+                str(output_xlsx),
+            RUNTIME_POLICY.lifecycle.charts_input_count_metadata_field:
+                len(csv_paths),
+        },
     )
     try:
         return proc.wait()

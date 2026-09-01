@@ -152,6 +152,8 @@ activemq-data/
 .envrc
 .venv
 .conda/
+.sbk/
+.jdk/
 env/
 venv/
 ENV/

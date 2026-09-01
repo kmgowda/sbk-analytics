@@ -13,11 +13,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Read-only dependency provenance diagnostics for shared development folders
   and managed GitHub releases, including layouts, resolved commands, Git state,
   release assets, checksums, and machine-readable status details.
+- Durable, credential-free local workload ownership records with safe
+  cross-invocation stale-run reconciliation and lifecycle status diagnostics.
+- Upstream Temurin checksum validation plus post-extraction Java major checks,
+  and real sbk-charts command health checks before cache publication.
 
 ### Changed
 - Extended immutable runtime policy coverage to dependency layouts and source
   vocabulary, executable/environment names, SBK and charts interfaces, pip
-  invocation, diagnostic formatting, units, and signal exit conventions.
+  invocation, configuration/property aliases, CLI and lifecycle schemas,
+  native probe commands, diagnostic formatting, units, and signal exit
+  conventions.
 - Kept shared-folder Git inspection lightweight by excluding untracked files,
   added debug logging for Git failures, and unified status/runtime layout order.
 - Established SBK 10.6 as the configured baseline contract without embedding
@@ -25,8 +31,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Replaced text-rendered architecture and lifecycle flows with GitHub-rendered
   Mermaid diagrams in the user, architecture, and agent documentation.
 - Delegated benchmark timing, fixed-record idle detection, GEM readiness,
-  remote lifecycle, and failure status to SBK 10.6+. Emergency SSH cleanup now
-  runs only when interrupted SBK-GEM does not finish native cleanup in time.
+  remote lifecycle, and failure status to SBK 10.6+. Removed unsafe broad
+  remote process-name killing; interrupted SBK-GEM receives native cleanup
+  grace before analytics force-stops only its owned local process group.
+- Made workload guard/registry establishment fail-closed and propagated a
+  per-invocation run ID to every locally owned child process.
+- Added debug diagnostics for restricted process-environment inspection and
+  documented fail-closed registry availability and schema quarantine behavior.
+- Kept managed sbk-charts isolated from application and active Conda/venv
+  environments, and removed the unused Conda dependency-source status.
 - Require both exit code zero and a non-empty CSV before charting an SBK run.
 
 ### Fixed

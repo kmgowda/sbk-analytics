@@ -189,7 +189,9 @@ Brief description of changes
 
 ### Important Variables
 - `CONDA_PREFIX`: Detects conda environment
-- `SBK_JAVA_HOME`: Points to JDK for SBK (set by sbk-analytics)
+- `SBK_JAVA_HOME`: Optional JDK input; analytics sets the validated selection
+  only in SBK child environments
+- `SBK_ANALYTICS_LIFECYCLE_FOLDER`: Durable workload registry override
 - `JAVA_HOME`: User's JAVA_HOME (not modified by sbk-analytics)
 - `PYTHONUNBUFFERED`: For unbuffered Python output
 

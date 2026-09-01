@@ -1,6 +1,7 @@
 import json
 import os
 import signal
+import stat
 import subprocess
 import sys
 import tempfile
@@ -13,6 +14,15 @@ import psutil
 
 from analytics.charts import run_sbk_charts
 from analytics.config import OrchestratorConfig
+from analytics.errors import LifecycleError
+from analytics.lifecycle import (
+    _group_run_identity_matches,
+    _identity_matches,
+    current_run_id,
+    inspect_records,
+    reconcile_stale_records,
+)
+from analytics.policy import RUNTIME_POLICY
 from analytics.processes import (
     ProcessExit,
     _signal_posix_group,
@@ -53,6 +63,15 @@ def _wait_stopped(*pids: int, timeout: float = 12) -> None:
     raise AssertionError(f"processes still running after cleanup: {running}")
 
 
+def _wait_no_files(root: Path, pattern: str, timeout: float = 8) -> None:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if not list(root.glob(pattern)):
+            return
+        time.sleep(0.05)
+    raise AssertionError(f"files still present: {list(root.glob(pattern))}")
+
+
 class ForcedParentExitTests(unittest.TestCase):
     """Exercise the real parent-death protection with a grandchild process."""
 
@@ -74,6 +93,9 @@ class ForcedParentExitTests(unittest.TestCase):
         )
         env = os.environ.copy()
         env["PYTHONPATH"] = str(ROOT) + os.pathsep + env.get("PYTHONPATH", "")
+        env[RUNTIME_POLICY.environment.lifecycle_folder] = str(
+            pid_file.parent / "lifecycle"
+        )
         kwargs = {
             "cwd": str(ROOT),
             "env": env,
@@ -99,6 +121,8 @@ class ForcedParentExitTests(unittest.TestCase):
                     os.kill(controller.pid, signal.SIGTERM)
                 controller.wait(timeout=10)
                 _wait_stopped(child_pid, grand_pid)
+                lifecycle = pid_file.parent / "lifecycle"
+                _wait_no_files(lifecycle, "*.json")
             finally:
                 if controller.poll() is None:
                     controller.kill()
@@ -157,6 +181,306 @@ class ForcedParentExitTests(unittest.TestCase):
 
 
 class ManagedProcessTests(unittest.TestCase):
+    def test_identity_environment_denial_logs_command_fallback(self):
+        process = mock.Mock()
+        process.is_running.return_value = True
+        process.status.return_value = psutil.STATUS_RUNNING
+        process.create_time.return_value = 123.0
+        process.environ.side_effect = psutil.AccessDenied(pid=4321)
+        process.cmdline.return_value = ["/opt/sbk/bin/sbk-yal", "-f", "run.yml"]
+        with mock.patch(
+            "analytics.lifecycle.psutil.Process", return_value=process
+        ), self.assertLogs("analytics.lifecycle", level="DEBUG") as logs:
+            matched = _identity_matches(
+                4321,
+                123.0,
+                command=["/opt/sbk/bin/sbk-yal", "-f", "run.yml"],
+                run_id="recorded-run",
+            )
+        self.assertTrue(matched)
+        self.assertIn("using recorded command identity", "\n".join(logs.output))
+
+    def test_group_environment_denial_logs_ambiguous_ownership(self):
+        process = mock.Mock()
+        process.pid = 4321
+        process.info = {
+            RUNTIME_POLICY.lifecycle.process_status_attribute:
+                psutil.STATUS_RUNNING,
+        }
+        process.environ.side_effect = psutil.AccessDenied(pid=process.pid)
+        with mock.patch(
+            "analytics.lifecycle.psutil.process_iter", return_value=[process]
+        ), mock.patch(
+            "analytics.lifecycle.os.getpgid", return_value=9876
+        ), self.assertLogs("analytics.lifecycle", level="DEBUG") as logs:
+            matched = _group_run_identity_matches(9876, "recorded-run")
+        self.assertFalse(matched)
+        self.assertIn("leaving the group untouched", "\n".join(logs.output))
+
+    def test_guard_start_failure_is_fail_closed(self):
+        child = subprocess.Popen(
+            [sys.executable, "-c", "import time; time.sleep(60)"],
+            start_new_session=True,
+        )
+        with mock.patch(
+            "analytics.processes.subprocess.Popen",
+            side_effect=[child, OSError("guard unavailable")],
+        ), self.assertRaises(LifecycleError):
+            managed_popen([sys.executable, "-c", "import time; time.sleep(60)"])
+        child.wait(timeout=5)
+        self.assertFalse(_running(child.pid))
+
+    def test_registry_write_failure_is_fail_closed(self):
+        with mock.patch(
+            "analytics.processes.register_process",
+            side_effect=PermissionError("registry unavailable"),
+        ), self.assertRaises(LifecycleError):
+            managed_popen([sys.executable, "-c", "import time; time.sleep(60)"])
+
+    def test_registry_records_role_metadata_and_run_id(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / "run-id"
+            code = (
+                "import os,pathlib,time;"
+                f"pathlib.Path({str(output)!r}).write_text("
+                f"os.environ[{RUNTIME_POLICY.environment.lifecycle_run_id!r}]);"
+                "time.sleep(60)"
+            )
+            with mock.patch.dict(
+                os.environ,
+                {RUNTIME_POLICY.environment.lifecycle_folder: str(root / "runs")},
+            ):
+                process = managed_popen(
+                    [sys.executable, "-c", code],
+                    lifecycle_role=RUNTIME_POLICY.lifecycle.charts_role,
+                    lifecycle_metadata={"output": "report.xlsx"},
+                )
+                try:
+                    _wait_for_file(output)
+                    status = inspect_records()
+                    self.assertEqual(status["active"], 1)
+                    self.assertEqual(status["records"][0]["role"], "sbk-charts")
+                    self.assertEqual(
+                        status["records"][0]["metadata"]["output"],
+                        "report.xlsx",
+                    )
+                    record = next((root / "runs").glob("*.json"))
+                    self.assertEqual(
+                        stat.S_IMODE(record.stat().st_mode),
+                        RUNTIME_POLICY.lifecycle.record_mode,
+                    )
+                    self.assertEqual(output.read_text(), current_run_id())
+                finally:
+                    terminate_process(process, grace_s=0.1)
+                self.assertEqual(inspect_records()["records"], [])
+
+    def test_run_id_preserves_identity_after_launcher_exec(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            ready = root / "ready"
+            command = (
+                f"exec {sys.executable} -c \"import pathlib,time; "
+                f"pathlib.Path('{ready}').write_text('ready'); time.sleep(60)\""
+            )
+            with mock.patch.dict(
+                os.environ,
+                {RUNTIME_POLICY.environment.lifecycle_folder: str(root / "runs")},
+            ):
+                process = managed_popen(["/bin/sh", "-c", command])
+                try:
+                    _wait_for_file(ready)
+                    status = inspect_records()
+                    self.assertTrue(status["records"][0]["process_active"])
+                finally:
+                    terminate_process(process, grace_s=0.1)
+
+    @staticmethod
+    def _stale_record(path: Path, process: subprocess.Popen, *, created: float) -> None:
+        target = psutil.Process(process.pid)
+        payload = {
+            "schema": RUNTIME_POLICY.lifecycle.schema_version,
+            "run_id": "prior-run",
+            "controller_pid": max(psutil.pids()) + 100000,
+            "controller_create_time": 1.0,
+            "pid": process.pid,
+            "process_create_time": created,
+            "pgid": os.getpgid(process.pid),
+            "role": RUNTIME_POLICY.lifecycle.local_role,
+            "command": target.cmdline(),
+            "metadata": {},
+            "created_at": time.time(),
+        }
+        path.parent.mkdir(parents=True)
+        path.write_text(json.dumps(payload), encoding="utf-8")
+
+    def test_next_invocation_reconciles_verified_stale_group(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            process = subprocess.Popen(
+                [sys.executable, "-c", "import time; time.sleep(60)"],
+                start_new_session=True,
+            )
+            record = root / "runs" / "prior.json"
+            self._stale_record(
+                record, process, created=psutil.Process(process.pid).create_time()
+            )
+            with mock.patch.dict(
+                os.environ,
+                {RUNTIME_POLICY.environment.lifecycle_folder: str(root / "runs")},
+            ):
+                summary = reconcile_stale_records()
+            process.wait(timeout=5)
+            self.assertEqual(summary["cleaned"], 1)
+            self.assertFalse(record.exists())
+
+    def test_reconciliation_cleans_verified_leaderless_group(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            child_file = root / "child.pid"
+            code = (
+                "import pathlib,subprocess,sys;"
+                "child=subprocess.Popen([sys.executable,'-c',"
+                "'import time;time.sleep(60)']);"
+                f"pathlib.Path({str(child_file)!r}).write_text(str(child.pid))"
+            )
+            env = os.environ.copy()
+            env[RUNTIME_POLICY.environment.lifecycle_run_id] = "prior-run"
+            leader = subprocess.Popen(
+                [sys.executable, "-c", code],
+                start_new_session=True,
+                env=env,
+            )
+            leader_created = psutil.Process(leader.pid).create_time()
+            _wait_for_file(child_file)
+            child_pid = int(child_file.read_text())
+            leader.wait(timeout=5)
+            record = root / "runs" / "prior.json"
+            payload = {
+                "schema": RUNTIME_POLICY.lifecycle.schema_version,
+                "run_id": "prior-run",
+                "controller_pid": max(psutil.pids()) + 100000,
+                "controller_create_time": 1.0,
+                "pid": leader.pid,
+                "process_create_time": leader_created,
+                "pgid": leader.pid,
+                "role": RUNTIME_POLICY.lifecycle.local_role,
+                "command": [sys.executable],
+                "metadata": {},
+                "created_at": time.time(),
+            }
+            record.parent.mkdir(parents=True)
+            record.write_text(json.dumps(payload), encoding="utf-8")
+            try:
+                with mock.patch.dict(
+                    os.environ,
+                    {
+                        RUNTIME_POLICY.environment.lifecycle_folder:
+                        str(root / "runs")
+                    },
+                ):
+                    summary = reconcile_stale_records()
+                _wait_stopped(child_pid)
+                self.assertEqual(summary["cleaned"], 1)
+                self.assertFalse(record.exists())
+            finally:
+                if _running(child_pid):
+                    os.killpg(leader.pid, signal.SIGKILL)
+
+    def test_unverified_leaderless_group_is_quarantined(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            child = subprocess.Popen(
+                [sys.executable, "-c", "import time;time.sleep(60)"],
+                start_new_session=True,
+                env={
+                    **os.environ,
+                    RUNTIME_POLICY.environment.lifecycle_run_id: "different-run",
+                },
+            )
+            record = root / "runs" / "prior.json"
+            payload = {
+                "schema": RUNTIME_POLICY.lifecycle.schema_version,
+                "run_id": "prior-run",
+                "controller_pid": max(psutil.pids()) + 100000,
+                "controller_create_time": 1.0,
+                "pid": child.pid + 100000,
+                "process_create_time": 1.0,
+                "pgid": child.pid,
+                "role": RUNTIME_POLICY.lifecycle.local_role,
+                "command": [sys.executable],
+                "metadata": {},
+                "created_at": time.time(),
+            }
+            record.parent.mkdir(parents=True)
+            record.write_text(json.dumps(payload), encoding="utf-8")
+            try:
+                with mock.patch.dict(
+                    os.environ,
+                    {
+                        RUNTIME_POLICY.environment.lifecycle_folder:
+                        str(root / "runs")
+                    },
+                ):
+                    summary = reconcile_stale_records()
+                self.assertEqual(summary["unresolved"], 1)
+                self.assertTrue(_running(child.pid))
+                self.assertTrue(record.with_suffix(".json.unresolved").is_file())
+            finally:
+                os.killpg(child.pid, signal.SIGKILL)
+                child.wait(timeout=5)
+
+    def test_pid_identity_mismatch_is_quarantined_not_killed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            process = subprocess.Popen(
+                [sys.executable, "-c", "import time; time.sleep(60)"],
+                start_new_session=True,
+            )
+            try:
+                record = root / "runs" / "prior.json"
+                self._stale_record(
+                    record,
+                    process,
+                    created=psutil.Process(process.pid).create_time() - 10,
+                )
+                with mock.patch.dict(
+                    os.environ,
+                    {RUNTIME_POLICY.environment.lifecycle_folder: str(root / "runs")},
+                ):
+                    summary = reconcile_stale_records()
+                self.assertEqual(summary["unresolved"], 1)
+                self.assertTrue(_running(process.pid))
+                self.assertTrue(
+                    record.with_suffix(".json.unresolved").is_file()
+                )
+            finally:
+                os.killpg(process.pid, signal.SIGKILL)
+                process.wait(timeout=5)
+
+    def test_unsupported_registry_schema_is_quarantined(self):
+        with tempfile.TemporaryDirectory() as directory:
+            registry = Path(directory) / "runs"
+            record = registry / "old-schema.json"
+            registry.mkdir(parents=True)
+            record.write_text(
+                json.dumps({
+                    RUNTIME_POLICY.lifecycle.schema_field:
+                        RUNTIME_POLICY.lifecycle.schema_version + 1,
+                }),
+                encoding="utf-8",
+            )
+            with mock.patch.dict(
+                os.environ,
+                {RUNTIME_POLICY.environment.lifecycle_folder: str(registry)},
+            ):
+                summary = reconcile_stale_records()
+            self.assertEqual(summary["unresolved"], 1)
+            self.assertFalse(record.exists())
+            self.assertTrue(
+                record.with_suffix(".json.unresolved").is_file()
+            )
+
     def test_permission_error_during_group_signal_is_best_effort(self):
         with mock.patch(
             "analytics.processes.os.killpg", side_effect=PermissionError("denied")

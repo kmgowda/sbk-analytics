@@ -49,26 +49,7 @@ DISPLAY_POLICY = RUNTIME_POLICY.display
 
 
 # Columns of the system sheet, in order.
-SYSTEM_COLUMNS: list[str] = [
-    "Source",
-    "Used by instances",
-    "Hostname",
-    "OS",
-    "OS version",
-    "Architecture",
-    "CPU model",
-    "Physical CPUs",
-    "Logical CPUs",
-    "CPU MHz",
-    "Total RAM (GiB)",
-    "Available RAM (GiB)",
-    "Container runtime",
-    "Container ID",
-    "K8s Pod",
-    "K8s Namespace",
-    "Collected at",
-    "Status",
-]
+SYSTEM_COLUMNS: list[str] = list(SYSTEM_INFO_POLICY.columns)
 
 
 # ---------------------------------------------------------------------------
@@ -80,25 +61,26 @@ def _cpu_brand() -> str:
     """Best-effort CPU brand/model string across platforms."""
     sysname = platform.system()
     try:
-        if sysname == "Linux":
+        if sysname == SYSTEM_INFO_POLICY.linux_platform:
             try:
-                with open("/proc/cpuinfo") as f:
+                with open(SYSTEM_INFO_POLICY.cpu_info_file) as f:
                     for line in f:
                         if line.lower().startswith("model name"):
                             return line.split(":", 1)[1].strip()
             except OSError:
                 pass
-            if shutil.which("lscpu"):
+            if shutil.which(SYSTEM_INFO_POLICY.lscpu_command[0]):
                 out = subprocess.run(
-                    ["lscpu"], capture_output=True, text=True,
+                    list(SYSTEM_INFO_POLICY.lscpu_command),
+                    capture_output=True, text=True,
                     timeout=SYSTEM_INFO_POLICY.local_command_timeout_s,
                 ).stdout
                 for line in out.splitlines():
                     if line.lower().startswith("model name"):
                         return line.split(":", 1)[1].strip()
-        elif sysname == "Darwin":
+        elif sysname == SYSTEM_INFO_POLICY.macos_platform:
             out = subprocess.run(
-                ["sysctl", "-n", "machdep.cpu.brand_string"],
+                list(SYSTEM_INFO_POLICY.macos_cpu_command),
                 capture_output=True, text=True,
                 timeout=SYSTEM_INFO_POLICY.local_command_timeout_s,
             ).stdout.strip()
@@ -106,35 +88,42 @@ def _cpu_brand() -> str:
                 return out
     except Exception as e:
         log.debug("cpu brand lookup failed: %s", e)
-    return platform.processor() or "unknown"
+    return platform.processor() or DISPLAY_POLICY.unknown_value
 
 
 def _container_info() -> dict[str, str]:
     """Detect Docker / Kubernetes container details for the current process."""
-    runtime = "none"
+    runtime = DISPLAY_POLICY.absent_value
     container_id = ""
     k8s_pod = ""
     k8s_namespace = ""
 
-    if Path("/.dockerenv").exists():
-        runtime = "docker"
-    if os.environ.get("KUBERNETES_SERVICE_HOST"):
-        runtime = "kubernetes"
+    if Path(SYSTEM_INFO_POLICY.docker_environment_file).exists():
+        runtime = SYSTEM_INFO_POLICY.docker_runtime
+    if os.environ.get(SYSTEM_INFO_POLICY.kubernetes_service_environment):
+        runtime = SYSTEM_INFO_POLICY.kubernetes_runtime
     try:
-        cgroup = Path("/proc/1/cgroup").read_text()
+        cgroup = Path(SYSTEM_INFO_POLICY.process_cgroup_file).read_text()
         if "/kubepods" in cgroup or "/kubelet" in cgroup:
-            runtime = "kubernetes"
-        elif runtime == "none" and ("/docker" in cgroup or "/containerd" in cgroup):
-            runtime = "docker"
+            runtime = SYSTEM_INFO_POLICY.kubernetes_runtime
+        elif (
+            runtime == DISPLAY_POLICY.absent_value
+            and ("/docker" in cgroup or "/containerd" in cgroup)
+        ):
+            runtime = SYSTEM_INFO_POLICY.docker_runtime
     except OSError:
         pass
 
-    if runtime != "none":
+    if runtime != DISPLAY_POLICY.absent_value:
         try:
-            for line in Path("/proc/self/cgroup").read_text().splitlines():
+            for line in Path(
+                SYSTEM_INFO_POLICY.self_cgroup_file
+            ).read_text().splitlines():
                 last = line.rstrip().split("/")[-1]
                 if last:
-                    container_id = last[:64]
+                    container_id = last[
+                        :SYSTEM_INFO_POLICY.container_id_characters
+                    ]
                     break
         except OSError:
             pass
@@ -153,10 +142,10 @@ def _container_info() -> dict[str, str]:
             pass
 
     return {
-        "Container runtime": runtime,
-        "Container ID": container_id,
-        "K8s Pod": k8s_pod,
-        "K8s Namespace": k8s_namespace,
+        SYSTEM_INFO_POLICY.container_runtime_column: runtime,
+        SYSTEM_INFO_POLICY.container_id_column: container_id,
+        SYSTEM_INFO_POLICY.kubernetes_pod_column: k8s_pod,
+        SYSTEM_INFO_POLICY.kubernetes_namespace_column: k8s_namespace,
     }
 
 
@@ -172,24 +161,32 @@ def collect_local_system_info() -> dict[str, str]:
         pass
 
     info: dict[str, str] = {
-        "Hostname": socket.gethostname(),
-        "OS": f"{platform.system()} {platform.release()}",
-        "OS version": platform.version(),
-        "Architecture": platform.machine(),
-        "CPU model": _cpu_brand(),
-        "Physical CPUs": str(psutil.cpu_count(logical=False) or ""),
-        "Logical CPUs": str(psutil.cpu_count(logical=True) or ""),
-        "CPU MHz": freq or "",
-        "Total RAM (GiB)": (
+        SYSTEM_INFO_POLICY.hostname_column: socket.gethostname(),
+        SYSTEM_INFO_POLICY.operating_system_column: (
+            f"{platform.system()} {platform.release()}"
+        ),
+        SYSTEM_INFO_POLICY.operating_system_version_column: platform.version(),
+        SYSTEM_INFO_POLICY.architecture_column: platform.machine(),
+        SYSTEM_INFO_POLICY.cpu_model_column: _cpu_brand(),
+        SYSTEM_INFO_POLICY.physical_cpus_column: str(
+            psutil.cpu_count(logical=False) or ""
+        ),
+        SYSTEM_INFO_POLICY.logical_cpus_column: str(
+            psutil.cpu_count(logical=True) or ""
+        ),
+        SYSTEM_INFO_POLICY.cpu_mhz_column: freq or "",
+        SYSTEM_INFO_POLICY.total_ram_column: (
             f"{vm.total / (DISPLAY_POLICY.bytes_per_kibibyte ** 3):.2f}"
         ),
-        "Available RAM (GiB)": (
+        SYSTEM_INFO_POLICY.available_ram_column: (
             f"{vm.available / (DISPLAY_POLICY.bytes_per_kibibyte ** 3):.2f}"
         ),
     }
     info.update(_container_info())
-    info["Collected at"] = datetime.now().isoformat(timespec="seconds")
-    info["Status"] = "ok"
+    info[SYSTEM_INFO_POLICY.collected_at_column] = datetime.now().isoformat(
+        timespec="seconds"
+    )
+    info[SYSTEM_INFO_POLICY.status_column] = RUNTIME_POLICY.cli.success_status
     return info
 
 
@@ -220,7 +217,7 @@ if [ -n "$KUBERNETES_SERVICE_HOST" ]; then runtime=kubernetes; fi
 if grep -q "/kubepods\|/kubelet" /proc/1/cgroup 2>/dev/null; then runtime=kubernetes; fi
 if [ "$runtime" = "none" ] && grep -q "/docker\|/containerd" /proc/1/cgroup 2>/dev/null; then runtime=docker; fi
 echo "container_runtime=$runtime"
-container_id=$(awk -F/ '{ for (i=NF; i>=1; i--) if ($i != "") { print $i; exit } }' /proc/self/cgroup 2>/dev/null | head -c 64)
+container_id=$(awk -F/ '{ for (i=NF; i>=1; i--) if ($i != "") { print $i; exit } }' /proc/self/cgroup 2>/dev/null | head -c __CONTAINER_ID_CHARACTERS__)
 echo "container_id=${container_id}"
 echo "k8s_pod=${POD_NAME:-${HOSTNAME:-}}"
 ns=""
@@ -228,7 +225,10 @@ if [ -r /var/run/secrets/kubernetes.io/serviceaccount/namespace ]; then
   ns=$(cat /var/run/secrets/kubernetes.io/serviceaccount/namespace 2>/dev/null)
 fi
 echo "k8s_namespace=${ns}"
-"""
+""".replace(
+    "__CONTAINER_ID_CHARACTERS__",
+    str(SYSTEM_INFO_POLICY.container_id_characters),
+)
 
 
 def collect_remote_system_info(
@@ -247,23 +247,35 @@ def collect_remote_system_info(
     """
     target = f"{user}@{node}" if user else node
     ssh_args = [
-        "ssh",
-        "-p", str(int(port)),
+        SSH_POLICY.ssh_command,
+        SSH_POLICY.port_option, str(int(port)),
         *SSH_POLICY.host_key_arguments,
-        "-o", "BatchMode=" + ("no" if password else "yes"),
-        "-o", f"ConnectTimeout={SSH_POLICY.connect_timeout_s}",
+        SSH_POLICY.option_flag,
+        SSH_POLICY.batch_mode_option + "=" + (
+            SSH_POLICY.disabled_value
+            if password else SSH_POLICY.enabled_value
+        ),
+        SSH_POLICY.option_flag,
+        f"{SSH_POLICY.connect_timeout_option}={SSH_POLICY.connect_timeout_s}",
         target,
-        "bash -s",
+        SSH_POLICY.remote_shell_command,
     ]
-    have_sshpass = bool(password) and shutil.which("sshpass") is not None
+    have_sshpass = (
+        bool(password)
+        and shutil.which(SSH_POLICY.sshpass_command) is not None
+    )
     if password and not have_sshpass:
         log.warning(
             "remote system info: 'sshpass' not on PATH but gempass is set for "
             "%s; attempting key-based ssh which may fail", node,
         )
     if have_sshpass:
-        env = {**os.environ, "SSHPASS": password}
-        cmd = ["sshpass", "-e", *ssh_args]
+        env = {**os.environ, SSH_POLICY.sshpass_environment: password}
+        cmd = [
+            SSH_POLICY.sshpass_command,
+            SSH_POLICY.sshpass_environment_option,
+            *ssh_args,
+        ]
     else:
         env = os.environ.copy()
         cmd = ssh_args
@@ -275,14 +287,17 @@ def collect_remote_system_info(
             capture_output=True, text=True, timeout=timeout_s,
         )
     except subprocess.TimeoutExpired:
-        return {"Status": f"ssh timeout after {int(timeout_s)}s"}
+        return {
+            SYSTEM_INFO_POLICY.status_column:
+                f"ssh timeout after {int(timeout_s)}s"
+        }
     except OSError as e:
-        return {"Status": f"ssh error: {e}"}
+        return {SYSTEM_INFO_POLICY.status_column: f"ssh error: {e}"}
 
     if proc.returncode != 0:
         err = (proc.stderr or "").strip().splitlines()[-1:] or [""]
         return {
-            "Status": (
+            SYSTEM_INFO_POLICY.status_column: (
                 f"ssh rc={proc.returncode}: "
                 f"{err[0][:DISPLAY_POLICY.system_info_tail_characters]}"
             )
@@ -305,22 +320,52 @@ def collect_remote_system_info(
             return ""
 
     info: dict[str, str] = {
-        "Hostname": raw.get("hostname", ""),
-        "OS": raw.get("os", ""),
-        "OS version": raw.get("os_version", ""),
-        "Architecture": raw.get("arch", ""),
-        "CPU model": raw.get("cpu_model", ""),
-        "Physical CPUs": raw.get("physical_cpus", ""),
-        "Logical CPUs": raw.get("logical_cpus", ""),
-        "CPU MHz": raw.get("cpu_mhz", ""),
-        "Total RAM (GiB)": _bytes_to_gib(raw.get("total_ram_kb", "")),
-        "Available RAM (GiB)": _bytes_to_gib(raw.get("avail_ram_kb", "")),
-        "Container runtime": raw.get("container_runtime", "none"),
-        "Container ID": raw.get("container_id", ""),
-        "K8s Pod": raw.get("k8s_pod", ""),
-        "K8s Namespace": raw.get("k8s_namespace", ""),
-        "Collected at": datetime.now().isoformat(timespec="seconds"),
-        "Status": "ok",
+        SYSTEM_INFO_POLICY.hostname_column: raw.get(
+            SYSTEM_INFO_POLICY.remote_hostname_field, ""
+        ),
+        SYSTEM_INFO_POLICY.operating_system_column: raw.get(
+            SYSTEM_INFO_POLICY.remote_os_field, ""
+        ),
+        SYSTEM_INFO_POLICY.operating_system_version_column: raw.get(
+            SYSTEM_INFO_POLICY.remote_os_version_field, ""
+        ),
+        SYSTEM_INFO_POLICY.architecture_column: raw.get(
+            SYSTEM_INFO_POLICY.remote_architecture_field, ""
+        ),
+        SYSTEM_INFO_POLICY.cpu_model_column: raw.get(
+            SYSTEM_INFO_POLICY.remote_cpu_model_field, ""
+        ),
+        SYSTEM_INFO_POLICY.physical_cpus_column: raw.get(
+            SYSTEM_INFO_POLICY.remote_physical_cpus_field, ""
+        ),
+        SYSTEM_INFO_POLICY.logical_cpus_column: raw.get(
+            SYSTEM_INFO_POLICY.remote_logical_cpus_field, ""
+        ),
+        SYSTEM_INFO_POLICY.cpu_mhz_column: raw.get(
+            SYSTEM_INFO_POLICY.remote_cpu_mhz_field, ""
+        ),
+        SYSTEM_INFO_POLICY.total_ram_column: _bytes_to_gib(raw.get(
+            SYSTEM_INFO_POLICY.remote_total_ram_kb_field, ""
+        )),
+        SYSTEM_INFO_POLICY.available_ram_column: _bytes_to_gib(raw.get(
+            SYSTEM_INFO_POLICY.remote_available_ram_kb_field, ""
+        )),
+        SYSTEM_INFO_POLICY.container_runtime_column: raw.get(
+            SYSTEM_INFO_POLICY.remote_container_runtime_field, "none"
+        ),
+        SYSTEM_INFO_POLICY.container_id_column: raw.get(
+            SYSTEM_INFO_POLICY.remote_container_id_field, ""
+        ),
+        SYSTEM_INFO_POLICY.kubernetes_pod_column: raw.get(
+            SYSTEM_INFO_POLICY.remote_kubernetes_pod_field, ""
+        ),
+        SYSTEM_INFO_POLICY.kubernetes_namespace_column: raw.get(
+            SYSTEM_INFO_POLICY.remote_kubernetes_namespace_field, ""
+        ),
+        SYSTEM_INFO_POLICY.collected_at_column: datetime.now().isoformat(
+            timespec="seconds"
+        ),
+        SYSTEM_INFO_POLICY.status_column: RUNTIME_POLICY.cli.success_status,
     }
     return info
 
@@ -355,7 +400,11 @@ def append_system_sheet(
 
     sources = list(sources)
     if not sources:
-        sources = [{"kind": "local", "instances": []}]
+        sources = [{
+            SYSTEM_INFO_POLICY.source_kind_field:
+                SYSTEM_INFO_POLICY.local_source,
+            SYSTEM_INFO_POLICY.source_instances_field: [],
+        }]
 
     wb = load_workbook(xlsx_path)
     if sheet_name in wb.sheetnames:
@@ -364,18 +413,29 @@ def append_system_sheet(
     ws.append(SYSTEM_COLUMNS)
 
     for src in sources:
-        kind = src.get("kind", "local")
-        instances = ", ".join(src.get("instances") or [])
-        if kind == "remote":
-            source_label = f"remote: {src['node']}"
+        kind = src.get(
+            SYSTEM_INFO_POLICY.source_kind_field,
+            SYSTEM_INFO_POLICY.local_source,
+        )
+        instances = ", ".join(
+            src.get(SYSTEM_INFO_POLICY.source_instances_field) or []
+        )
+        if kind == SYSTEM_INFO_POLICY.remote_source:
+            node = src[SYSTEM_INFO_POLICY.source_node_field]
+            source_label = f"{SYSTEM_INFO_POLICY.remote_source}: {node}"
             info = collect_remote_system_info(
-                src["node"],
-                user=src.get("user", ""),
-                password=src.get("password", ""),
-                port=int(src.get("port", 22)),
+                node,
+                user=src.get(SYSTEM_INFO_POLICY.source_user_field, ""),
+                password=src.get(
+                    SYSTEM_INFO_POLICY.source_password_field, ""
+                ),
+                port=int(src.get(
+                    SYSTEM_INFO_POLICY.source_port_field,
+                    SSH_POLICY.default_port,
+                )),
             )
         else:
-            source_label = "local"
+            source_label = SYSTEM_INFO_POLICY.local_source
             info = collect_local_system_info()
 
         row = [source_label, instances] + [
@@ -384,28 +444,8 @@ def append_system_sheet(
         ws.append(row)
 
     # Column widths
-    widths = {
-        "Source": 22,
-        "Used by instances": 26,
-        "Hostname": 24,
-        "OS": 24,
-        "OS version": 32,
-        "Architecture": 14,
-        "CPU model": 38,
-        "Physical CPUs": 14,
-        "Logical CPUs": 14,
-        "CPU MHz": 12,
-        "Total RAM (GiB)": 18,
-        "Available RAM (GiB)": 20,
-        "Container runtime": 18,
-        "Container ID": 34,
-        "K8s Pod": 28,
-        "K8s Namespace": 18,
-        "Collected at": 22,
-        "Status": 22,
-    }
-    for idx, col in enumerate(SYSTEM_COLUMNS, start=1):
-        ws.column_dimensions[get_column_letter(idx)].width = widths.get(col, 16)
+    for idx, width in enumerate(SYSTEM_INFO_POLICY.column_widths, start=1):
+        ws.column_dimensions[get_column_letter(idx)].width = width
 
     # Freeze the header row.
     ws.freeze_panes = "A2"

@@ -8,5 +8,6 @@ dependencies:
   - pyyaml
   - requests
   - pytorch
-  # Note: sbk-charts is installed by sbk-analytics based on sbk-config.env
-  # not here, to ensure version consistency with the configuration file
+  # Manual development host only. sbk-analytics never installs sbk-charts into
+  # this Conda environment; charts uses a selected ready-to-run local command
+  # or its own versioned venv based on sbk-config.env.

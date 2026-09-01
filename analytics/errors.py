@@ -19,3 +19,7 @@ class LocalPackageError(DependencyResolutionError):
 
 class CacheError(DependencyResolutionError):
     """A managed dependency cache could not be installed or validated."""
+
+
+class LifecycleError(SbkAnalyticsError):
+    """A workload could not be placed under durable lifecycle ownership."""
