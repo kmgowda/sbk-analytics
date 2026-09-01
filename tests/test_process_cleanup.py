@@ -215,7 +215,7 @@ class WorkloadWiringTests(unittest.TestCase):
             ) as terminate:
                 if mode == "serial":
                     target = mock.patch(
-                        "analytics.runner._hung_jvm_watchdog",
+                        "analytics.runner._wait_for_native_completion",
                         side_effect=ProcessExit(signal.SIGTERM),
                     )
                 else:

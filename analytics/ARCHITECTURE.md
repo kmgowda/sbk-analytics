@@ -41,6 +41,7 @@ compatible interpreter and environment exist.
 ┌─────────────────────────────────────────────────────────────┐
 │                Configuration Module (config.py)              │
 │  - YAML parsing and validation                              │
+│  - Supported SBK option migration/compatibility             │
 │  - Configuration object creation                             │
 └─────────────────────────┬───────────────────────────────────┘
                           │
@@ -82,7 +83,7 @@ compatible interpreter and environment exist.
 │  - Serial/parallel execution                                │
 │  - Subprocess management                                    │
 │  - Log forwarding (macOS)                                   │
-│  - Hung JVM detection                                       │
+│  - SBK-native lifecycle/status handling                     │
 └─────────────────────────┬───────────────────────────────────┘
                           │
                           ▼
@@ -163,14 +164,17 @@ System sheet → Final Excel output
 ### 5. Process Lifecycle Flow
 ```
 cli.py signal context → runner.py / charts.py → managed process tree
-catchable signal → workload-specific cleanup → TERM → 3 s grace → KILL
+catchable signal → SBK-GEM native cleanup (30 s) → fallback cleanup → KILL
 parent death → liveness-pipe EOF → independent guard → TERM/KILL group
 ```
 
 Every SBK and sbk-charts invocation is registered until its complete process
 tree exits. Normal wrapper exit also triggers removal of any remaining
-descendants in its workload group. Catchable sbk-gem interruptions retain best-effort remote SSH
-cleanup; no local mechanism can initiate new remote cleanup after SIGKILL.
+descendants in its workload group. SBK-GEM owns normal deployment,
+benchmark timing, failure reporting, and remote cleanup. Catchable GEM
+interruptions allow native cleanup first and use broad remote SSH cleanup only
+as an emergency fallback; no local mechanism can initiate new remote cleanup
+after SIGKILL.
 
 ## Key Design Decisions
 

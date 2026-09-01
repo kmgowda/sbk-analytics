@@ -53,30 +53,16 @@ class RunResult:
 
     @property
     def ok(self) -> bool:
-        """A run is treated as successful when a non-empty CSV exists.
-
-        We deliberately do NOT require ``returncode == 0`` because SBK 9.0's
-        JVM can hang on shutdown for some drivers (notably RocksDB) after the
-        benchmark itself has completed and the CSV has been flushed. In that
-        case the watchdog SIGKILLs the JVM and the returncode is negative,
-        but the CSV is complete and usable.
-        """
-        return self.csv_path.exists() and self.csv_path.stat().st_size > 0
+        """SBK must exit successfully and produce a non-empty CSV."""
+        return (
+            self.returncode == 0
+            and self.csv_path.exists()
+            and self.csv_path.stat().st_size > 0
+        )
 
 
 def _build_cmd(executable: Path, yml_path: Path) -> list[str]:
     return [str(executable), "-f", str(yml_path)]
-
-
-def _kill_grace_for(yml_path: Path) -> tuple[int, int]:
-    """Return ``(remote_grace, local_grace)`` for the YAML's mode."""
-    _, is_gem = _read_yml(yml_path)
-    if is_gem:
-        return (
-            int(BENCHMARK_POLICY.remote_kill_grace_s),
-            int(BENCHMARK_POLICY.local_kill_grace_s),
-        )
-    return 0, int(BENCHMARK_POLICY.local_kill_grace_s)
 
 
 def _print_sbk_banner(
@@ -99,22 +85,11 @@ def _print_sbk_banner(
         if is_gem else SBK_ARTIFACT.primary_executable
     )
     params, _ = _read_yml(yml_path)
-    if expected_seconds is None:
-        timeout_desc = "no timeout (records-bounded / open-ended)"
+    timeout_desc = "SBK native lifecycle"
+    if expected_seconds is not None:
+        timeout_desc += f" (benchmark duration: {expected_seconds}s)"
     elif is_gem:
-        timeout_desc = (
-            f"remote kill at +{int(BENCHMARK_POLICY.remote_kill_grace_s)}s, "
-            f"local kill at +{int(BENCHMARK_POLICY.local_kill_grace_s)}s "
-            "(deadline "
-            f"{expected_seconds + int(BENCHMARK_POLICY.local_kill_grace_s)}s)"
-        )
-    else:
-        timeout_desc = (
-            "kill at seconds + "
-            f"{int(BENCHMARK_POLICY.local_kill_grace_s)}s "
-            "(deadline "
-            f"{expected_seconds + int(BENCHMARK_POLICY.local_kill_grace_s)}s)"
-        )
+        timeout_desc += " (deployment time excluded from benchmark timing)"
 
     mode_tag = "serial" if serial else "parallel"
     lines = [
@@ -175,9 +150,8 @@ def _expected_seconds(yml_path: Path) -> int | None:
     - ``seconds:`` is set to a non-positive value (``0`` / negative)
     - the YAML cannot be parsed
 
-    A return of ``None`` is the signal to the watchdog that the benchmark is
-    bounded by records or runs forever, and that the SBK process should NOT be
-    killed by sbk-analytics.
+    Analytics uses this only for display. SBK owns benchmark timing,
+    fixed-record idle detection, and normal process completion.
     """
     params, _ = _read_yml(yml_path)
     if "seconds" not in params:
@@ -189,14 +163,7 @@ def _expected_seconds(yml_path: Path) -> int | None:
     return secs if secs > 0 else None
 
 
-# ---- Kill grace ----------------------------------------------------------
-#
-# Both executables use the benchmark policy's local grace window before
-# sbk-analytics force-kills the local process. GEM additionally runs remote
-# cleanup at the earlier remote grace deadline, leaving the configured gap
-# for the local wrapper to notice and shut down cleanly.
-
-# ---- Remote SBK kill (sbk-gem-yal only) ---------------------------------
+# ---- Emergency remote cleanup fallback (sbk-gem-yal only) ---------------
 
 
 def _remote_kill_pattern() -> str:
@@ -216,8 +183,8 @@ def _kill_remote_sbk_clients(yml_path: Path) -> None:
     Uses the same credentials sbk-gem-yal itself used: ``gemuser`` / ``gempass``
     / ``gemport`` (default 22). Requires ``sshpass`` on PATH when ``gempass``
     is supplied; without it we still try keys-only ssh. Failures are logged
-    and do not propagate -- the local sbk-gem-yal process has already been
-    killed by the caller, and the CSV is preserved.
+    and do not propagate. This is used only after SBK-GEM fails to complete
+    its own cleanup during the native shutdown grace period.
     """
     params, is_gem = _read_yml(yml_path)
     if not is_gem:
@@ -316,108 +283,9 @@ def _ssh_pkill_one(node: str, user: str, password: str, port: int,
         log.warning("remote sbk kill: %s error: %s", node, e)
 
 
-def _hung_jvm_watchdog(
-    proc: ManagedProcess,
-    csv_path: Path,
-    yml_path: Path,
-    *,
-    expected_seconds: int | None,
-    is_gem: bool,
-    poll_interval_s: float = BENCHMARK_POLICY.watchdog_poll_interval_s,
-) -> int:
-    """Wait for ``proc`` to exit, force-killing it after the benchmark window.
-
-    Timing (with ``seconds`` taken from the YAML):
-
-    - At ``seconds + remote_kill_grace_s`` (gem mode only): SSH into every
-      ``nodes:`` entry
-      and ``pkill -9 -f io.sbk.main`` so the remote sbk clients are killed
-      first. Done once, in a background thread (so it does not delay the
-      local kill).
-    - At ``seconds + local_kill_grace_s`` (both modes): terminate the local
-      ``sbk-yal`` / ``sbk-gem-yal`` process. For gem mode we wait briefly
-      for the remote-kill thread to finish first so the killed-remote logs
-      are sequenced correctly with the local kill log.
-
-    If ``expected_seconds`` is ``None`` (benchmark bounded by ``records:`` or
-    runs forever) no timeout applies and we just wait for the process to
-    exit. sbk-analytics never kills the local SBK process or the remote sbk
-    clients in that case.
-    """
-    start = time.monotonic()
-    remote_deadline = (
-        start + expected_seconds + BENCHMARK_POLICY.remote_kill_grace_s
-        if (expected_seconds is not None and is_gem)
-        else None
-    )
-    local_deadline = (
-        start + expected_seconds + BENCHMARK_POLICY.local_kill_grace_s
-        if expected_seconds is not None
-        else None
-    )
-    remote_kill_thread: threading.Thread | None = None
-
-    while True:
-        rc = proc.poll()
-        if rc is not None:
-            # Process finished on its own. If we already launched the remote
-            # kill, let that thread finish in the background -- it's fine to
-            # let it complete after we return.
-            return rc
-
-        now = time.monotonic()
-
-        # Stage 1: GEM remote kill at the configured remote deadline.
-        if (
-            remote_deadline is not None
-            and remote_kill_thread is None
-            and now >= remote_deadline
-        ):
-            log.warning(
-                "sbk-gem-yal: %ds + %ds grace reached; killing remote sbk "
-                "clients on all nodes",
-                expected_seconds, int(BENCHMARK_POLICY.remote_kill_grace_s),
-            )
-            remote_kill_thread = threading.Thread(
-                target=_kill_remote_sbk_clients,
-                args=(yml_path,),
-                daemon=True,
-            )
-            remote_kill_thread.start()
-
-        # Stage 2: local kill at the configured local deadline.
-        if local_deadline is not None and now >= local_deadline:
-            # For gem mode, wait briefly for the remote-kill thread so the
-            # remote SBKs are gone *before* we kill the local sbk-gem-yal.
-            if remote_kill_thread is not None:
-                remote_kill_thread.join(
-                    timeout=BENCHMARK_POLICY.remote_before_local_join_s
-                )
-            try:
-                size = csv_path.stat().st_size if csv_path.exists() else 0
-            except OSError:
-                size = 0
-            log.warning(
-                "%s instance did not complete within %ds + %ds; killing "
-                "local process (csv=%d bytes)",
-                (
-                    SBK_ARTIFACT.additional_executables[0]
-                    if is_gem else SBK_ARTIFACT.primary_executable
-                ),
-                expected_seconds,
-                int(BENCHMARK_POLICY.local_kill_grace_s),
-                size,
-            )
-            proc.terminate()
-            try:
-                return proc.wait(
-                    timeout=BENCHMARK_POLICY.local_terminate_wait_s
-                )
-            except subprocess.TimeoutExpired:
-                proc.kill()
-                return proc.wait()
-
-        time.sleep(poll_interval_s)
+def _wait_for_native_completion(proc: ManagedProcess) -> int:
+    """Wait for SBK to report its authoritative terminal status."""
+    return proc.wait()
 
 
 def _run_serial(
@@ -501,10 +369,7 @@ def _run_serial(
                 stderr=sys.stderr if output_to_stderr else None,
             )
         try:
-            rc = _hung_jvm_watchdog(
-                proc, csv_path, yml_path,
-                expected_seconds=seconds, is_gem=is_gem,
-            )
+            rc = _wait_for_native_completion(proc)
         except BaseException:
             _terminate_sbk_process(proc, yml_path, is_gem=is_gem)
             raise
@@ -539,16 +404,13 @@ def _run_parallel(
     print(PARALLEL_WARNING, file=sys.stderr, flush=True)
     log_dir.mkdir(parents=True, exist_ok=True)
 
-    # Each tuple:
-    #   (class_name, yml, csv, log, popen, start_ts,
-    #    expected_seconds, remote_deadline, local_deadline, is_gem)
+    # Each tuple: (class_name, yml, csv, log, popen, start_ts, is_gem)
     procs: list[
         tuple[
             str, Path, Path, Path, ManagedProcess, float,
-            int | None, float | None, float | None, bool,
+            bool,
         ]
     ] = []
-    remote_kill_threads: dict[int, threading.Thread] = {}
 
     total = len(jobs)
     for idx, (class_name, yml_path, csv_path) in enumerate(jobs, start=1):
@@ -583,19 +445,8 @@ def _run_parallel(
             # Popen duplicates the descriptor for the child; the parent should
             # not keep one log file open for every parallel benchmark.
             f.close()
-        remote_dl = (
-            start + seconds + BENCHMARK_POLICY.remote_kill_grace_s
-            if (seconds is not None and is_gem)
-            else None
-        )
-        local_dl = (
-            start + seconds + BENCHMARK_POLICY.local_kill_grace_s
-            if seconds is not None
-            else None
-        )
         procs.append(
-            (class_name, yml_path, csv_path, log_path, p, start,
-             seconds, remote_dl, local_dl, is_gem)
+            (class_name, yml_path, csv_path, log_path, p, start, is_gem)
         )
 
     # heartbeat loop
@@ -603,63 +454,11 @@ def _run_parallel(
     last_print = 0.0
     try:
         while pending:
-            time.sleep(BENCHMARK_POLICY.watchdog_poll_interval_s)
+            time.sleep(BENCHMARK_POLICY.process_poll_interval_s)
             now = time.monotonic()
             for i in list(pending):
-                (class_name, yml_path, csv_path, _, p, p_start,
-                 seconds, remote_dl, local_dl, is_gem) = procs[i]
+                (_, _, _, _, p, _, _) = procs[i]
                 if p.poll() is not None:
-                    pending.discard(i)
-                    continue
-
-                # Stage 1: GEM remote kill at the configured remote deadline.
-                if (
-                    remote_dl is not None
-                    and i not in remote_kill_threads
-                    and now >= remote_dl
-                ):
-                    log.warning(
-                        "[parallel] class=%s sbk-gem-yal: %ds + %ds grace "
-                        "reached; killing remote sbk clients",
-                        class_name,
-                        seconds,
-                        int(BENCHMARK_POLICY.remote_kill_grace_s),
-                    )
-                    t = threading.Thread(
-                        target=_kill_remote_sbk_clients, args=(yml_path,),
-                        daemon=True,
-                    )
-                    t.start()
-                    remote_kill_threads[i] = t
-
-                # Stage 2: local kill at the configured local deadline.
-                if local_dl is not None and now >= local_dl:
-                    t = remote_kill_threads.get(i)
-                    if t is not None:
-                        t.join(
-                            timeout=BENCHMARK_POLICY.remote_before_local_join_s
-                        )
-                    size = csv_path.stat().st_size if csv_path.exists() else 0
-                    log.warning(
-                        "[parallel] class=%s (%s) did not complete within "
-                        "%ds + %ds; killing local process (csv=%d bytes)",
-                        class_name,
-                        (
-                            SBK_ARTIFACT.additional_executables[0]
-                            if is_gem else SBK_ARTIFACT.primary_executable
-                        ),
-                        seconds,
-                        int(BENCHMARK_POLICY.local_kill_grace_s),
-                        size,
-                    )
-                    p.terminate()
-                    try:
-                        p.wait(
-                            timeout=BENCHMARK_POLICY.local_terminate_wait_s
-                        )
-                    except subprocess.TimeoutExpired:
-                        p.kill()
-                        p.wait()
                     pending.discard(i)
             if (
                 pending
@@ -678,7 +477,7 @@ def _run_parallel(
                 last_print = now
     except BaseException:
         for (
-            _, yml_path, _, _, process, _, _, _, _, is_gem
+            _, yml_path, _, _, process, _, is_gem
         ) in procs:
             _terminate_sbk_process(process, yml_path, is_gem=is_gem)
         raise
@@ -708,20 +507,32 @@ def _run_parallel(
 def _terminate_sbk_process(
     process: ManagedProcess, yml_path: Path, *, is_gem: bool
 ) -> None:
-    """Terminate one SBK tree and best-effort remote GEM clients."""
+    """Let SBK-GEM clean up natively, then use emergency remote cleanup."""
     if process.poll() is not None:
         return
     if is_gem:
-        _kill_remote_sbk_clients(yml_path)
+        log.warning(
+            "requesting native SBK-GEM shutdown; allowing %.0fs for remote cleanup",
+            BENCHMARK_POLICY.gem_native_shutdown_grace_s,
+        )
+        process.terminate()
+        try:
+            process.wait(timeout=BENCHMARK_POLICY.gem_native_shutdown_grace_s)
+            return
+        except subprocess.TimeoutExpired:
+            log.warning(
+                "SBK-GEM did not finish native cleanup; invoking emergency remote kill"
+            )
+            _kill_remote_sbk_clients(yml_path)
     terminate_process(process)
 
 
 def _sbk_env(jdk_home: Path | None) -> dict[str, str] | None:
     """Return the subprocess env for sbk-yal / sbk-gem-yal.
 
-    Sets ``SBK_JAVA_HOME`` (preferred by SBK 10.0) to the specified JDK.
+    Sets ``SBK_JAVA_HOME`` (preferred by SBK) to the specified JDK.
     Explicitly unsets ``JAVA_HOME`` if it exists in the parent environment to prevent
-    SBK from using a different Java version. SBK 10.0 will use SBK_JAVA_HOME if set.
+    SBK from using a different Java version. SBK uses SBK_JAVA_HOME if set.
     Also prepends ``<jdk>/bin`` to ``PATH``.
     Returns None when no JDK is supplied so the SBK scripts fall back to the
     caller's existing environment.
@@ -730,10 +541,10 @@ def _sbk_env(jdk_home: Path | None) -> dict[str, str] | None:
         return None
     env = os.environ.copy()
     jdk_home_str = str(jdk_home)
-    # Set SBK_JAVA_HOME for SBK 10.0
+    # Set the launcher-specific Java home for SBK.
     env["SBK_JAVA_HOME"] = jdk_home_str
     # Explicitly unset JAVA_HOME to prevent SBK from using a different Java version
-    # SBK 10.0 will use SBK_JAVA_HOME if set, otherwise fall back to JAVA_HOME
+    # SBK uses SBK_JAVA_HOME if set, otherwise it falls back to JAVA_HOME.
     if "JAVA_HOME" in env:
         del env["JAVA_HOME"]
     # Prepend JDK bin to PATH

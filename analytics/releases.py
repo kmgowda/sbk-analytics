@@ -623,7 +623,8 @@ def _ensure_sbk_locked(
         if has_yal and has_required_gem:
             log.info("SBK %s already installed at %s (cache hit)", version, home)
             return SbkInstall(
-                home=home, source=DependencySource.MANAGED_CACHE
+                home=home, source=DependencySource.MANAGED_CACHE,
+                detected_version=version,
             )
         log.warning(
             "SBK %s cache marker exists but binaries missing at %s; re-installing",
@@ -734,7 +735,11 @@ def _ensure_sbk_locked(
         shutil.rmtree(cache)
     stage.replace(cache)
     log.info("SBK %s ready at %s", version, final_home)
-    return SbkInstall(home=final_home, source=DependencySource.DOWNLOADED)
+    return SbkInstall(
+        home=final_home,
+        source=DependencySource.DOWNLOADED,
+        detected_version=version,
+    )
 
 
 # ---------- sbk-charts ----------

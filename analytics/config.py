@@ -70,6 +70,7 @@ from typing import Any
 import yaml
 
 from .policy import RUNTIME_POLICY
+from .sbk_contract import normalize_sbk_params
 
 
 CONFIGURATION_POLICY = RUNTIME_POLICY.configuration
@@ -370,6 +371,7 @@ def _build_instances(
             raise ValueError(
                 f"classes[{idx}]: expected string or mapping, got {type(entry).__name__}"
             )
+        params = normalize_sbk_params(params, context=f"classes[{idx}]")
         out.append(Instance(name=name, class_name=class_name, params=params))
 
     # check name uniqueness (explicit names could collide)

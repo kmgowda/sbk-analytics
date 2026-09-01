@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- SBK 10.6+ option compatibility, including validation for its GEM/SBM
+  aggregate, cleanup, provisioning, host-key, port, and idle-timeout options.
+
+### Changed
+- Established SBK 10.6 as the configured baseline contract without embedding
+  version checks or version-specific branches in runtime source.
+- Delegated benchmark timing, fixed-record idle detection, GEM readiness,
+  remote lifecycle, and failure status to SBK 10.6+. Emergency SSH cleanup now
+  runs only when interrupted SBK-GEM does not finish native cleanup in time.
+- Require both exit code zero and a non-empty CSV before charting an SBK run.
+
+### Fixed
+- Prevented analytics from killing SBK-GEM while 10.6 is still provisioning
+  nodes before the benchmark timer starts.
+
 ### Removed
 - Native Windows launcher, bootstrap checksums, CI job, packaging, tests, and
   runtime-specific process/cache branches. Supported application targets are

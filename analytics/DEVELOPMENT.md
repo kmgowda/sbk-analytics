@@ -29,6 +29,7 @@ analytics/              # Main package
 ├── cli.py             # CLI entry point
 ├── policy.py          # runtime policy and managed-artifact metadata
 ├── config.py          # YAML config parsing
+├── sbk_contract.py    # supported SBK option contract and migrations
 ├── releases.py        # Dependency resolution (JDK, SBK, sbk-charts)
 ├── runner.py          # SBK execution (serial/parallel)
 ├── charts.py          # sbk-charts invocation
@@ -116,6 +117,8 @@ sbk-analytics -c examples/config.yml
   sbk-charts from sbk-analytics
 - **Caching**: External dependencies cached locally
 - **macOS Handling**: Special subprocess handling for logging
+- **SBK Lifecycle**: SBK owns timing/readiness/failure reporting; broad
+  remote cleanup is interruption fallback only
 
 ## Dependencies
 

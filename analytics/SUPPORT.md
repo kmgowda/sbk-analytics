@@ -65,6 +65,7 @@ If you're new to sbk-analytics, start with:
 - Ensure dependencies are installed
 
 **Problem**: SBK instances fail
+- Confirm the selected SBK implements the shipped baseline command contract
 - Check YAML configuration syntax
 - Verify file paths exist
 - Use verbose logging: `sbk-analytics -c config.yml -v`
@@ -74,11 +75,12 @@ If you're new to sbk-analytics, start with:
 - Current releases terminate the complete local process tree for `sbk-yal`,
   `sbk-gem-yal`, and `sbk-charts`; verify with `ps`/Task Manager that the
   process is from the same invocation
-- Allow up to 3 seconds for graceful shutdown before forced termination
+- Allow up to 30 seconds for SBK-GEM to perform its native remote cleanup
 - Use `-v` to see termination messages for catchable signals
-- Remote SBK clients receive best-effort SSH cleanup on catchable interrupts;
-  after an uncatchable local kill, inspect the remote nodes separately
-- Remote cleanup disables SSH host-key checking and runs
+- Remote SBK clients normally receive SBK-GEM's own cleanup. Analytics
+  uses SSH cleanup only if that native shutdown times out; after an uncatchable
+  local kill, inspect the remote nodes separately
+- The emergency remote cleanup disables SSH host-key checking and runs
   `pkill -9 -f io.sbk.main`; use only trusted, dedicated benchmark nodes,
   because other matching SBK workloads on those nodes will also be stopped
 

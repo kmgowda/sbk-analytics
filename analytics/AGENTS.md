@@ -147,7 +147,7 @@ artifact identities plus operational defaults shared by multiple subsystems.
 - application, SBK, sbk-charts, and JDK metadata
 - cache marker/home/metadata filenames and cache namespaces
 - GitHub, download, retry, pip trust, and dependency probe behavior
-- process termination, benchmark watchdog, SSH, and system-info timing
+- process termination, SBK-native lifecycle, SSH fallback, and system-info timing
 - configuration defaults, accepted values, and CLI exit codes
 
 Version pins remain operator configuration in `sbk-config.env`; algorithm-local
@@ -166,7 +166,7 @@ to a consumer module.
 - `run_jobs()`: Main entry point for running SBK instances
 - `_run_serial()`: Execute instances one at a time
 - `_run_parallel()`: Execute instances concurrently
-- `_hung_jvm_watchdog()`: Monitor and kill hung JVM processes
+- `_wait_for_native_completion()`: Trust SBK's authoritative completion
 
 **Environment Configuration**:
 - Sets `SBK_JAVA_HOME` to resolved JDK location
@@ -228,7 +228,7 @@ sbk-analytics invocation
 **Key Settings**:
 ```
 sbk.url=https://github.com/kmgowda/SBK
-sbk.version=10.4
+sbk.version=10.6
 # sbk.local.folder=/root/projects/SBK
 downloads.folder=./.sbk
 sbk.jdk.version=25

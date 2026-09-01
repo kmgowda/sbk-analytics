@@ -21,6 +21,11 @@ workdir: /tmp/sbk-analytics
 sbk:
   seconds: 60
   time: ms
+  # Fixed-record runs can override the native 600-second idle limit:
+  # idletimeoutseconds: 600
+  # Distributed instances (those with nodes:) may also set packagescleanup,
+  # fullcopy, hostkeycheck/knownhosts, sbmport/sbmsleepms, totalrecords, or
+  # totalthroughput. SBK-GEM embeds SBM; analytics does not launch sbm directly.
 
 classes:
   - class: file
