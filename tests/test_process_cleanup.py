@@ -16,6 +16,7 @@ from analytics.charts import run_sbk_charts
 from analytics.config import OrchestratorConfig
 from analytics.errors import LifecycleError
 from analytics.lifecycle import (
+    _group_exists,
     _group_run_identity_matches,
     _identity_matches,
     current_run_id,
@@ -181,6 +182,59 @@ class ForcedParentExitTests(unittest.TestCase):
 
 
 class ManagedProcessTests(unittest.TestCase):
+    def test_group_scan_ignores_denied_unrelated_process(self):
+        unrelated = mock.Mock()
+        unrelated.pid = 1234
+        member = mock.Mock()
+        member.pid = 9876
+        member.info = {
+            RUNTIME_POLICY.lifecycle.process_status_attribute:
+                psutil.STATUS_ZOMBIE,
+        }
+
+        def process_group(pid):
+            if pid == unrelated.pid:
+                raise PermissionError("unrelated system process")
+            return member.pid
+
+        with mock.patch(
+            "analytics.lifecycle.os.killpg"
+        ), mock.patch(
+            "analytics.lifecycle.psutil.process_iter",
+            return_value=[unrelated, member],
+        ), mock.patch(
+            "analytics.lifecycle.os.getpgid", side_effect=process_group
+        ):
+            self.assertFalse(_group_exists(member.pid))
+
+    def test_group_identity_ignores_denied_unrelated_process(self):
+        unrelated = mock.Mock()
+        unrelated.pid = 1234
+        member = mock.Mock()
+        member.pid = 9876
+        member.info = {
+            RUNTIME_POLICY.lifecycle.process_status_attribute:
+                psutil.STATUS_RUNNING,
+        }
+        member.environ.return_value = {
+            RUNTIME_POLICY.environment.lifecycle_run_id: "recorded-run",
+        }
+
+        def process_group(pid):
+            if pid == unrelated.pid:
+                raise PermissionError("unrelated system process")
+            return member.pid
+
+        with mock.patch(
+            "analytics.lifecycle.psutil.process_iter",
+            return_value=[unrelated, member],
+        ), mock.patch(
+            "analytics.lifecycle.os.getpgid", side_effect=process_group
+        ):
+            self.assertTrue(
+                _group_run_identity_matches(member.pid, "recorded-run")
+            )
+
     def test_identity_environment_denial_logs_command_fallback(self):
         process = mock.Mock()
         process.is_running.return_value = True

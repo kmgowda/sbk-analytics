@@ -209,15 +209,29 @@ def _group_exists(pgid: int) -> bool:
         LIFECYCLE_POLICY.process_status_attribute,
     )):
         try:
-            if (
-                os.getpgid(process.pid) == pgid
-                and process.info[LIFECYCLE_POLICY.process_status_attribute]
-                != psutil.STATUS_ZOMBIE
-            ):
-                return True
+            process_pgid = os.getpgid(process.pid)
         except (psutil.NoSuchProcess, ProcessLookupError):
             continue
         except (psutil.AccessDenied, PermissionError):
+            # macOS commonly denies getpgid() for unrelated system processes.
+            # That says nothing about the workload group being inspected. The
+            # process-group leader is the only denied PID whose membership can
+            # be inferred from its PID, so retain the conservative result for
+            # that case and skip unrelated inaccessible processes.
+            if process.pid == pgid:
+                return True
+            continue
+        if process_pgid != pgid:
+            continue
+        try:
+            if (
+                process.info[LIFECYCLE_POLICY.process_status_attribute]
+                != psutil.STATUS_ZOMBIE
+            ):
+                return True
+        except (psutil.AccessDenied, PermissionError):
+            # Membership is already known, so an unreadable status is a live
+            # ambiguity and cleanup must continue waiting conservatively.
             return True
     return False
 
@@ -230,9 +244,26 @@ def _group_run_identity_matches(pgid: int, run_id: str) -> bool:
         LIFECYCLE_POLICY.process_status_attribute,
     )):
         try:
+            process_pgid = os.getpgid(process.pid)
+        except (psutil.NoSuchProcess, ProcessLookupError):
+            continue
+        except (psutil.AccessDenied, PermissionError) as exc:
+            if process.pid != pgid:
+                continue
+            # Ambiguous ownership must never result in a signal.
+            log.debug(
+                "could not verify lifecycle run ID for process-group "
+                "member pid=%s pgid=%s; leaving the group untouched: %s",
+                process.pid,
+                pgid,
+                exc,
+            )
+            return False
+        if process_pgid != pgid:
+            continue
+        try:
             if (
-                os.getpgid(process.pid) != pgid
-                or process.info[LIFECYCLE_POLICY.process_status_attribute]
+                process.info[LIFECYCLE_POLICY.process_status_attribute]
                 == psutil.STATUS_ZOMBIE
             ):
                 continue
@@ -243,7 +274,8 @@ def _group_run_identity_matches(pgid: int, run_id: str) -> bool:
             ):
                 return False
         except (psutil.Error, OSError) as exc:
-            # Ambiguous ownership must never result in a signal.
+            # The process is a verified group member, so unreadable identity
+            # remains ambiguous and must fail closed.
             log.debug(
                 "could not verify lifecycle run ID for process-group "
                 "member pid=%s pgid=%s; leaving the group untouched: %s",

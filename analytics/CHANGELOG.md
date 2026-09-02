@@ -54,6 +54,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Require both exit code zero and a non-empty CSV before charting an SBK run.
 
 ### Fixed
+- Ignore inaccessible unrelated system processes while inspecting an owned
+  process group, preventing macOS stale-run reconciliation from timing out
+  after the verified workload has already terminated.
 - Relocate absolute virtual-environment paths when publishing a staged managed
   sbk-charts installation, validate the final console command, and repair cache
   entries whose shebang still points to a removed staging directory.
