@@ -24,6 +24,7 @@ EXIT_CODES = RUNTIME_POLICY.exit_codes
 DISPLAY_POLICY = RUNTIME_POLICY.display
 CLI_POLICY = RUNTIME_POLICY.cli
 DIAGNOSTIC_FIELDS = RUNTIME_POLICY.diagnostics
+WORKFLOW_POLICY = RUNTIME_POLICY.workflow
 
 
 @dataclass(frozen=True)
@@ -70,7 +71,7 @@ def _prepare_workflow(args: Any, versions: Any, services: WorkflowServices):
         )
     log.info(
         "mode=%s instances=%d uses_gem=%s",
-        cfg.mode if cfg else "dependency-check",
+        cfg.mode if cfg else WORKFLOW_POLICY.dependency_check_mode,
         len(cfg.instances) if cfg else 0,
         cfg.uses_gem if cfg else False,
     )
@@ -207,18 +208,21 @@ def _run_benchmarks(
         )
 
     # 2. Generate per-class YAMLs
-    yml_dir = work / "yml"
-    csv_dir = work / "csv"
+    yml_dir = work / WORKFLOW_POLICY.yaml_directory
+    csv_dir = work / WORKFLOW_POLICY.csv_directory
     csv_dir.mkdir(parents=True, exist_ok=True)
 
     jobs: list[tuple[str, Path, Path]] = []
     for inst in cfg.instances:
-        csv_path = (csv_dir / f"sbk-{inst.name}.csv").resolve()
+        csv_path = (
+            csv_dir
+            / WORKFLOW_POLICY.csv_filename_template.format(name=inst.name)
+        ).resolve()
         yml_path = services.generate_instance_yaml(inst, yml_dir, csv_path)
         jobs.append((inst.name, yml_path, csv_path))
 
     # 3. Run SBK instances
-    log_dir = work / "logs"
+    log_dir = work / WORKFLOW_POLICY.log_directory
     results = services.run_jobs(
         executable, jobs, mode=cfg.mode, log_dir=log_dir, jdk_home=jdk.home,
         forward_logs=args.forward_logs, executables=executables,
@@ -230,7 +234,13 @@ def _run_benchmarks(
 
     print("\n=== SBK run summary ===", flush=True)
     for r in results:
-        status = "OK" if r.ok else f"FAIL(rc={r.returncode})"
+        status = (
+            WORKFLOW_POLICY.successful_run_status
+            if r.ok
+            else WORKFLOW_POLICY.failed_run_status_template.format(
+                returncode=r.returncode
+            )
+        )
         extra = f" log={r.log_path}" if r.log_path else ""
         print(f"  {status:14s} instance={r.class_name} csv={r.csv_path}{extra}")
     return succeeded, failed, pre_run_removed
@@ -280,7 +290,7 @@ def _validate_usable_inputs(
         services._emit_json(json_stream, {
             DIAGNOSTIC_FIELDS.status: CLI_POLICY.failed_status,
             DIAGNOSTIC_FIELDS.exit_code: EXIT_CODES.no_usable_csv,
-            DIAGNOSTIC_FIELDS.reason: "no usable CSV input",
+            DIAGNOSTIC_FIELDS.reason: WORKFLOW_POLICY.no_usable_csv_reason,
             DIAGNOSTIC_FIELDS.sbk: services._dependency_summary_sbk(sbk),
             DIAGNOSTIC_FIELDS.successful_instances: [],
             DIAGNOSTIC_FIELDS.failed_instances: [
@@ -348,7 +358,7 @@ def _publish_report(
             **services._dependency_summary(sbk, charts, versions),
             DIAGNOSTIC_FIELDS.status: CLI_POLICY.failed_status,
             DIAGNOSTIC_FIELDS.exit_code: rc,
-            DIAGNOSTIC_FIELDS.reason: "sbk-charts failed",
+            DIAGNOSTIC_FIELDS.reason: WORKFLOW_POLICY.charts_failure_reason,
         })
         return rc
     if not output_xlsx.exists():
@@ -357,7 +367,7 @@ def _publish_report(
             **services._dependency_summary(sbk, charts, versions),
             DIAGNOSTIC_FIELDS.status: CLI_POLICY.failed_status,
             DIAGNOSTIC_FIELDS.exit_code: EXIT_CODES.missing_output,
-            DIAGNOSTIC_FIELDS.reason: "expected output was not produced",
+            DIAGNOSTIC_FIELDS.reason: WORKFLOW_POLICY.missing_output_reason,
         })
         return EXIT_CODES.missing_output
 
@@ -372,7 +382,8 @@ def _publish_report(
             **services._dependency_summary(sbk, charts, versions),
             DIAGNOSTIC_FIELDS.status: CLI_POLICY.failed_status,
             DIAGNOSTIC_FIELDS.exit_code: EXIT_CODES.system_info_failure,
-            DIAGNOSTIC_FIELDS.reason: "failed to append system sheet",
+            DIAGNOSTIC_FIELDS.reason:
+                WORKFLOW_POLICY.system_info_failure_reason,
         })
         return EXIT_CODES.system_info_failure
 

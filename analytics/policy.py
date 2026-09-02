@@ -41,6 +41,9 @@ class ApplicationMetadata:
     distribution_name: str
     command_name: str
     repository_url: str
+    banner_filename: str
+    root_config_filename: str
+    bundled_config_filename: str
 
 
 APPLICATION = ApplicationMetadata(
@@ -48,6 +51,9 @@ APPLICATION = ApplicationMetadata(
     distribution_name="sbk-analytics",
     command_name="sbk-analytics",
     repository_url="https://github.com/kmgowda/sbk-analytics",
+    banner_filename="banner.txt",
+    root_config_filename="sbk-config.env",
+    bundled_config_filename="default-sbk-config.env",
 )
 
 
@@ -127,6 +133,7 @@ class CachePolicy:
     default_jdk_folder: str = "./.jdk"
     lock_name_template: str = ".{name}.lock"
     install_stage_template: str = ".{name}.install-{pid}"
+    partial_download_suffix: str = ".part"
 
 
 @dataclass(frozen=True)
@@ -172,6 +179,7 @@ class ArchivePolicy:
     member_mode_shift: int = 16
     executable_mode_mask: int = 0o111
     secondary_asset_penalty: int = 10
+    preferred_tar_suffix: str = ".tar.gz"
 
     @property
     def release_suffixes(self) -> tuple[str, ...]:
@@ -231,6 +239,21 @@ class EnvironmentPolicy:
     sbk_local_folder: str = "SBK_LOCAL_FOLDER"
     charts_local_folder: str = "SBK_CHARTS_LOCAL_FOLDER"
     charts_local_executable: str = "SBK_CHARTS_LOCAL_EXECUTABLE"
+    java_tool_option_separator: str = " "
+    java_unbuffered_options: tuple[str, ...] = (
+        "-Djava.stdout.buffered=false",
+        "-Djava.stderr.buffered=false",
+        "-Dsun.stdout.encoding=UTF-8",
+        "-Dsun.stderr.encoding=UTF-8",
+    )
+
+
+@dataclass(frozen=True)
+class HostPlatformPolicy:
+    """Canonical values returned by :data:`sys.platform`."""
+
+    linux: str = "linux"
+    macos: str = "darwin"
 
 
 @dataclass(frozen=True)
@@ -249,6 +272,9 @@ class SbkInterfacePolicy:
     gem_user_option: str = "gemuser"
     gem_password_option: str = "gempass"
     gem_port_option: str = "gemport"
+    file_driver_name: str = "file"
+    file_path_options: tuple[str, ...] = ("file", "fname")
+    configuration_file_option: str = "-f"
 
 
 @dataclass(frozen=True)
@@ -415,6 +441,18 @@ class NetworkPolicy:
         "https://api.github.com/repos/{repo}/releases/tags/{tag}"
     )
     github_api_version: str = "2022-11-28"
+    github_accept_header: str = "Accept"
+    github_accept_value: str = "application/vnd.github+json"
+    github_api_version_header: str = "X-GitHub-Api-Version"
+    github_token_environment: str = "GITHUB_TOKEN"
+    authorization_header: str = "Authorization"
+    bearer_prefix: str = "Bearer "
+    range_header: str = "Range"
+    byte_range_template: str = "bytes={offset}-"
+    content_length_header: str = "content-length"
+    https_prefix: str = "https://"
+    url_scheme_separator: str = "://"
+    release_tag_prefix: str = "v"
     release_assets_field: str = "assets"
     release_asset_name_field: str = "name"
     release_asset_url_field: str = "browser_download_url"
@@ -455,6 +493,29 @@ class DependencyPolicy:
     python_metadata_script_template: str = (
         "import importlib.metadata as m; print(m.version('{distribution}'))"
     )
+    charts_archive_url_template: str = (
+        "{repository}/archive/refs/tags/{version}{archive_suffix}"
+    )
+    charts_archive_name_template: str = (
+        "{artifact}-{version}{archive_suffix}"
+    )
+    charts_git_specification_template: str = "git+{repository}@{version}"
+    charts_executable_globs: tuple[str, ...] = (
+        "sbk-charts*", "sb-charts*",
+    )
+    sbk_primary_asset_prefix_template: str = "{artifact}-{version}"
+    sbk_secondary_asset_tokens: tuple[str, ...] = ("gem", "yal", "sbm")
+    jdk_archive_name_template: str = "jdk-{version}{archive_suffix}"
+    jdk_metadata_binary_field: str = "binary"
+    jdk_metadata_package_field: str = "package"
+    jdk_metadata_link_field: str = "link"
+    jdk_metadata_checksum_field: str = "checksum"
+    jdk_x86_64_aliases: tuple[str, ...] = ("x86_64", "amd64")
+    jdk_x86_64_architecture: str = "x64"
+    jdk_platform_names: tuple[tuple[str, str], ...] = (
+        ("linux", "linux"),
+        ("darwin", "mac"),
+    )
 
     @property
     def default_version_policy(self) -> str:
@@ -476,6 +537,10 @@ class ProcessPolicy:
     guard_pipe_poll_interval_s: float = 0.25
     guard_exit_padding_s: float = 1.0
     guard_force_wait_s: float = 1.0
+    line_buffer_size: int = 1
+    handled_signal_names: tuple[str, ...] = (
+        "SIGINT", "SIGTERM", "SIGHUP", "SIGQUIT",
+    )
 
 
 @dataclass(frozen=True)
@@ -570,6 +635,25 @@ class BenchmarkPolicy:
 
 
 @dataclass(frozen=True)
+class WorkflowPolicy:
+    """Stable run-artifact layout and summary reason vocabulary."""
+
+    dependency_check_mode: str = "dependency-check"
+    yaml_directory: str = "yml"
+    csv_directory: str = "csv"
+    log_directory: str = "logs"
+    csv_filename_template: str = "sbk-{name}.csv"
+    yaml_filename_template: str = "sbk-{name}.yml"
+    log_filename_template: str = "sbk-{name}.log"
+    successful_run_status: str = "OK"
+    failed_run_status_template: str = "FAIL(rc={returncode})"
+    no_usable_csv_reason: str = "no usable CSV input"
+    charts_failure_reason: str = "sbk-charts failed"
+    missing_output_reason: str = "expected output was not produced"
+    system_info_failure_reason: str = "failed to append system sheet"
+
+
+@dataclass(frozen=True)
 class SystemInfoPolicy:
     linux_platform: str = "Linux"
     macos_platform: str = "Darwin"
@@ -578,6 +662,11 @@ class SystemInfoPolicy:
     self_cgroup_file: str = "/proc/self/cgroup"
     docker_environment_file: str = "/.dockerenv"
     kubernetes_service_environment: str = "KUBERNETES_SERVICE_HOST"
+    kubernetes_pod_environment: str = "POD_NAME"
+    hostname_environment: str = "HOSTNAME"
+    kubernetes_namespace_file: str = (
+        "/var/run/secrets/kubernetes.io/serviceaccount/namespace"
+    )
     kubernetes_runtime: str = "kubernetes"
     docker_runtime: str = "docker"
     lscpu_command: tuple[str, ...] = ("lscpu",)
@@ -659,7 +748,7 @@ class SystemInfoPolicy:
 @dataclass(frozen=True)
 class ConfigurationPolicy:
     default_mode: str = "serial"
-    valid_modes: tuple[str, ...] = ("serial", "parallel")
+    parallel_mode: str = "parallel"
     default_workdir: str = os.path.join(tempfile.gettempdir(), APPLICATION.name)
     default_output: str = f"{APPLICATION.name}.xlsx"
     default_ai_model: str = "noai"
@@ -716,6 +805,10 @@ class ConfigurationPolicy:
     @property
     def valid_cleanup(self) -> tuple[str, ...]:
         return (self.default_cleanup, self.cleanup_on_success)
+
+    @property
+    def valid_modes(self) -> tuple[str, ...]:
+        return (self.default_mode, self.parallel_mode)
 
 
 @dataclass(frozen=True)
@@ -783,6 +876,7 @@ class RuntimePolicy:
     archives: ArchivePolicy = ArchivePolicy()
     provenance: DependencyProvenancePolicy = DependencyProvenancePolicy()
     environment: EnvironmentPolicy = EnvironmentPolicy()
+    platform: HostPlatformPolicy = HostPlatformPolicy()
     sbk_interface: SbkInterfacePolicy = SbkInterfacePolicy()
     sbk_contract: SbkContractPolicy = SbkContractPolicy()
     charts_interface: ChartsInterfacePolicy = ChartsInterfacePolicy()
@@ -795,6 +889,7 @@ class RuntimePolicy:
     lifecycle: LifecyclePolicy = LifecyclePolicy()
     ssh: SshPolicy = SshPolicy()
     benchmarks: BenchmarkPolicy = BenchmarkPolicy()
+    workflow: WorkflowPolicy = WorkflowPolicy()
     system_info: SystemInfoPolicy = SystemInfoPolicy()
     configuration: ConfigurationPolicy = ConfigurationPolicy()
     properties: PropertiesPolicy = PropertiesPolicy()

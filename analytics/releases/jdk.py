@@ -20,7 +20,7 @@ from pathlib import Path
 import requests
 
 from ._shared import (
-    CACHE_METADATA_POLICY, CACHE_POLICY, DEPENDENCY_POLICY,
+    ARCHIVE_POLICY, CACHE_METADATA_POLICY, CACHE_POLICY, DEPENDENCY_POLICY,
     ENVIRONMENT_POLICY, LAYOUT_POLICY, NETWORK_POLICY, CacheError,
     DependencyResolutionError, JdkInstall, _cache_lock, _cache_lock_path,
     _cache_root, _cache_stage_path, _download, _extract, _write_metadata,
@@ -132,9 +132,14 @@ def find_existing_jdk(required_major: int) -> Path | None:
 
 
 def _jdk_platform() -> tuple[str, str]:
-    arch = "x64" if os.uname().machine in ("x86_64", "amd64") else os.uname().machine
+    machine = os.uname().machine
+    arch = (
+        DEPENDENCY_POLICY.jdk_x86_64_architecture
+        if machine in DEPENDENCY_POLICY.jdk_x86_64_aliases
+        else machine
+    )
     try:
-        os_name = {"linux": "linux", "darwin": "mac"}[sys.platform]
+        os_name = dict(DEPENDENCY_POLICY.jdk_platform_names)[sys.platform]
     except KeyError as exc:
         raise DependencyResolutionError(
             f"managed JDK installation is unsupported on {sys.platform}; "
@@ -160,9 +165,15 @@ def _jdk_asset(
         )
         response.raise_for_status()
         assets = response.json()
-        package = assets[0]["binary"]["package"]
-        download_url = str(package["link"])
-        checksum = str(package["checksum"]).lower()
+        package = assets[0][DEPENDENCY_POLICY.jdk_metadata_binary_field][
+            DEPENDENCY_POLICY.jdk_metadata_package_field
+        ]
+        download_url = str(
+            package[DEPENDENCY_POLICY.jdk_metadata_link_field]
+        )
+        checksum = str(
+            package[DEPENDENCY_POLICY.jdk_metadata_checksum_field]
+        ).lower()
     except (requests.RequestException, ValueError, IndexError, KeyError, TypeError) as exc:
         raise DependencyResolutionError(
             f"could not resolve checksum-verified Temurin JDK {version} metadata"
@@ -171,7 +182,7 @@ def _jdk_asset(
         raise DependencyResolutionError(
             f"Temurin JDK {version} metadata contains an invalid SHA-256"
         )
-    if not download_url.startswith("https://"):
+    if not download_url.startswith(NETWORK_POLICY.https_prefix):
         raise DependencyResolutionError(
             f"Temurin JDK {version} metadata contains a non-HTTPS package URL"
         )
@@ -303,7 +314,10 @@ def _install_jdk_locked(
     stage.mkdir(parents=True)
 
     url, expected_checksum = _jdk_asset(version, ssl_verify)
-    archive = stage / f"jdk-{version}.tar.gz"
+    archive = stage / DEPENDENCY_POLICY.jdk_archive_name_template.format(
+        version=version,
+        archive_suffix=ARCHIVE_POLICY.preferred_tar_suffix,
+    )
     checksum = _download(url, archive, ssl_verify=ssl_verify)
     if checksum.lower() != expected_checksum:
         raise CacheError(

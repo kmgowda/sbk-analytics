@@ -359,7 +359,9 @@ def _shared_provenance(
 
 def _read_metadata(path: Path) -> dict:
     try:
-        value = json.loads(path.read_text(encoding="utf-8"))
+        value = json.loads(
+            path.read_text(encoding=DISPLAY_POLICY.text_encoding)
+        )
     except (OSError, ValueError, TypeError):
         return {}
     return value if isinstance(value, dict) else {}
@@ -424,12 +426,15 @@ def _gh_release(
 ) -> dict:
     """Fetch GitHub release metadata, accepting plain and ``v``-prefixed tags."""
     headers = {
-        "Accept": "application/vnd.github+json",
-        "X-GitHub-Api-Version": NETWORK_POLICY.github_api_version,
+        NETWORK_POLICY.github_accept_header: NETWORK_POLICY.github_accept_value,
+        NETWORK_POLICY.github_api_version_header:
+            NETWORK_POLICY.github_api_version,
     }
-    token = os.environ.get("GITHUB_TOKEN")
+    token = os.environ.get(NETWORK_POLICY.github_token_environment)
     if token:
-        headers["Authorization"] = f"Bearer {token}"
+        headers[NETWORK_POLICY.authorization_header] = (
+            f"{NETWORK_POLICY.bearer_prefix}{token}"
+        )
 
     # Use ssl_verify setting from sbk-config.env
     if not ssl_verify:
@@ -439,7 +444,12 @@ def _gh_release(
     else:
         log.debug("SSL verification enabled (ssl.verify=true in sbk-config.env)")
 
-    candidates = (tag,) if tag.lower().startswith("v") else (tag, f"v{tag}")
+    prefix = NETWORK_POLICY.release_tag_prefix
+    candidates = (
+        (tag,)
+        if tag.lower().startswith(prefix)
+        else (tag, f"{prefix}{tag}")
+    )
     for candidate in candidates:
         url = NETWORK_POLICY.github_api_url.format(repo=repo, tag=candidate)
         log.info("fetching GitHub release metadata: %s@%s", repo, candidate)
@@ -467,12 +477,15 @@ def _download(
 ) -> str:
     """Download `url` to `dest`, resuming via HTTP Range if .part already exists."""
     dest.parent.mkdir(parents=True, exist_ok=True)
-    tmp = dest.with_suffix(dest.suffix + ".part")
+    tmp = dest.with_suffix(dest.suffix + CACHE_POLICY.partial_download_suffix)
     last_err: Exception | None = None
 
     for attempt in range(1, max_attempts + 1):
         offset = tmp.stat().st_size if tmp.exists() else 0
-        headers = {"Range": f"bytes={offset}-"} if offset else {}
+        headers = {
+            NETWORK_POLICY.range_header:
+                NETWORK_POLICY.byte_range_template.format(offset=offset)
+        } if offset else {}
         log.info(
             "downloading %s -> %s (attempt %d/%d, offset=%d, SSL verify=%s)",
             url, dest, attempt, max_attempts, offset, ssl_verify,
@@ -496,7 +509,9 @@ def _download(
                     r.raise_for_status()
 
                 # Get total file size for progress reporting
-                total_size = int(r.headers.get('content-length', 0))
+                total_size = int(
+                    r.headers.get(NETWORK_POLICY.content_length_header, 0)
+                )
                 if offset:
                     total_size += offset
 

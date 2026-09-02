@@ -150,9 +150,9 @@ def _print_source_provenance(provenance, *, local_action: str) -> None:
 
 def _print_banner() -> None:
     """Print the sbk-analytics ASCII art banner to stderr."""
-    banner_path = Path(__file__).parent / "banner.txt"
+    banner_path = Path(__file__).parent / APPLICATION.banner_filename
     try:
-        banner = banner_path.read_text(encoding="utf-8")
+        banner = banner_path.read_text(encoding=DISPLAY_POLICY.text_encoding)
         print(banner.format(version=__version__), file=sys.stderr, flush=True)
     except Exception:
         # Fallback if banner file is missing
@@ -243,13 +243,16 @@ def _bundled_versions_file() -> Path:
     """
     launcher_root = os.environ.get(ENVIRONMENT_POLICY.source_root)
     if launcher_root:
-        launcher_file = Path(launcher_root) / "sbk-config.env"
+        launcher_file = Path(launcher_root) / APPLICATION.root_config_filename
         if launcher_file.is_file():
             return launcher_file
-    source_tree_file = Path(__file__).resolve().parent.parent / "sbk-config.env"
+    source_tree_file = (
+        Path(__file__).resolve().parent.parent
+        / APPLICATION.root_config_filename
+    )
     if source_tree_file.is_file():
         return source_tree_file
-    return Path(__file__).resolve().parent / "default-sbk-config.env"
+    return Path(__file__).resolve().parent / APPLICATION.bundled_config_filename
 
 
 def _parse_args(argv: list[str] | None) -> argparse.Namespace:
@@ -630,8 +633,10 @@ def _print_dependency_status(status: dict) -> None:
 def _init_local_config(output: Path) -> int:
     if output.exists():
         raise ConfigurationError(f"refusing to overwrite existing file: {output}")
-    template = _bundled_versions_file().read_text(encoding="utf-8")
-    output.write_text(template, encoding="utf-8")
+    template = _bundled_versions_file().read_text(
+        encoding=DISPLAY_POLICY.text_encoding
+    )
+    output.write_text(template, encoding=DISPLAY_POLICY.text_encoding)
     print(f"Created local configuration: {output}")
     print("Edit sbk.local.folder and/or sbk-charts.local.folder before use.")
     return EXIT_CODES.success
@@ -642,9 +647,16 @@ def _cleanup_benchmark_data(cfg, work: Path) -> list[Path]:
     work_root = work.resolve()
     removed: list[Path] = []
     for instance in cfg.instances:
-        if instance.class_name.lower() != "file":
+        if instance.class_name.lower() != SBK_INTERFACE_POLICY.file_driver_name:
             continue
-        raw = instance.params.get("file") or instance.params.get("fname")
+        raw = next(
+            (
+                instance.params.get(option)
+                for option in SBK_INTERFACE_POLICY.file_path_options
+                if instance.params.get(option)
+            ),
+            None,
+        )
         if not raw:
             continue
         path = Path(str(raw)).expanduser()

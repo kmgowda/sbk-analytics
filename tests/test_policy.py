@@ -130,6 +130,43 @@ class PolicyTests(unittest.TestCase):
             "nodes",
         )
 
+    def test_operational_templates_are_centralized_and_composable(self):
+        archive = RUNTIME_POLICY.archives.preferred_tar_suffix
+        dependencies = RUNTIME_POLICY.dependencies
+        workflow = RUNTIME_POLICY.workflow
+        self.assertEqual(
+            dependencies.charts_archive_name_template.format(
+                artifact=SBK_CHARTS_ARTIFACT.key,
+                version="1.2.3",
+                archive_suffix=archive,
+            ),
+            "sbk-charts-1.2.3.tar.gz",
+        )
+        self.assertEqual(
+            dependencies.jdk_archive_name_template.format(
+                version="25",
+                archive_suffix=archive,
+            ),
+            "jdk-25.tar.gz",
+        )
+        self.assertEqual(
+            workflow.yaml_filename_template.format(name="write"),
+            "sbk-write.yml",
+        )
+        self.assertEqual(
+            workflow.csv_filename_template.format(name="write"),
+            "sbk-write.csv",
+        )
+        self.assertEqual(
+            workflow.log_filename_template.format(name="write"),
+            "sbk-write.log",
+        )
+        self.assertIn(
+            RUNTIME_POLICY.configuration.parallel_mode,
+            RUNTIME_POLICY.configuration.valid_modes,
+        )
+        self.assertTrue(RUNTIME_POLICY.environment.java_unbuffered_options)
+
     def test_cross_subsystem_schemas_are_centralized(self):
         lifecycle = RUNTIME_POLICY.lifecycle
         lifecycle_fields = {
@@ -276,6 +313,7 @@ class PolicyTests(unittest.TestCase):
             ".ok",
             ".home",
             "metadata.json",
+            RUNTIME_POLICY.cache.partial_download_suffix,
             SBK_ARTIFACT.repository_url,
             SBK_CHARTS_ARTIFACT.repository_url,
             RUNTIME_POLICY.provenance.shared_folder_mode,
@@ -285,9 +323,13 @@ class PolicyTests(unittest.TestCase):
             RUNTIME_POLICY.provenance.explicit_executable_layout,
             RUNTIME_POLICY.environment.sbk_java_home,
             RUNTIME_POLICY.environment.java_tool_options,
+            *RUNTIME_POLICY.environment.java_unbuffered_options,
             RUNTIME_POLICY.environment.lifecycle_run_id,
             RUNTIME_POLICY.sbk_interface.local_arguments_wrapper,
             RUNTIME_POLICY.sbk_interface.gem_arguments_wrapper,
+            RUNTIME_POLICY.sbk_interface.file_driver_name,
+            *RUNTIME_POLICY.sbk_interface.file_path_options,
+            RUNTIME_POLICY.sbk_interface.configuration_file_option,
             RUNTIME_POLICY.environment.source_root,
             RUNTIME_POLICY.environment.downloads_folder,
             RUNTIME_POLICY.environment.legacy_cache_folder,
@@ -336,6 +378,32 @@ class PolicyTests(unittest.TestCase):
             RUNTIME_POLICY.system_info.self_cgroup_file,
             RUNTIME_POLICY.system_info.docker_environment_file,
             RUNTIME_POLICY.system_info.kubernetes_service_environment,
+            RUNTIME_POLICY.system_info.kubernetes_pod_environment,
+            RUNTIME_POLICY.system_info.hostname_environment,
+            RUNTIME_POLICY.system_info.kubernetes_namespace_file,
+            RUNTIME_POLICY.network.github_accept_header,
+            RUNTIME_POLICY.network.github_accept_value,
+            RUNTIME_POLICY.network.github_api_version_header,
+            RUNTIME_POLICY.network.github_token_environment,
+            RUNTIME_POLICY.network.authorization_header,
+            RUNTIME_POLICY.network.range_header,
+            RUNTIME_POLICY.network.byte_range_template,
+            RUNTIME_POLICY.network.content_length_header,
+            RUNTIME_POLICY.archives.preferred_tar_suffix,
+            RUNTIME_POLICY.dependencies.charts_archive_url_template,
+            RUNTIME_POLICY.dependencies.charts_archive_name_template,
+            RUNTIME_POLICY.dependencies.charts_git_specification_template,
+            RUNTIME_POLICY.dependencies.jdk_archive_name_template,
+            RUNTIME_POLICY.dependencies.jdk_metadata_binary_field,
+            RUNTIME_POLICY.dependencies.jdk_metadata_package_field,
+            RUNTIME_POLICY.dependencies.jdk_metadata_link_field,
+            RUNTIME_POLICY.dependencies.jdk_metadata_checksum_field,
+            RUNTIME_POLICY.dependencies.sbk_primary_asset_prefix_template,
+            *RUNTIME_POLICY.dependencies.charts_executable_globs,
+            *RUNTIME_POLICY.dependencies.sbk_secondary_asset_tokens,
+            *RUNTIME_POLICY.dependencies.jdk_x86_64_aliases,
+            *(value for pair in RUNTIME_POLICY.dependencies.jdk_platform_names
+              for value in pair),
         }
         forbidden_strings.update(
             value
@@ -346,6 +414,15 @@ class PolicyTests(unittest.TestCase):
             value
             for value in dataclasses.astuple(RUNTIME_POLICY.diagnostics)
             if isinstance(value, str)
+        )
+        forbidden_strings.update(
+            value
+            for value in dataclasses.astuple(RUNTIME_POLICY.workflow)
+            if isinstance(value, str)
+        )
+        forbidden_strings.update(dataclasses.astuple(RUNTIME_POLICY.platform))
+        forbidden_strings.update(
+            RUNTIME_POLICY.processes.handled_signal_names
         )
         violations = []
         for filename in consumers:

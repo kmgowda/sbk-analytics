@@ -89,7 +89,7 @@ def _ensure_sbk_locked(
                 detected_version=version,
                 provenance=_release_provenance(
                     repository_url=(
-                        repo if "://" in repo
+                        repo if NETWORK_POLICY.url_scheme_separator in repo
                         else f"{NETWORK_POLICY.github_web_url}/{repo}"
                     ),
                     version=version,
@@ -120,8 +120,17 @@ def _ensure_sbk_locked(
         if not n.endswith(ARCHIVE_POLICY.release_suffixes):
             continue
         # de-prioritise sub-distros like sbk-gem-yal-X.tar
-        score = 0 if n.startswith(("sbk-" + version.lower(), f"sbk-{version}")) else 1
-        if "gem" in n or "yal" in n or "sbm" in n:
+        primary_prefix = (
+            DEPENDENCY_POLICY.sbk_primary_asset_prefix_template.format(
+                artifact=SBK_ARTIFACT.key,
+                version=version,
+            ).lower()
+        )
+        score = 0 if n.startswith(primary_prefix) else 1
+        if any(
+            token in n
+            for token in DEPENDENCY_POLICY.sbk_secondary_asset_tokens
+        ):
             score += ARCHIVE_POLICY.secondary_asset_penalty
         candidates.append((score, a))
 
@@ -230,7 +239,7 @@ def _ensure_sbk_locked(
         detected_version=version,
         provenance=_release_provenance(
             repository_url=(
-                repo if "://" in repo
+                repo if NETWORK_POLICY.url_scheme_separator in repo
                 else f"{NETWORK_POLICY.github_web_url}/{repo}"
             ),
             version=version,

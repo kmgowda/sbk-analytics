@@ -110,8 +110,9 @@ repository defaults, dependency source/layout vocabulary, executable and
 environment names, managed-cache filenames, command-line contracts,
 YAML/property aliases, diagnostic and lifecycle record schemas, SBK option
 contracts, native probe commands, network/retry limits, display units, process
-grace periods, native benchmark lifecycle, SSH behavior, configuration
-defaults, and application exit codes.
+grace periods, host-platform identities, generated workflow filenames,
+native benchmark lifecycle, SSH behavior, configuration defaults, and
+application exit codes.
 Release version pins and operator choices remain in `sbk-config.env` so they can
 be updated without changing Python code.
 

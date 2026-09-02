@@ -35,6 +35,10 @@ ENVIRONMENT_POLICY = RUNTIME_POLICY.environment
 LAYOUT_POLICY = RUNTIME_POLICY.dependency_layout
 SBK_INTERFACE_POLICY = RUNTIME_POLICY.sbk_interface
 DISPLAY_POLICY = RUNTIME_POLICY.display
+PLATFORM_POLICY = RUNTIME_POLICY.platform
+PROCESS_POLICY = RUNTIME_POLICY.processes
+CONFIGURATION_POLICY = RUNTIME_POLICY.configuration
+WORKFLOW_POLICY = RUNTIME_POLICY.workflow
 
 PARALLEL_WARNING = (
     "WARNING: parallel mode is experimental. Multiple SBK instances will run "
@@ -65,7 +69,11 @@ class RunResult:
 
 
 def _build_cmd(executable: Path, yml_path: Path) -> list[str]:
-    return [str(executable), "-f", str(yml_path)]
+    return [
+        str(executable),
+        SBK_INTERFACE_POLICY.configuration_file_option,
+        str(yml_path),
+    ]
 
 
 def _print_sbk_banner(
@@ -94,7 +102,11 @@ def _print_sbk_banner(
     elif is_gem:
         timeout_desc += " (deployment time excluded from benchmark timing)"
 
-    mode_tag = "serial" if serial else "parallel"
+    mode_tag = (
+        CONFIGURATION_POLICY.default_mode
+        if serial
+        else CONFIGURATION_POLICY.parallel_mode
+    )
     lines = [
         "",
         "=" * DISPLAY_POLICY.section_width,
@@ -239,24 +251,21 @@ def _run_serial(
         # stdout/stderr inherited so the user sees output live
         # On macOS, we need to explicitly handle Java output to ensure logs are visible
         env_unbuffered = env.copy() if env is not None else os.environ.copy()
-        
+
         # Force Java to use unbuffered stdout/stderr (important for macOS)
         java_opts = []
         if ENVIRONMENT_POLICY.java_tool_options in env_unbuffered:
             java_opts.append(
                 env_unbuffered[ENVIRONMENT_POLICY.java_tool_options]
             )
-        java_opts.extend([
-            '-Djava.stdout.buffered=false',
-            '-Djava.stderr.buffered=false',
-            '-Dsun.stdout.encoding=UTF-8',
-            '-Dsun.stderr.encoding=UTF-8'
-        ])
-        env_unbuffered[ENVIRONMENT_POLICY.java_tool_options] = ' '.join(java_opts)
-        
+        java_opts.extend(ENVIRONMENT_POLICY.java_unbuffered_options)
+        env_unbuffered[ENVIRONMENT_POLICY.java_tool_options] = (
+            ENVIRONMENT_POLICY.java_tool_option_separator.join(java_opts)
+        )
+
         # On macOS or when forced, explicitly capture and forward output to ensure visibility
-        use_forwarding = sys.platform == 'darwin' or forward_logs
-        
+        use_forwarding = sys.platform == PLATFORM_POLICY.macos or forward_logs
+
         if use_forwarding:
             log.debug("Using explicit output forwarding for SBK logs")
             proc = managed_popen(
@@ -264,7 +273,7 @@ def _run_serial(
                 env=env_unbuffered,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
-                bufsize=1,  # Line buffered
+                bufsize=PROCESS_POLICY.line_buffer_size,
                 text=True,
                 universal_newlines=True,
                 lifecycle_role=(
@@ -350,8 +359,10 @@ def _run_parallel(
     total = len(jobs)
     for idx, (class_name, yml_path, csv_path) in enumerate(jobs, start=1):
         job_executable = (executables or {}).get(class_name, executable)
-        log_path = log_dir / f"sbk-{class_name}.log"
-        f = log_path.open("w")
+        log_path = log_dir / WORKFLOW_POLICY.log_filename_template.format(
+            name=class_name
+        )
+        f = log_path.open("w", encoding=DISPLAY_POLICY.text_encoding)
         _, is_gem = _read_yml(yml_path)
         seconds = _expected_seconds(yml_path)
         cmd = _build_cmd(job_executable, yml_path)
@@ -525,7 +536,7 @@ def run_jobs(
             )
     env = _sbk_env(jdk_home)
     try:
-        if mode == "parallel":
+        if mode == CONFIGURATION_POLICY.parallel_mode:
             return _run_parallel(
                 executable, jobs, log_dir, env=env, executables=executables
             )

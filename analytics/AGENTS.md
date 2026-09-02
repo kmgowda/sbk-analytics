@@ -174,6 +174,7 @@ artifact identities plus operational defaults shared by multiple subsystems.
   SBK option/migration contract
 - GitHub, download, retry, pip trust, and dependency probe behavior
 - shared display geometry, units, diagnostic limits, and signal exit convention
+- host-platform identities, generated workflow paths, and Java output options
 - process termination, durable SBK-native lifecycle, SSH/native probes, and
   timing
 - configuration defaults, accepted values, and CLI exit codes

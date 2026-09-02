@@ -20,7 +20,7 @@ from pathlib import Path
 from urllib.parse import quote
 
 from ._shared import (
-    CACHE_METADATA_POLICY, CACHE_POLICY, DEPENDENCY_POLICY,
+    ARCHIVE_POLICY, CACHE_METADATA_POLICY, CACHE_POLICY, DEPENDENCY_POLICY,
     DIAGNOSTIC_FIELDS, DISPLAY_POLICY, ENVIRONMENT_POLICY, LAYOUT_POLICY,
     NETWORK_POLICY, PROVENANCE_POLICY, ChartsInstall, DependencyResolutionError,
     DependencySource, LocalPackageError, _check_version, _command_version,
@@ -138,9 +138,15 @@ def _ensure_sbk_charts_locked(
 
     # Prefer the immutable, checksum-verified GitHub source archive. Custom
     # configurations without a digest retain the legacy git-tag fallback.
-    source_archive = stage / f"{SBK_CHARTS_ARTIFACT.key}-{version}.tar.gz"
-    source_url = (
-        f"{repo_url.rstrip('/')}/archive/refs/tags/{quote(version, safe='')}.tar.gz"
+    source_archive = stage / DEPENDENCY_POLICY.charts_archive_name_template.format(
+        artifact=SBK_CHARTS_ARTIFACT.key,
+        version=version,
+        archive_suffix=ARCHIVE_POLICY.preferred_tar_suffix,
+    )
+    source_url = DEPENDENCY_POLICY.charts_archive_url_template.format(
+        repository=repo_url.rstrip("/"),
+        version=quote(version, safe=""),
+        archive_suffix=ARCHIVE_POLICY.preferred_tar_suffix,
     )
     if source_sha256 is not None:
         checksum = _download(source_url, source_archive, ssl_verify=ssl_verify)
@@ -154,7 +160,10 @@ def _ensure_sbk_charts_locked(
         pip_url = repo_url.rstrip("/")
         if not pip_url.endswith(LAYOUT_POLICY.git_url_suffix):
             pip_url = pip_url + LAYOUT_POLICY.git_url_suffix
-        spec = f"git+{pip_url}@{version}"
+        spec = DEPENDENCY_POLICY.charts_git_specification_template.format(
+            repository=pip_url,
+            version=version,
+        )
         source_url = spec
         log.warning(
             "sbk-charts.sha256 is not configured; using the legacy git install"
@@ -202,7 +211,11 @@ def _ensure_sbk_charts_locked(
     if not install.cli.exists():
         # some versions expose differently named entry points
         bindir = stage_venv / LAYOUT_POLICY.executable_directory
-        candidates = list(bindir.glob("sbk-charts*")) + list(bindir.glob("sb-charts*"))
+        candidates = [
+            candidate
+            for pattern in DEPENDENCY_POLICY.charts_executable_globs
+            for candidate in bindir.glob(pattern)
+        ]
         if candidates:
             install = ChartsInstall(
                 venv_dir=stage_venv,

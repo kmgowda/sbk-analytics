@@ -70,7 +70,8 @@ Change cross-cutting operational defaults in `analytics/policy.py`. Its frozen
 dataclasses own dependency identities and repository defaults, managed-cache
 layout, source/provenance vocabulary, executable and environment names, command
 interfaces, network/retry settings, display units, process and benchmark
-timing, SSH behavior, configuration defaults, and exit codes. Keep release
+timing, host-platform identities, workflow artifact names, Java runtime
+options, SSH behavior, configuration defaults, and exit codes. Keep release
 version pins and operator selections in `sbk-config.env`; named constants used
 by only one algorithm remain next to that algorithm. Do not duplicate a policy
 literal in a consumer. Add or update `tests/test_policy.py` whenever policy

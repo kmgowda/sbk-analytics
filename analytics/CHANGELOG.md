@@ -43,8 +43,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Extended immutable runtime policy coverage to dependency layouts and source
   vocabulary, executable/environment names, SBK and charts interfaces, pip
   invocation, configuration/property aliases, CLI and lifecycle schemas,
-  native probe commands, diagnostic formatting, units, and signal exit
-  conventions.
+  native probe commands, diagnostic formatting, units, signal handling,
+  download headers, artifact archive templates, host-platform identities,
+  Java output options, and generated workflow paths.
 - Kept shared-folder Git inspection lightweight by excluding untracked files,
   added debug logging for Git failures, and unified status/runtime layout order.
 - Established SBK 10.6 as the configured baseline contract without embedding
