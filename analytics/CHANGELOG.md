@@ -118,7 +118,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Disabled certificate verification by default across the complete standalone
   bootstrap path: curl/wget use their insecure transport option and uv receives
   the centralized insecure-host list. Mandatory uv SHA-256 verification is
-  unchanged.
+  unchanged. Documentation now distinguishes that direct check from lockfile
+  package hashes and uv-owned managed-Python integrity validation.
 - Active venv/Conda environments are no longer modified by the native launcher;
   sbk-analytics and sbk-charts always use separate managed environments
 - Production bootstrap installs sbk-analytics non-editably and runs Python in

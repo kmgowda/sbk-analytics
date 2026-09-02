@@ -27,6 +27,10 @@ If you're new to sbk-analytics, start with:
   healthy saved environment is automatically reused without invoking uv
 - A checksum error is never bypassed. Check proxy/content rewriting and the
   platform SHA-256 values in `sbk-bootstrap.env`
+- Application packages are installed from the exact versions and artifact
+  hashes recorded in `uv.lock`. Managed-Python download integrity is owned by
+  the pinned uv release; sbk-analytics health-checks the installed interpreter
+  but does not independently checksum its source archive.
 - Runtime source, root/package configuration, example YAML, launcher, or lock
   changes create a freshly built versioned environment. Corrupt or interrupted
   staging directories are repaired without reusing partial or stale-wheel state
