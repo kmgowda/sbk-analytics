@@ -28,6 +28,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and real sbk-charts command health checks before cache publication.
 
 ### Changed
+- Decomposed the CLI into a small command dispatcher plus a dedicated workflow
+  orchestration module, and split dependency resolution into stable shared
+  primitives with separate SBK, sbk-charts, and JDK resolver modules. The
+  public `analytics.releases` imports remain compatible. Workflow execution is
+  further divided into named preparation, dependency, benchmark, input
+  validation, and report-publication phases with direct unit tests; local
+  artifact inspection now belongs to its matching resolver module.
 - Renamed the persistent workflow catalog from `examples/classes/` to
   `examples/benchmarks/` so the directory matches the canonical top-level
   `benchmarks:` workflow key.
@@ -36,8 +43,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Extended immutable runtime policy coverage to dependency layouts and source
   vocabulary, executable/environment names, SBK and charts interfaces, pip
   invocation, configuration/property aliases, CLI and lifecycle schemas,
-  native probe commands, diagnostic formatting, units, and signal exit
-  conventions.
+  native probe commands, diagnostic formatting, units, signal handling,
+  download headers, artifact archive templates, host-platform identities,
+  Java output options, and generated workflow paths.
 - Kept shared-folder Git inspection lightweight by excluding untracked files,
   added debug logging for Git failures, and unified status/runtime layout order.
 - Established SBK 10.6 as the configured baseline contract without embedding

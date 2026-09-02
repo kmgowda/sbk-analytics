@@ -46,6 +46,7 @@ from .releases import (
 from .runner import _read_yml, run_jobs
 from .system_info import append_system_sheet
 from .yaml_gen import generate_instance_yaml
+from .workflow import WorkflowServices, execute_workflow
 
 log = logging.getLogger(APPLICATION.name)
 CACHE_POLICY = RUNTIME_POLICY.cache
@@ -149,9 +150,9 @@ def _print_source_provenance(provenance, *, local_action: str) -> None:
 
 def _print_banner() -> None:
     """Print the sbk-analytics ASCII art banner to stderr."""
-    banner_path = Path(__file__).parent / "banner.txt"
+    banner_path = Path(__file__).parent / APPLICATION.banner_filename
     try:
-        banner = banner_path.read_text(encoding="utf-8")
+        banner = banner_path.read_text(encoding=DISPLAY_POLICY.text_encoding)
         print(banner.format(version=__version__), file=sys.stderr, flush=True)
     except Exception:
         # Fallback if banner file is missing
@@ -242,13 +243,16 @@ def _bundled_versions_file() -> Path:
     """
     launcher_root = os.environ.get(ENVIRONMENT_POLICY.source_root)
     if launcher_root:
-        launcher_file = Path(launcher_root) / "sbk-config.env"
+        launcher_file = Path(launcher_root) / APPLICATION.root_config_filename
         if launcher_file.is_file():
             return launcher_file
-    source_tree_file = Path(__file__).resolve().parent.parent / "sbk-config.env"
+    source_tree_file = (
+        Path(__file__).resolve().parent.parent
+        / APPLICATION.root_config_filename
+    )
     if source_tree_file.is_file():
         return source_tree_file
-    return Path(__file__).resolve().parent / "default-sbk-config.env"
+    return Path(__file__).resolve().parent / APPLICATION.bundled_config_filename
 
 
 def _parse_args(argv: list[str] | None) -> argparse.Namespace:
@@ -629,8 +633,10 @@ def _print_dependency_status(status: dict) -> None:
 def _init_local_config(output: Path) -> int:
     if output.exists():
         raise ConfigurationError(f"refusing to overwrite existing file: {output}")
-    template = _bundled_versions_file().read_text(encoding="utf-8")
-    output.write_text(template, encoding="utf-8")
+    template = _bundled_versions_file().read_text(
+        encoding=DISPLAY_POLICY.text_encoding
+    )
+    output.write_text(template, encoding=DISPLAY_POLICY.text_encoding)
     print(f"Created local configuration: {output}")
     print("Edit sbk.local.folder and/or sbk-charts.local.folder before use.")
     return EXIT_CODES.success
@@ -641,9 +647,16 @@ def _cleanup_benchmark_data(cfg, work: Path) -> list[Path]:
     work_root = work.resolve()
     removed: list[Path] = []
     for instance in cfg.instances:
-        if instance.class_name.lower() != "file":
+        if instance.class_name.lower() != SBK_INTERFACE_POLICY.file_driver_name:
             continue
-        raw = instance.params.get("file") or instance.params.get("fname")
+        raw = next(
+            (
+                instance.params.get(option)
+                for option in SBK_INTERFACE_POLICY.file_path_options
+                if instance.params.get(option)
+            ),
+            None,
+        )
         if not raw:
             continue
         path = Path(str(raw)).expanduser()
@@ -792,308 +805,32 @@ def _execute(args: argparse.Namespace, json_stream=None) -> int:
         else:
             _print_dependency_status(status)
         return EXIT_CODES.success
-    cfg = load_config(args.config) if args.config is not None else None
-
-    if versions.sbk_local_folder is not None:
-        log.info("SBK local folder: %s", versions.sbk_local_folder)
-    else:
-        log.info("SBK: %s @ %s", versions.sbk_url, versions.sbk)
-    if (versions.sbk_charts_local_folder is not None
-            or versions.sbk_charts_local_executable is not None):
-        log.info(
-            "sbk-charts local selection: %s",
-            versions.sbk_charts_local_executable
-            or versions.sbk_charts_local_folder,
-        )
-    else:
-        log.info(
-            "sbk-charts: %s @ %s",
-            versions.sbk_charts_url,
-            versions.sbk_charts,
-        )
-    log.info(
-        "mode=%s instances=%d uses_gem=%s",
-        cfg.mode if cfg else "dependency-check",
-        len(cfg.instances) if cfg else 0,
-        cfg.uses_gem if cfg else False,
+    services = WorkflowServices(
+        load_config=load_config,
+        ensure_sbk=ensure_sbk,
+        ensure_jdk=ensure_jdk,
+        ensure_sbk_charts=ensure_sbk_charts,
+        _print_sbk_resolution=_print_sbk_resolution,
+        _print_charts_resolution=_print_charts_resolution,
+        _cleanup_workdir_before_run=_cleanup_workdir_before_run,
+        generate_instance_yaml=generate_instance_yaml,
+        run_jobs=run_jobs,
+        run_sbk_charts=run_sbk_charts,
+        append_system_sheet=append_system_sheet,
+        _build_system_sources=_build_system_sources,
+        _dependency_summary=_dependency_summary,
+        _dependency_summary_sbk=_dependency_summary_sbk,
+        _cleanup_benchmark_data=_cleanup_benchmark_data,
+        _emit_json=_emit_json,
     )
-    for inst in cfg.instances if cfg else []:
-        log.info("  - %s (class=%s) params=%s", inst.name, inst.class_name, inst.params)
-
-    # Working directory: precedence is
-    #   1. -w / --work-dir CLI flag
-    #   2. workdir: in the input YAML (just after `mode:`)
-    #   3. the centralized configuration policy default
-    work = None
-    if cfg is not None:
-        work = args.work_dir if args.work_dir is not None else Path(cfg.workdir)
-        work.mkdir(parents=True, exist_ok=True)
-        log.info("work dir: %s", work.resolve())
-        usage = shutil.disk_usage(work)
-        gibibyte = DISPLAY_POLICY.bytes_per_kibibyte ** 3
-        print(
-            f"Filesystem free space: {usage.free / gibibyte:.2f} GiB",
-            flush=True,
-        )
-
-    # 1. Resolve the required JDK (used via SBK_JAVA_HOME), SBK, and sbk-charts.
-    #    ensure_jdk() first checks the existing SBK_JAVA_HOME / JAVA_HOME /
-    #    `java` on PATH for a matching major version; only downloads if none
-    #    match. The user pins the required major version in sbk-config.env via
-    #    `sbk.jdk.version=...` (with a centralized runtime-policy default).
-    print("\n=== Resolving dependencies ===", flush=True)
-    print(
-        "Explicit local folders take priority; other missing dependencies "
-        "are downloaded and cached.",
-        flush=True,
+    return execute_workflow(
+        args,
+        properties_path=properties_path,
+        versions=versions,
+        verify=verify,
+        services=services,
+        json_stream=json_stream,
     )
-    
-    # Validate an authoritative local SBK before probing or downloading a JDK.
-    sbk = ensure_sbk(
-        versions.sbk,
-        repo=versions.sbk_repo,
-        downloads_folder=versions.downloads_folder,
-        ssl_verify=verify,
-        local_folder=versions.sbk_local_folder,
-        require_gem=cfg.uses_gem if cfg else False,
-        version_policy=versions.sbk_version_policy,
-    )
-    _print_sbk_resolution(sbk, versions.sbk)
-
-    jdk = ensure_jdk(
-        versions.sbk_jdk, jdk_folder=versions.jdk_folder, ssl_verify=verify
-    )
-    log.info("JDK %s home: %s", versions.sbk_jdk, jdk.home)
-    print(f"[ok] JDK {versions.sbk_jdk} ready at {jdk.home}", flush=True)
-
-    if args.command == CLI_POLICY.dependencies_command or args.resolve_only:
-        charts = ensure_sbk_charts(
-            versions.sbk_charts, repo_url=versions.sbk_charts_url,
-            source_sha256=versions.sbk_charts_sha256,
-            downloads_folder=versions.downloads_folder, ssl_verify=verify,
-            local_folder=versions.sbk_charts_local_folder,
-            local_executable=versions.sbk_charts_local_executable,
-            version_policy=versions.sbk_charts_version_policy,
-            preflight=(
-                args.command == CLI_POLICY.dependencies_command
-                and args.subcommand == CLI_POLICY.doctor_subcommand
-            ),
-        )
-        _print_charts_resolution(charts, versions.sbk_charts)
-        summary = _dependency_summary(sbk, charts, versions)
-        summary[DIAGNOSTIC_FIELDS.status] = CLI_POLICY.success_status
-        summary[DIAGNOSTIC_FIELDS.exit_code] = EXIT_CODES.success
-        _emit_json(json_stream, summary)
-        print("\nDependency check passed.", flush=True)
-        return EXIT_CODES.success
-
-    assert cfg is not None and work is not None
-
-    executable = sbk.sbk_gem_yal if cfg.uses_gem else sbk.sbk_yal
-    executables = {
-        inst.name: sbk.sbk_gem_yal if inst.uses_gem else sbk.sbk_yal
-        for inst in cfg.instances
-    }
-    log.info("default SBK executable: %s", executable)
-    for inst in cfg.instances:
-        log.info("SBK executable for %s: %s", inst.name, executables[inst.name])
-
-    pre_run_removed: list[Path] = []
-    if cfg.cleanup_before_run:
-        pre_run_removed = _cleanup_workdir_before_run(
-            work,
-            protected_paths=(
-                args.config,
-                properties_path,
-                versions.downloads_folder,
-                versions.jdk_folder,
-                versions.sbk_local_folder,
-                versions.sbk_charts_local_folder,
-                versions.sbk_charts_local_executable,
-                sbk.home,
-                jdk.home,
-            ),
-        )
-        print(
-            "Pre-run workdir cleanup: removed "
-            f"{len(pre_run_removed)} top-level entr"
-            f"{'y' if len(pre_run_removed) == 1 else 'ies'} from "
-            f"{work.resolve()}.",
-            flush=True,
-        )
-
-    # 2. Generate per-class YAMLs
-    yml_dir = work / "yml"
-    csv_dir = work / "csv"
-    csv_dir.mkdir(parents=True, exist_ok=True)
-
-    jobs: list[tuple[str, Path, Path]] = []
-    for inst in cfg.instances:
-        csv_path = (csv_dir / f"sbk-{inst.name}.csv").resolve()
-        yml_path = generate_instance_yaml(inst, yml_dir, csv_path)
-        jobs.append((inst.name, yml_path, csv_path))
-
-    # 3. Run SBK instances
-    log_dir = work / "logs"
-    results = run_jobs(
-        executable, jobs, mode=cfg.mode, log_dir=log_dir, jdk_home=jdk.home,
-        forward_logs=args.forward_logs, executables=executables,
-        output_to_stderr=json_stream is not None,
-    )
-
-    succeeded = [r for r in results if r.ok]
-    failed = [r for r in results if not r.ok]
-
-    print("\n=== SBK run summary ===", flush=True)
-    for r in results:
-        status = "OK" if r.ok else f"FAIL(rc={r.returncode})"
-        extra = f" log={r.log_path}" if r.log_path else ""
-        print(f"  {status:14s} instance={r.class_name} csv={r.csv_path}{extra}")
-
-    # Resolve sbk-charts.use_files: take each entry as a CSV path, optionally
-    # relative to the working directory. Drop (with a warning) any that don't
-    # exist; sbk-charts would fail anyway.
-    extra_csvs: list[Path] = []
-    for raw_path in cfg.use_files:
-        p = Path(raw_path)
-        if not p.is_absolute():
-            p = (work / p).resolve()
-        else:
-            p = p.resolve()
-        if p.is_file() and p.stat().st_size > 0:
-            extra_csvs.append(p)
-        else:
-            print(
-                f"WARNING: sbk-charts.use_files entry ignored (missing or "
-                f"empty): {p}",
-                file=sys.stderr, flush=True,
-            )
-    if extra_csvs:
-        print("\n=== sbk-charts use_files (pre-existing) ===", flush=True)
-        for p in extra_csvs:
-            print(f"  USE            csv={p}")
-
-    if not succeeded and not extra_csvs:
-        print(
-            "All SBK instances failed and no use_files supplied; skipping "
-            "sbk-charts as per spec.",
-            file=sys.stderr,
-            flush=True,
-        )
-        _emit_json(json_stream, {
-            DIAGNOSTIC_FIELDS.status: CLI_POLICY.failed_status,
-            DIAGNOSTIC_FIELDS.exit_code: EXIT_CODES.no_usable_csv,
-            DIAGNOSTIC_FIELDS.reason: "no usable CSV input",
-            DIAGNOSTIC_FIELDS.sbk: _dependency_summary_sbk(sbk),
-            DIAGNOSTIC_FIELDS.successful_instances: [],
-            DIAGNOSTIC_FIELDS.failed_instances: [
-                r.class_name for r in failed
-            ],
-        })
-        return EXIT_CODES.no_usable_csv
-
-    if failed:
-        print(
-            f"WARNING: {len(failed)} of {len(results)} SBK runs failed; "
-            f"continuing with {len(succeeded)} fresh CSV(s) and "
-            f"{len(extra_csvs)} pre-existing use_files.",
-            file=sys.stderr,
-            flush=True,
-        )
-
-    # 4. Resolve sbk-charts lazily, only after usable CSV input exists.
-    charts = ensure_sbk_charts(
-        versions.sbk_charts, repo_url=versions.sbk_charts_url,
-        source_sha256=versions.sbk_charts_sha256,
-        downloads_folder=versions.downloads_folder, ssl_verify=verify,
-        local_folder=versions.sbk_charts_local_folder,
-        local_executable=versions.sbk_charts_local_executable,
-        version_policy=versions.sbk_charts_version_policy,
-    )
-    _print_charts_resolution(charts, versions.sbk_charts)
-
-    # 5. sbk-charts (once)
-    # The output xlsx lives in <workdir> unless cfg.output is an absolute path
-    # (or contains an explicit directory component) -- in which case we honour
-    # the user's exact location.
-    output_p = Path(cfg.output)
-    if output_p.is_absolute() or len(output_p.parts) > 1:
-        output_xlsx = output_p.resolve()
-    else:
-        output_xlsx = (work / output_p).resolve()
-    output_xlsx.parent.mkdir(parents=True, exist_ok=True)
-    csv_paths = [r.csv_path for r in succeeded] + extra_csvs
-
-    rc = run_sbk_charts(
-        charts, cfg, csv_paths, output_xlsx, work_dir=work,
-        output_to_stderr=json_stream is not None,
-    )
-    if rc != 0:
-        log.error("sbk-charts exited with rc=%s", rc)
-        _emit_json(json_stream, {
-            **_dependency_summary(sbk, charts, versions),
-            DIAGNOSTIC_FIELDS.status: CLI_POLICY.failed_status,
-            DIAGNOSTIC_FIELDS.exit_code: rc,
-            DIAGNOSTIC_FIELDS.reason: "sbk-charts failed",
-        })
-        return rc
-    if not output_xlsx.exists():
-        log.error("sbk-charts did not produce expected output: %s", output_xlsx)
-        _emit_json(json_stream, {
-            **_dependency_summary(sbk, charts, versions),
-            DIAGNOSTIC_FIELDS.status: CLI_POLICY.failed_status,
-            DIAGNOSTIC_FIELDS.exit_code: EXIT_CODES.missing_output,
-            DIAGNOSTIC_FIELDS.reason: "expected output was not produced",
-        })
-        return EXIT_CODES.missing_output
-
-    # 6. Append system sheet (one row per distinct host: local + remote nodes
-    #    visited by sbk-gem-yal instances).
-    try:
-        sources = _build_system_sources(succeeded)
-        append_system_sheet(output_xlsx, sources=sources)
-    except Exception as e:
-        log.error("failed to append system sheet: %s", e)
-        _emit_json(json_stream, {
-            **_dependency_summary(sbk, charts, versions),
-            DIAGNOSTIC_FIELDS.status: CLI_POLICY.failed_status,
-            DIAGNOSTIC_FIELDS.exit_code: EXIT_CODES.system_info_failure,
-            DIAGNOSTIC_FIELDS.reason: "failed to append system sheet",
-        })
-        return EXIT_CODES.system_info_failure
-
-    summary = {
-            **_dependency_summary(sbk, charts, versions),
-            DIAGNOSTIC_FIELDS.status: CLI_POLICY.success_status,
-            DIAGNOSTIC_FIELDS.exit_code: EXIT_CODES.success,
-            DIAGNOSTIC_FIELDS.output: str(output_xlsx),
-            DIAGNOSTIC_FIELDS.successful_instances: [
-                r.class_name for r in succeeded
-            ],
-            DIAGNOSTIC_FIELDS.failed_instances: [
-                r.class_name for r in failed
-            ],
-    }
-    removed: list[Path] = []
-    cleanup_on_success = RUNTIME_POLICY.configuration.cleanup_on_success
-    if cfg.cleanup == cleanup_on_success:
-        removed = _cleanup_benchmark_data(cfg, work)
-        print(f"Cleanup on success: removed {len(removed)} benchmark data path(s).")
-    usage = shutil.disk_usage(work)
-    summary[DIAGNOSTIC_FIELDS.cleanup] = {
-        DIAGNOSTIC_FIELDS.cleanup_policy: cfg.cleanup,
-        DIAGNOSTIC_FIELDS.removed_paths: [str(path) for path in removed]
-        if cfg.cleanup == cleanup_on_success else [],
-        DIAGNOSTIC_FIELDS.cleanup_before_run: cfg.cleanup_before_run,
-        DIAGNOSTIC_FIELDS.before_run_removed_entries:
-            len(pre_run_removed),
-    }
-    summary[DIAGNOSTIC_FIELDS.filesystem_free_bytes_after] = usage.free
-    _emit_json(json_stream, summary)
-    gibibyte = DISPLAY_POLICY.bytes_per_kibibyte ** 3
-    print(f"Filesystem free space after run: {usage.free / gibibyte:.2f} GiB")
-    print(f"\nDone. Output: {output_xlsx}", flush=True)
-    return EXIT_CODES.success
 
 
 def main(argv: list[str] | None = None) -> int:

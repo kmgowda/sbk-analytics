@@ -20,6 +20,8 @@ from .policy import RUNTIME_POLICY
 
 
 SBK_INTERFACE_POLICY = RUNTIME_POLICY.sbk_interface
+DISPLAY_POLICY = RUNTIME_POLICY.display
+WORKFLOW_POLICY = RUNTIME_POLICY.workflow
 
 
 def _normalise_nodes(value: Any) -> Any:
@@ -63,8 +65,10 @@ def generate_instance_yaml(
         params[nodes_option] = _normalise_nodes(params[nodes_option])
         wrapper_key = SBK_INTERFACE_POLICY.gem_arguments_wrapper
 
-    yml_path = out_dir / f"sbk-{inst.name}.yml"
-    with yml_path.open("w") as f:
+    yml_path = out_dir / WORKFLOW_POLICY.yaml_filename_template.format(
+        name=inst.name
+    )
+    with yml_path.open("w", encoding=DISPLAY_POLICY.text_encoding) as f:
         yaml.safe_dump(
             {wrapper_key: params},
             f,

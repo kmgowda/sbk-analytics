@@ -43,10 +43,12 @@ flowchart TB
     end
 
     subgraph Orchestration["Analytics orchestration"]
-        CLI["cli.py<br/>Arguments, logging, workflow"]
+        CLI["cli.py<br/>Arguments, logging, dispatch"]
+        Workflow["workflow.py<br/>Execution pipeline"]
         Config["config.py + sbk_contract.py<br/>Parse, normalize, validate"]
         Properties["properties.py<br/>Release and local-package settings"]
-        Resolver["releases.py<br/>Resolve JDK, SBK, and sbk-charts"]
+        Resolver["releases package<br/>Shared cache and provenance"]
+        ArtifactResolvers["releases/sbk.py + charts.py + jdk.py<br/>Artifact-specific resolution"]
         Generator["yaml_gen.py<br/>Generate sbkArgs / sbkGemArgs YAML"]
         Runner["runner.py<br/>Serial or parallel SBK execution"]
         Processes["processes.py + lifecycle.py<br/>Managed trees and durable ownership"]
@@ -68,7 +70,7 @@ flowchart TB
     User --> Config
     User --> Properties
     CLI --> Config
-    CLI --> Properties --> Resolver
+    CLI --> Properties --> Workflow --> Resolver --> ArtifactResolvers
     Config --> Generator
     Resolver --> JDK
     Resolver --> SBK
@@ -79,12 +81,28 @@ flowchart TB
     CSV --> Charts --> Report
     SystemInfo --> Report
     Policy -. shared policy .-> CLI
+    Policy -.-> Workflow
     Policy -.-> Resolver
     Policy -.-> Runner
     Policy -.-> Processes
 ```
 
 ## Component Interactions
+
+`workflow.py` keeps the top-level coordinator intentionally small. Each phase
+has one responsibility and can be tested directly through `WorkflowServices`.
+
+```mermaid
+flowchart LR
+    Prepare["Prepare config and workdir"] --> Resolve["Resolve SBK and JDK"]
+    Resolve --> Mode{"Doctor / resolve-only?"}
+    Mode -->|Yes| Doctor["Resolve and preflight sbk-charts"]
+    Mode -->|No| Benchmarks["Generate YAML and run SBK workloads"]
+    Benchmarks --> Inputs["Collect and validate usable CSV inputs"]
+    Inputs -->|None| Stop["Return no-usable-CSV status"]
+    Inputs -->|Available| Report["Resolve charts and publish report"]
+    Report --> System["Append system information and cleanup"]
+```
 
 ### 1. Configuration Flow
 ```mermaid
@@ -97,22 +115,22 @@ flowchart LR
 ### 2. Dependency Resolution Flow
 ```mermaid
 flowchart TB
-    Resolver["releases.py"]
+    Resolver["releases package facade"]
 
-    Resolver --> EnsureSBK["ensure_sbk()"]
+    Resolver --> EnsureSBK["releases/sbk.py<br/>ensure_sbk()"]
     EnsureSBK --> LocalSBK{"Local SBK configured?"}
     LocalSBK -->|Yes| ValidateSBK["Read-only validation<br/>No SBK build"]
     LocalSBK -->|No| CachedSBK{"Complete managed cache?"}
     CachedSBK -->|Yes| ReuseSBK["Reuse cached SBK"]
     CachedSBK -->|No| DownloadSBK["Lock, download, validate, publish"]
 
-    Resolver --> EnsureJDK["ensure_jdk()"]
+    Resolver --> EnsureJDK["releases/jdk.py<br/>ensure_jdk()"]
     EnsureJDK --> ExistingJDK{"Matching JDK available?"}
     ExistingJDK -->|Yes| ReuseJDK["Use installed or cached JDK"]
     ExistingJDK -->|No| DownloadJDK["Resolve upstream checksum<br/>download and verify Temurin"]
     DownloadJDK --> ValidateJDK["Run java -version<br/>require configured major"]
 
-    CSV["At least one successful CSV"] --> EnsureCharts["ensure_sbk_charts()"]
+    CSV["At least one successful CSV"] --> EnsureCharts["releases/charts.py<br/>ensure_sbk_charts()"]
     EnsureCharts --> LocalCharts{"Local charts selected?"}
     LocalCharts -->|Yes| ValidateCharts["Read-only validation<br/>No install"]
     LocalCharts -->|No| CachedCharts{"Complete charts cache?"}

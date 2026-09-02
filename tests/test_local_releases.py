@@ -16,13 +16,12 @@ from analytics.releases import (
     SourceProvenance,
     ensure_sbk,
     ensure_sbk_charts,
-    _gh_release,
-    _git_details,
     inspect_shared_sbk,
     inspect_shared_sbk_charts,
     resolve_local_sbk,
     resolve_local_sbk_charts,
 )
+from analytics.releases._shared import _git_details, _gh_release
 
 
 def _executable(path: Path) -> Path:
@@ -44,7 +43,7 @@ class LocalSbkResolutionTests(unittest.TestCase):
         found = mock.Mock(status_code=200)
         found.json.return_value = {"tag_name": "v11.0", "assets": []}
         with mock.patch(
-            "analytics.releases.requests.get", side_effect=(missing, found)
+            "analytics.releases._shared.requests.get", side_effect=(missing, found)
         ) as request:
             release = _gh_release("owner/repository", "11.0", ssl_verify=True)
 
@@ -101,7 +100,7 @@ class LocalSbkResolutionTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             home = _sbk_home(root / "build" / "install" / "sbk")
-            with mock.patch("analytics.releases.subprocess.run") as run:
+            with mock.patch("analytics.releases._shared.subprocess.run") as run:
                 status = inspect_shared_sbk(root)
 
             run.assert_not_called()
@@ -119,9 +118,9 @@ class LocalSbkResolutionTests(unittest.TestCase):
             revision = mock.Mock(returncode=0, stdout="abc123def456\n")
             changes = mock.Mock(returncode=0, stdout=" M sbk-yal/source.java\n")
             with mock.patch(
-                "analytics.releases._command_version", return_value="10.7"
+                "analytics.releases.sbk._command_version", return_value="10.7"
             ), mock.patch(
-                "analytics.releases.subprocess.run",
+                "analytics.releases._shared.subprocess.run",
                 side_effect=(revision, changes),
             ) as run:
                 install = resolve_local_sbk(root)
@@ -138,7 +137,7 @@ class LocalSbkResolutionTests(unittest.TestCase):
             root = Path(directory)
             (root / ".git").mkdir()
             with mock.patch(
-                "analytics.releases.subprocess.run",
+                "analytics.releases._shared.subprocess.run",
                 side_effect=OSError("git unavailable"),
             ), self.assertLogs("analytics.releases", level="DEBUG") as logs:
                 revision, dirty = _git_details(root)
@@ -185,7 +184,7 @@ class LocalSbkResolutionTests(unittest.TestCase):
     def test_invalid_explicit_folder_never_falls_back_to_github(self):
         with tempfile.TemporaryDirectory() as directory:
             missing = Path(directory) / "missing"
-            with mock.patch("analytics.releases._gh_release") as github:
+            with mock.patch("analytics.releases.sbk._gh_release") as github:
                 with self.assertRaisesRegex(RuntimeError, "does not exist"):
                     ensure_sbk("10.6", local_folder=missing)
             github.assert_not_called()
@@ -199,7 +198,7 @@ class LocalSbkResolutionTests(unittest.TestCase):
             (cache / ".home").write_text(str(home), encoding="utf-8")
             (cache / ".ok").touch()
 
-            with mock.patch("analytics.releases._gh_release") as github:
+            with mock.patch("analytics.releases.sbk._gh_release") as github:
                 install = ensure_sbk("10.6", downloads_folder=downloads)
 
             self.assertEqual(install.source, DependencySource.MANAGED_CACHE)
@@ -226,9 +225,9 @@ class LocalSbkResolutionTests(unittest.TestCase):
                     }
                 ]
             }
-            with mock.patch("analytics.releases._gh_release", return_value=release), \
-                    mock.patch("analytics.releases._download", side_effect=fake_download), \
-                    mock.patch("analytics.releases._extract", side_effect=fake_extract):
+            with mock.patch("analytics.releases.sbk._gh_release", return_value=release), \
+                    mock.patch("analytics.releases.sbk._download", side_effect=fake_download), \
+                    mock.patch("analytics.releases.sbk._extract", side_effect=fake_extract):
                 install = ensure_sbk("10.6", downloads_folder=downloads)
 
             self.assertEqual(install.source, DependencySource.DOWNLOADED)
@@ -251,10 +250,10 @@ class LocalSbkResolutionTests(unittest.TestCase):
                 return "b" * 64
 
             with mock.patch(
-                "analytics.releases._gh_release", return_value=release
+                "analytics.releases.sbk._gh_release", return_value=release
             ), mock.patch(
-                "analytics.releases._download", side_effect=fake_download
-            ), mock.patch("analytics.releases._extract") as extract:
+                "analytics.releases.sbk._download", side_effect=fake_download
+            ), mock.patch("analytics.releases.sbk._extract") as extract:
                 with self.assertRaisesRegex(RuntimeError, "checksum mismatch"):
                     ensure_sbk("10.6", downloads_folder=downloads)
             extract.assert_not_called()
@@ -280,7 +279,7 @@ class LocalChartsResolutionTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             cli = _executable(root / "sbk-charts")
-            with mock.patch("analytics.releases.subprocess.run") as run:
+            with mock.patch("analytics.releases._shared.subprocess.run") as run:
                 status = inspect_shared_sbk_charts(root)
 
             run.assert_not_called()
@@ -318,7 +317,7 @@ class LocalChartsResolutionTests(unittest.TestCase):
             root = Path(directory)
             cli = _executable(root / "sbk-charts")
             with mock.patch.dict(os.environ, {"CONDA_PREFIX": "/conda"}), \
-                    mock.patch("analytics.releases.subprocess.run") as run:
+                    mock.patch("analytics.releases._shared.subprocess.run") as run:
                 install = ensure_sbk_charts("4.26.7.1", local_folder=root)
 
             self.assertEqual(install.source, DependencySource.LOCAL)
@@ -331,7 +330,7 @@ class LocalChartsResolutionTests(unittest.TestCase):
     def test_invalid_explicit_folder_never_runs_pip(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            with mock.patch("analytics.releases.subprocess.run") as run:
+            with mock.patch("analytics.releases._shared.subprocess.run") as run:
                 with self.assertRaisesRegex(RuntimeError, "no supported executable"):
                     ensure_sbk_charts("4.26.7.1", local_folder=root)
             run.assert_not_called()
@@ -345,7 +344,7 @@ class LocalChartsResolutionTests(unittest.TestCase):
             (cache / ".ok").touch()
 
             with mock.patch.dict(os.environ, {}, clear=True), \
-                    mock.patch("analytics.releases.subprocess.run") as run:
+                    mock.patch("analytics.releases._shared.subprocess.run") as run:
                 install = ensure_sbk_charts(
                     "4.26.7.1", downloads_folder=downloads
                 )
@@ -369,10 +368,10 @@ class LocalChartsResolutionTests(unittest.TestCase):
 
             with mock.patch.dict(os.environ, {}, clear=True), \
                     mock.patch(
-                        "analytics.releases.venv.EnvBuilder",
+                        "analytics.releases.charts.venv.EnvBuilder",
                         FakeVenvBuilder,
                     ), mock.patch(
-                        "analytics.releases.subprocess.run",
+                        "analytics.releases._shared.subprocess.run",
                         return_value=mock.Mock(returncode=0, stdout="", stderr=""),
                     ) as run:
                 install = ensure_sbk_charts(
@@ -410,9 +409,9 @@ class LocalChartsResolutionTests(unittest.TestCase):
                     )
 
             with mock.patch.dict(os.environ, {}, clear=True), mock.patch(
-                "analytics.releases.venv.EnvBuilder", FakeVenvBuilder
+                "analytics.releases.charts.venv.EnvBuilder", FakeVenvBuilder
             ), mock.patch(
-                "analytics.releases.subprocess.run",
+                "analytics.releases._shared.subprocess.run",
                 return_value=mock.Mock(returncode=0, stdout="", stderr=""),
             ):
                 install = ensure_sbk_charts(
@@ -445,9 +444,9 @@ class LocalChartsResolutionTests(unittest.TestCase):
                 with mock.patch.dict(
                     os.environ, {active_name: "/active/user/environment"}
                 ), mock.patch(
-                    "analytics.releases.venv.EnvBuilder", FakeVenvBuilder
+                    "analytics.releases.charts.venv.EnvBuilder", FakeVenvBuilder
                 ), mock.patch(
-                    "analytics.releases.subprocess.run", return_value=result
+                    "analytics.releases._shared.subprocess.run", return_value=result
                 ) as run:
                     ensure_sbk_charts(
                         "4.26.7.1", downloads_folder=downloads
@@ -483,11 +482,11 @@ class LocalChartsResolutionTests(unittest.TestCase):
                 return digest
 
             with mock.patch(
-                "analytics.releases.venv.EnvBuilder", FakeVenvBuilder
+                "analytics.releases.charts.venv.EnvBuilder", FakeVenvBuilder
             ), mock.patch(
-                "analytics.releases._download", side_effect=fake_download
+                "analytics.releases.charts._download", side_effect=fake_download
             ), mock.patch(
-                "analytics.releases.subprocess.run",
+                "analytics.releases._shared.subprocess.run",
                 return_value=mock.Mock(returncode=0, stdout="", stderr=""),
             ) as run:
                 install = ensure_sbk_charts(
@@ -519,9 +518,9 @@ class LocalChartsResolutionTests(unittest.TestCase):
                 returncode=1, stdout="", stderr="missing charts dependency"
             )
             with mock.patch(
-                "analytics.releases.venv.EnvBuilder", FakeVenvBuilder
+                "analytics.releases.charts.venv.EnvBuilder", FakeVenvBuilder
             ), mock.patch(
-                "analytics.releases.subprocess.run",
+                "analytics.releases._shared.subprocess.run",
                 side_effect=[installer, installer, broken],
             ), self.assertRaisesRegex(LocalPackageError, "readiness check failed"):
                 ensure_sbk_charts("4.26.7.1", downloads_folder=downloads)
@@ -541,10 +540,10 @@ class LocalChartsResolutionTests(unittest.TestCase):
                     _executable(Path(venv_dir) / "bin" / "python")
 
             with mock.patch(
-                "analytics.releases.venv.EnvBuilder", FakeVenvBuilder
+                "analytics.releases.charts.venv.EnvBuilder", FakeVenvBuilder
             ), mock.patch(
-                "analytics.releases._download", return_value="b" * 64
-            ), mock.patch("analytics.releases.subprocess.run") as run:
+                "analytics.releases.charts._download", return_value="b" * 64
+            ), mock.patch("analytics.releases._shared.subprocess.run") as run:
                 with self.assertRaisesRegex(RuntimeError, "checksum mismatch"):
                     ensure_sbk_charts(
                         "4.26.7.1",

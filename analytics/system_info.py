@@ -128,14 +128,14 @@ def _container_info() -> dict[str, str]:
         except OSError:
             pass
 
-    if runtime == "kubernetes":
+    if runtime == SYSTEM_INFO_POLICY.kubernetes_runtime:
         k8s_pod = (
-            os.environ.get("POD_NAME")
-            or os.environ.get("HOSTNAME")
+            os.environ.get(SYSTEM_INFO_POLICY.kubernetes_pod_environment)
+            or os.environ.get(SYSTEM_INFO_POLICY.hostname_environment)
             or socket.gethostname()
         )
         try:
-            ns_path = Path("/var/run/secrets/kubernetes.io/serviceaccount/namespace")
+            ns_path = Path(SYSTEM_INFO_POLICY.kubernetes_namespace_file)
             if ns_path.is_file():
                 k8s_namespace = ns_path.read_text().strip()
         except OSError:

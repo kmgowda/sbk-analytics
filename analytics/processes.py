@@ -314,7 +314,7 @@ def child_process_cleanup(*, reconcile: bool = True) -> Iterator[None]:
         raise ProcessExit(signum)
 
     if threading.current_thread() is threading.main_thread():
-        for name in ("SIGINT", "SIGTERM", "SIGHUP", "SIGQUIT"):
+        for name in PROCESS_POLICY.handled_signal_names:
             signum = getattr(signal, name, None)
             if signum is None:
                 continue

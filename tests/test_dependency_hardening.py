@@ -24,10 +24,12 @@ from analytics.errors import CacheError, ConfigurationError, LocalPackageError
 from analytics.processes import ProcessExit
 from analytics.properties import parse_properties
 from analytics.releases import (
-    ChartsInstall, DependencySource, JdkInstall, SbkInstall, _cache_lock,
-    _charts_version, _extract, _install_jdk_locked, _jdk_asset, _run_pip, cache_root,
+    ChartsInstall, DependencySource, JdkInstall, SbkInstall, cache_root,
     resolve_local_sbk_charts,
 )
+from analytics.releases._shared import _cache_lock, _extract, _run_pip
+from analytics.releases.charts import _charts_version
+from analytics.releases.jdk import _install_jdk_locked, _jdk_asset
 from analytics.runner import RunResult
 
 
@@ -62,7 +64,7 @@ class PropertiesHardeningTests(unittest.TestCase):
             executable.write_text("#!/bin/sh\necho 'sbk-charts 1.2.3'\n")
             executable.chmod(executable.stat().st_mode | stat.S_IXUSR)
             with mock.patch(
-                "analytics.releases._charts_version", return_value="1.2.3"
+                "analytics.releases.charts._charts_version", return_value="1.2.3"
             ):
                 install = resolve_local_sbk_charts(
                     executable=executable, expected_version="1.2.3",
@@ -70,7 +72,7 @@ class PropertiesHardeningTests(unittest.TestCase):
                 )
             self.assertEqual(install.cli, executable.resolve())
             with mock.patch(
-                "analytics.releases._charts_version", return_value="1.2.3"
+                "analytics.releases.charts._charts_version", return_value="1.2.3"
             ), self.assertRaisesRegex(LocalPackageError, "version mismatch"):
                 resolve_local_sbk_charts(
                     executable=executable, expected_version="9.9.9",
@@ -79,7 +81,7 @@ class PropertiesHardeningTests(unittest.TestCase):
 
     def test_charts_version_ignores_unrelated_dotted_versions(self):
         result = mock.Mock(returncode=0, stdout="Python 3.12.1\n", stderr="")
-        with mock.patch("analytics.releases.subprocess.run", return_value=result), \
+        with mock.patch("analytics.releases._shared.subprocess.run", return_value=result), \
                 mock.patch.object(Path, "is_file", return_value=False):
             self.assertIsNone(_charts_version(Path("/tools/sbk-charts")))
 
@@ -87,7 +89,7 @@ class PropertiesHardeningTests(unittest.TestCase):
         result = mock.Mock(
             returncode=0, stdout="Sbk Charts Version : 4.26.7.1\n", stderr=""
         )
-        with mock.patch("analytics.releases.subprocess.run", return_value=result):
+        with mock.patch("analytics.releases._shared.subprocess.run", return_value=result):
             self.assertEqual(
                 _charts_version(Path("/tools/sbk-charts")), "4.26.7.1"
             )
@@ -152,14 +154,14 @@ class JdkPublicationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             cache = Path(directory) / "jdk" / "25"
             with mock.patch(
-                "analytics.releases._jdk_asset",
+                "analytics.releases.jdk._jdk_asset",
                 return_value=("https://example.invalid/jdk.tar.gz", "a" * 64),
             ), mock.patch(
-                "analytics.releases._download", return_value="a" * 64
+                "analytics.releases.jdk._download", return_value="a" * 64
             ), mock.patch(
-                "analytics.releases._extract", side_effect=self._fake_extract
+                "analytics.releases.jdk._extract", side_effect=self._fake_extract
             ), mock.patch(
-                "analytics.releases._java_major_version", return_value=21
+                "analytics.releases.jdk._java_major_version", return_value=21
             ), self.assertRaisesRegex(CacheError, "required major 25"):
                 _install_jdk_locked("25", cache, False)
             self.assertFalse((cache / ".ok").exists())
@@ -173,7 +175,7 @@ class JdkPublicationTests(unittest.TestCase):
             }}
         }]
         with mock.patch(
-            "analytics.releases.requests.get", return_value=response
+            "analytics.releases.jdk.requests.get", return_value=response
         ) as get:
             url, digest = _jdk_asset("25", True)
         response.raise_for_status.assert_called_once_with()
@@ -185,11 +187,11 @@ class JdkPublicationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             cache = Path(directory) / "jdk" / "25"
             with mock.patch(
-                "analytics.releases._jdk_asset",
+                "analytics.releases.jdk._jdk_asset",
                 return_value=("https://example.invalid/jdk.tar.gz", "a" * 64),
             ), mock.patch(
-                "analytics.releases._download", return_value="b" * 64
-            ), mock.patch("analytics.releases._extract") as extract, \
+                "analytics.releases.jdk._download", return_value="b" * 64
+            ), mock.patch("analytics.releases.jdk._extract") as extract, \
                     self.assertRaisesRegex(CacheError, "checksum mismatch"):
                 _install_jdk_locked("25", cache, False)
             extract.assert_not_called()
@@ -199,14 +201,14 @@ class JdkPublicationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             cache = Path(directory) / "jdk" / "25"
             with mock.patch(
-                "analytics.releases._jdk_asset",
+                "analytics.releases.jdk._jdk_asset",
                 return_value=("https://example.invalid/jdk.tar.gz", "a" * 64),
             ), mock.patch(
-                "analytics.releases._download", return_value="a" * 64
+                "analytics.releases.jdk._download", return_value="a" * 64
             ), mock.patch(
-                "analytics.releases._extract", side_effect=self._fake_extract
+                "analytics.releases.jdk._extract", side_effect=self._fake_extract
             ), mock.patch(
-                "analytics.releases._java_major_version", return_value=25
+                "analytics.releases.jdk._java_major_version", return_value=25
             ):
                 install = _install_jdk_locked("25", cache, False)
             self.assertTrue((cache / ".ok").is_file())
@@ -410,7 +412,7 @@ class CliFlowTests(unittest.TestCase):
                 f"sbk-charts.local.folder={charts}\n"
             )
             stdout = io.StringIO()
-            with mock.patch("analytics.releases.subprocess.run") as run, \
+            with mock.patch("analytics.releases._shared.subprocess.run") as run, \
                     contextlib.redirect_stdout(stdout), \
                     contextlib.redirect_stderr(io.StringIO()):
                 rc = main(["-p", str(properties), "deps", "status", "--json"])
@@ -430,7 +432,7 @@ class CliFlowTests(unittest.TestCase):
                 "source-launcher",
             )
             human = io.StringIO()
-            with mock.patch("analytics.releases.subprocess.run") as run, \
+            with mock.patch("analytics.releases._shared.subprocess.run") as run, \
                     contextlib.redirect_stdout(human), \
                     contextlib.redirect_stderr(io.StringIO()):
                 human_rc = main(["-p", str(properties), "deps", "status"])

@@ -37,6 +37,8 @@ log = logging.getLogger(__name__)
 ENVIRONMENT_POLICY = RUNTIME_POLICY.environment
 LIFECYCLE_POLICY = RUNTIME_POLICY.lifecycle
 PROCESS_POLICY = RUNTIME_POLICY.processes
+PLATFORM_POLICY = RUNTIME_POLICY.platform
+DISPLAY_POLICY = RUNTIME_POLICY.display
 
 _RUN_ID = uuid.uuid4().hex
 
@@ -62,7 +64,7 @@ def registry_root() -> Path:
     xdg = os.environ.get(ENVIRONMENT_POLICY.xdg_state_home)
     if xdg:
         state = Path(xdg).expanduser()
-    elif sys.platform == "darwin":
+    elif sys.platform == PLATFORM_POLICY.macos:
         state = Path.home().joinpath(*LIFECYCLE_POLICY.macos_state_path)
     else:
         state = Path.home().joinpath(*LIFECYCLE_POLICY.linux_state_path)
@@ -96,7 +98,7 @@ def _atomic_write(path: Path, payload: dict[str, Any]) -> None:
     try:
         temporary.write_text(
             json.dumps(payload, indent=2, sort_keys=True) + "\n",
-            encoding="utf-8",
+            encoding=DISPLAY_POLICY.text_encoding,
         )
         temporary.chmod(LIFECYCLE_POLICY.record_mode)
         temporary.replace(path)
@@ -139,7 +141,9 @@ def unregister_process(path: Path | None) -> None:
 
 
 def _read_record(path: Path) -> dict[str, Any]:
-    value = json.loads(path.read_text(encoding="utf-8"))
+    value = json.loads(
+        path.read_text(encoding=DISPLAY_POLICY.text_encoding)
+    )
     if not isinstance(value, dict):
         raise ValueError("lifecycle record is not an object")
     if (

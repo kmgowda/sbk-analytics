@@ -130,6 +130,43 @@ class PolicyTests(unittest.TestCase):
             "nodes",
         )
 
+    def test_operational_templates_are_centralized_and_composable(self):
+        archive = RUNTIME_POLICY.archives.preferred_tar_suffix
+        dependencies = RUNTIME_POLICY.dependencies
+        workflow = RUNTIME_POLICY.workflow
+        self.assertEqual(
+            dependencies.charts_archive_name_template.format(
+                artifact=SBK_CHARTS_ARTIFACT.key,
+                version="1.2.3",
+                archive_suffix=archive,
+            ),
+            "sbk-charts-1.2.3.tar.gz",
+        )
+        self.assertEqual(
+            dependencies.jdk_archive_name_template.format(
+                version="25",
+                archive_suffix=archive,
+            ),
+            "jdk-25.tar.gz",
+        )
+        self.assertEqual(
+            workflow.yaml_filename_template.format(name="write"),
+            "sbk-write.yml",
+        )
+        self.assertEqual(
+            workflow.csv_filename_template.format(name="write"),
+            "sbk-write.csv",
+        )
+        self.assertEqual(
+            workflow.log_filename_template.format(name="write"),
+            "sbk-write.log",
+        )
+        self.assertIn(
+            RUNTIME_POLICY.configuration.parallel_mode,
+            RUNTIME_POLICY.configuration.valid_modes,
+        )
+        self.assertTrue(RUNTIME_POLICY.environment.java_unbuffered_options)
+
     def test_cross_subsystem_schemas_are_centralized(self):
         lifecycle = RUNTIME_POLICY.lifecycle
         lifecycle_fields = {
@@ -258,21 +295,25 @@ class PolicyTests(unittest.TestCase):
 
     def test_policy_consumers_do_not_reintroduce_cross_cutting_literals(self):
         consumers = (
-            "charts.py",
-            "cli.py",
-            "config.py",
-            "lifecycle.py",
-            "processes.py",
-            "properties.py",
-            "releases.py",
-            "runner.py",
-            "sbk_contract.py",
-            "system_info.py",
+            Path("charts.py"),
+            Path("cli.py"),
+            Path("config.py"),
+            Path("lifecycle.py"),
+            Path("processes.py"),
+            Path("properties.py"),
+            Path("runner.py"),
+            Path("sbk_contract.py"),
+            Path("system_info.py"),
+            Path("workflow.py"),
+            *(path.relative_to(ROOT / "analytics") for path in sorted(
+                (ROOT / "analytics" / "releases").glob("*.py")
+            )),
         )
         forbidden_strings = {
             ".ok",
             ".home",
             "metadata.json",
+            RUNTIME_POLICY.cache.partial_download_suffix,
             SBK_ARTIFACT.repository_url,
             SBK_CHARTS_ARTIFACT.repository_url,
             RUNTIME_POLICY.provenance.shared_folder_mode,
@@ -282,9 +323,13 @@ class PolicyTests(unittest.TestCase):
             RUNTIME_POLICY.provenance.explicit_executable_layout,
             RUNTIME_POLICY.environment.sbk_java_home,
             RUNTIME_POLICY.environment.java_tool_options,
+            *RUNTIME_POLICY.environment.java_unbuffered_options,
             RUNTIME_POLICY.environment.lifecycle_run_id,
             RUNTIME_POLICY.sbk_interface.local_arguments_wrapper,
             RUNTIME_POLICY.sbk_interface.gem_arguments_wrapper,
+            RUNTIME_POLICY.sbk_interface.file_driver_name,
+            *RUNTIME_POLICY.sbk_interface.file_path_options,
+            RUNTIME_POLICY.sbk_interface.configuration_file_option,
             RUNTIME_POLICY.environment.source_root,
             RUNTIME_POLICY.environment.downloads_folder,
             RUNTIME_POLICY.environment.legacy_cache_folder,
@@ -333,6 +378,32 @@ class PolicyTests(unittest.TestCase):
             RUNTIME_POLICY.system_info.self_cgroup_file,
             RUNTIME_POLICY.system_info.docker_environment_file,
             RUNTIME_POLICY.system_info.kubernetes_service_environment,
+            RUNTIME_POLICY.system_info.kubernetes_pod_environment,
+            RUNTIME_POLICY.system_info.hostname_environment,
+            RUNTIME_POLICY.system_info.kubernetes_namespace_file,
+            RUNTIME_POLICY.network.github_accept_header,
+            RUNTIME_POLICY.network.github_accept_value,
+            RUNTIME_POLICY.network.github_api_version_header,
+            RUNTIME_POLICY.network.github_token_environment,
+            RUNTIME_POLICY.network.authorization_header,
+            RUNTIME_POLICY.network.range_header,
+            RUNTIME_POLICY.network.byte_range_template,
+            RUNTIME_POLICY.network.content_length_header,
+            RUNTIME_POLICY.archives.preferred_tar_suffix,
+            RUNTIME_POLICY.dependencies.charts_archive_url_template,
+            RUNTIME_POLICY.dependencies.charts_archive_name_template,
+            RUNTIME_POLICY.dependencies.charts_git_specification_template,
+            RUNTIME_POLICY.dependencies.jdk_archive_name_template,
+            RUNTIME_POLICY.dependencies.jdk_metadata_binary_field,
+            RUNTIME_POLICY.dependencies.jdk_metadata_package_field,
+            RUNTIME_POLICY.dependencies.jdk_metadata_link_field,
+            RUNTIME_POLICY.dependencies.jdk_metadata_checksum_field,
+            RUNTIME_POLICY.dependencies.sbk_primary_asset_prefix_template,
+            *RUNTIME_POLICY.dependencies.charts_executable_globs,
+            *RUNTIME_POLICY.dependencies.sbk_secondary_asset_tokens,
+            *RUNTIME_POLICY.dependencies.jdk_x86_64_aliases,
+            *(value for pair in RUNTIME_POLICY.dependencies.jdk_platform_names
+              for value in pair),
         }
         forbidden_strings.update(
             value
@@ -343,6 +414,15 @@ class PolicyTests(unittest.TestCase):
             value
             for value in dataclasses.astuple(RUNTIME_POLICY.diagnostics)
             if isinstance(value, str)
+        )
+        forbidden_strings.update(
+            value
+            for value in dataclasses.astuple(RUNTIME_POLICY.workflow)
+            if isinstance(value, str)
+        )
+        forbidden_strings.update(dataclasses.astuple(RUNTIME_POLICY.platform))
+        forbidden_strings.update(
+            RUNTIME_POLICY.processes.handled_signal_names
         )
         violations = []
         for filename in consumers:
@@ -374,6 +454,92 @@ class PolicyTests(unittest.TestCase):
                 ):
                     violations.append(f"{filename}:{node.lineno}: numeric sleep")
         self.assertEqual(violations, [])
+
+    def test_dependency_resolvers_have_artifact_boundaries(self):
+        releases = ROOT / "analytics" / "releases"
+        self.assertFalse((ROOT / "analytics" / "releases.py").exists())
+        expected_definitions = {
+            "sbk.py": "ensure_sbk",
+            "charts.py": "ensure_sbk_charts",
+            "jdk.py": "ensure_jdk",
+        }
+        for filename, function_name in expected_definitions.items():
+            tree = ast.parse((releases / filename).read_text())
+            definitions = {
+                node.name for node in tree.body
+                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            }
+            self.assertIn(function_name, definitions)
+
+        facade = ast.parse((releases / "__init__.py").read_text())
+        facade_definitions = {
+            node.name for node in facade.body
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        }
+        self.assertFalse(facade_definitions)
+
+        from analytics import releases
+
+        self.assertTrue(all(not name.startswith("_") for name in releases.__all__))
+        self.assertNotIn("_download", vars(releases))
+        self.assertNotIn("_gh_release", vars(releases))
+        self.assertNotIn("_extract", vars(releases))
+
+    def test_artifact_modules_expose_module_docstrings(self):
+        from analytics.releases import charts, jdk, sbk
+
+        self.assertIn("SBK", sbk.__doc__ or "")
+        self.assertIn("sbk-charts", charts.__doc__ or "")
+        self.assertIn("JDK", jdk.__doc__ or "")
+
+    def test_local_resolvers_belong_to_artifact_modules(self):
+        releases = ROOT / "analytics" / "releases"
+        definitions = {}
+        for filename in ("_shared.py", "sbk.py", "charts.py", "jdk.py"):
+            tree = ast.parse((releases / filename).read_text())
+            definitions[filename] = {
+                node.name for node in tree.body
+                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            }
+        self.assertIn("resolve_local_sbk", definitions["sbk.py"])
+        self.assertIn("inspect_shared_sbk", definitions["sbk.py"])
+        self.assertIn("resolve_local_sbk_charts", definitions["charts.py"])
+        self.assertIn("inspect_shared_sbk_charts", definitions["charts.py"])
+        self.assertIn("_jdk_executable", definitions["jdk.py"])
+        for name in (
+            "resolve_local_sbk",
+            "inspect_shared_sbk",
+            "resolve_local_sbk_charts",
+            "inspect_shared_sbk_charts",
+            "_jdk_executable",
+        ):
+            self.assertNotIn(name, definitions["_shared.py"])
+
+    def test_cli_execute_delegates_to_workflow_module(self):
+        tree = ast.parse((ROOT / "analytics" / "cli.py").read_text())
+        execute = next(
+            node for node in tree.body
+            if isinstance(node, ast.FunctionDef) and node.name == "_execute"
+        )
+        self.assertLessEqual(execute.end_lineno - execute.lineno + 1, 175)
+        calls = {
+            node.func.id for node in ast.walk(execute)
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+        }
+        self.assertIn("execute_workflow", calls)
+
+        workflow_tree = ast.parse(
+            (ROOT / "analytics" / "workflow.py").read_text()
+        )
+        workflow_execute = next(
+            node for node in workflow_tree.body
+            if isinstance(node, ast.FunctionDef)
+            and node.name == "execute_workflow"
+        )
+        self.assertLessEqual(
+            workflow_execute.end_lineno - workflow_execute.lineno + 1,
+            50,
+        )
 
 
 if __name__ == "__main__":
