@@ -1,5 +1,4 @@
 import os
-import platform
 import shutil
 import signal
 import subprocess
@@ -66,6 +65,7 @@ set -u
 printf 'uv' >>"$FAKE_LOG"
 printf '\t%s' "$@" >>"$FAKE_LOG"
 printf '\n' >>"$FAKE_LOG"
+printf 'uv-insecure-host\t%s\n' "${UV_INSECURE_HOST-}" >>"$FAKE_LOG"
 if [[ "${1:-}" == "--version" ]]; then echo 'uv 0.12.5'; exit 0; fi
 if [[ "${1:-}" == "python" && "${2:-}" == "install" ]]; then exit 0; fi
 if [[ "${1:-}" == "venv" ]]; then
@@ -143,6 +143,22 @@ exit 2
         self.assertIn("uv\tvenv\t--managed-python", calls)
         self.assertIn("uv\tsync\t--active\t--locked\t--no-editable", calls)
         self.assertIn("--reinstall-package\tsbk-analytics", calls)
+        self.assertIn(
+            "uv-insecure-host\tgithub.com release-assets.githubusercontent.com",
+            calls,
+        )
+
+    def test_bootstrap_tls_verification_defaults_to_false(self):
+        policy = (self.source / "sbk-bootstrap.env").read_text()
+        self.assertIn("SBK_ANALYTICS_BOOTSTRAP_TLS_VERIFY=false", policy)
+        result = self._run("--version")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        insecure_lines = [
+            line for line in self.log.read_text().splitlines()
+            if line.startswith("uv-insecure-host\t")
+        ]
+        self.assertTrue(insecure_lines)
+        self.assertTrue(all(line != "uv-insecure-host\t" for line in insecure_lines))
 
     def test_no_arguments_are_supported(self):
         result = self._run()
@@ -266,22 +282,32 @@ exit 2
         self.assertFalse(list((state / "locks").glob("*.lock")))
 
     def test_uv_archive_checksum_mismatch_is_rejected(self):
-        mirror = self.root / "mirror" / "0.12.5"
-        mirror.mkdir(parents=True)
-        machine = platform.machine().lower()
-        architecture = "aarch64" if machine in ("aarch64", "arm64") else "x86_64"
-        platform_target = (
-            f"{architecture}-apple-darwin"
-            if platform.system() == "Darwin"
-            else f"{architecture}-unknown-linux-gnu"
-        )
-        archive = mirror / f"uv-{platform_target}.tar.gz"
+        archive = self.root / "invalid-uv.tar.gz"
         archive.write_bytes(b"not the official archive")
+        fake_curl = self.bin_dir / "curl"
+        fake_curl.write_text(
+            """#!/usr/bin/env bash
+set -u
+printf 'curl' >>"$FAKE_LOG"
+printf '\t%s' "$@" >>"$FAKE_LOG"
+printf '\n' >>"$FAKE_LOG"
+destination=''
+previous=''
+for argument in "$@"; do
+    if [[ "$previous" == '--output' ]]; then destination="$argument"; fi
+    previous="$argument"
+done
+[[ -n "$destination" ]] || exit 2
+cp "$FAKE_UV_ARCHIVE" "$destination"
+""",
+            encoding="utf-8",
+        )
+        fake_curl.chmod(0o755)
         env = self.env.copy()
         env.pop("SBK_ANALYTICS_UV_EXECUTABLE")
         env["SBK_ANALYTICS_ENV_HOME"] = str(self.root / "checksum state")
-        env["SBK_ANALYTICS_UV_BASE_URL"] = mirror.parent.as_uri()
-        env["SBK_ANALYTICS_BOOTSTRAP_ALLOW_INSECURE"] = "1"
+        env["FAKE_UV_ARCHIVE"] = str(archive)
+        env["PATH"] = f"{self.bin_dir}{os.pathsep}{env['PATH']}"
         result = subprocess.run(
             [self.bash, str(self.launcher), "--version"],
             cwd=self.root,
@@ -292,6 +318,11 @@ exit 2
         )
         self.assertEqual(result.returncode, 1)
         self.assertIn("checksum mismatch", result.stderr)
+        curl_call = next(
+            line for line in self.log.read_text().splitlines()
+            if line.startswith("curl\t")
+        )
+        self.assertIn("\t--insecure\t", f"\t{curl_call}\t")
 
     def test_invalid_bootstrap_policy_fails_with_clear_error(self):
         policy_path = self.source / "sbk-bootstrap.env"
@@ -303,6 +334,17 @@ exit 2
         self.assertEqual(result.returncode, 1)
         self.assertIn("invalid bootstrap policy", result.stderr)
         self.assertIn("SBK_ANALYTICS_PYTHON_VERSION", result.stderr)
+
+    def test_invalid_bootstrap_tls_policy_fails_with_clear_error(self):
+        policy_path = self.source / "sbk-bootstrap.env"
+        policy_path.write_text(policy_path.read_text().replace(
+            "SBK_ANALYTICS_BOOTSTRAP_TLS_VERIFY=false",
+            "SBK_ANALYTICS_BOOTSTRAP_TLS_VERIFY=disabled",
+        ))
+        result = self._run("--version")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("invalid bootstrap policy", result.stderr)
+        self.assertIn("SBK_ANALYTICS_BOOTSTRAP_TLS_VERIFY", result.stderr)
 
 
 if __name__ == "__main__":

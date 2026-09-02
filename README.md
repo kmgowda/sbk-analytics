@@ -261,8 +261,25 @@ This disables SSL verification for:
 - SBK/JDK downloads via requests
 - pip dependency downloads for sbk-charts and its legacy no-digest Git fallback
 
-The stage-zero uv bootstrap is separate from this compatibility setting: it
-always requires HTTPS and verifies the pinned archive SHA-256 before execution.
+The stage-zero launcher has the matching default
+`SBK_ANALYTICS_BOOTSTRAP_TLS_VERIFY=false` in `sbk-bootstrap.env`. It invokes
+`curl --insecure` or `wget --no-check-certificate` for the initial uv download
+and supplies the centralized insecure-host list to uv for managed-Python and
+locked-package downloads. HTTPS URLs are still required and the pinned uv
+archive SHA-256 is always verified before execution.
+
+Bootstrap integrity is layered independently of certificate validation:
+
+- The launcher verifies the downloaded uv archive against the platform-specific
+  SHA-256 committed in `sbk-bootstrap.env` before executing it.
+- `uv sync --locked` requires the checked-in `uv.lock` to match the project and
+  uses its exact package versions and recorded artifact hashes when installing
+  application dependencies.
+- `uv python install` delegates managed-Python download selection and integrity
+  validation to the pinned uv release and its bundled download metadata.
+  sbk-analytics health-checks the resulting interpreter, but does not maintain
+  or verify a second, independent Python-archive checksum. This is the residual
+  trust boundary when bootstrap TLS verification is disabled.
 
 When TLS verification is disabled, dependency resolution also supplies the
 centralized trusted-host list to pip. Remote system-information probes likewise
@@ -270,9 +287,10 @@ disable SSH host-key checking and use the operating system's null
 known-hosts file. Use those SSH features only with dedicated, trusted benchmark
 nodes unless the centralized SSH policy is hardened for your environment.
 
-For stricter environments, set `ssl.verify=true`. A private trust root can be
-selected with `ssl.ca.bundle=/path/to/company-ca.pem`. Invalid boolean values
-are rejected instead of being treated as false.
+For stricter environments, set `ssl.verify=true` and
+`SBK_ANALYTICS_BOOTSTRAP_TLS_VERIFY=true`. A private trust root for application
+downloads can be selected with `ssl.ca.bundle=/path/to/company-ca.pem`.
+Invalid boolean values are rejected instead of being treated as false.
 
 ## Build / install
 

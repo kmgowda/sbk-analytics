@@ -51,6 +51,20 @@ validate_positive_integer() {
         policy_error "$1" "expected a positive integer"
 }
 
+validate_boolean() {
+    [[ "$2" == "true" || "$2" == "false" ]] ||
+        policy_error "$1" "expected true or false"
+}
+
+validate_host_list() {
+    local host
+    [[ -n "$2" ]] || policy_error "$1" "expected at least one host"
+    for host in $2; do
+        [[ "$host" =~ ^[A-Za-z0-9.-]+(:[0-9]+)?$ ]] ||
+            policy_error "$1" "invalid host: $host"
+    done
+}
+
 validate_https_url() {
     [[ "$2" == https://* ]] ||
         policy_error "$1" "expected an HTTPS URL"
@@ -73,6 +87,10 @@ validate_positive_integer "SBK_ANALYTICS_LOCK_POLL_SECONDS" \
     "${SBK_ANALYTICS_LOCK_POLL_SECONDS-}"
 validate_https_url "SBK_ANALYTICS_UV_RELEASE_BASE" \
     "${SBK_ANALYTICS_UV_RELEASE_BASE-}"
+validate_boolean "SBK_ANALYTICS_BOOTSTRAP_TLS_VERIFY" \
+    "${SBK_ANALYTICS_BOOTSTRAP_TLS_VERIFY-}"
+validate_host_list "SBK_ANALYTICS_BOOTSTRAP_INSECURE_HOSTS" \
+    "${SBK_ANALYTICS_BOOTSTRAP_INSECURE_HOSTS-}"
 
 readonly PYTHON_VERSION="$SBK_ANALYTICS_PYTHON_VERSION"
 readonly UV_VERSION="$SBK_ANALYTICS_UV_VERSION"
@@ -82,6 +100,16 @@ readonly ENV_METADATA_SCHEMA="$SBK_ANALYTICS_ENV_METADATA_SCHEMA"
 readonly LOCK_ATTEMPTS="$SBK_ANALYTICS_LOCK_ATTEMPTS"
 readonly LOCK_POLL_SECONDS="$SBK_ANALYTICS_LOCK_POLL_SECONDS"
 readonly UV_RELEASE_BASE="$SBK_ANALYTICS_UV_RELEASE_BASE"
+readonly BOOTSTRAP_TLS_VERIFY="$SBK_ANALYTICS_BOOTSTRAP_TLS_VERIFY"
+readonly BOOTSTRAP_INSECURE_HOSTS="$SBK_ANALYTICS_BOOTSTRAP_INSECURE_HOSTS"
+
+if [[ "$BOOTSTRAP_TLS_VERIFY" == "false" ]]; then
+    # uv accepts a space-separated UV_INSECURE_HOST list. This covers both its
+    # managed-Python downloads and locked package synchronization.
+    export UV_INSECURE_HOST="$BOOTSTRAP_INSECURE_HOSTS"
+else
+    unset UV_INSECURE_HOST 2>/dev/null || true
+fi
 
 case "$(uname -s 2>/dev/null || true)" in
     Linux)
@@ -244,7 +272,9 @@ release_lock() {
 }
 
 download_file() {
-    local url="$1" destination="$2"
+    local url="$1" destination="$2" curl_tls_option wget_tls_option
+    curl_tls_option=
+    wget_tls_option=
     case "$url" in
         https://*) ;;
         *)
@@ -252,11 +282,18 @@ download_file() {
                 fail "bootstrap downloads require HTTPS: $url"
             ;;
     esac
+    if [[ "$BOOTSTRAP_TLS_VERIFY" == "false" ]]; then
+        curl_tls_option=--insecure
+        wget_tls_option=--no-check-certificate
+        log "TLS certificate verification disabled for bootstrap download"
+    fi
     if command -v curl >/dev/null 2>&1; then
         curl --fail --location --silent --show-error \
+            ${curl_tls_option:+"$curl_tls_option"} \
             --output "$destination" "$url" >&2
     elif command -v wget >/dev/null 2>&1; then
-        wget --quiet --output-document="$destination" "$url" >&2
+        wget --quiet ${wget_tls_option:+"$wget_tls_option"} \
+            --output-document="$destination" "$url" >&2
     else
         fail "curl or wget is required for the first bootstrap"
     fi

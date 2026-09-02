@@ -115,9 +115,12 @@ conditionally required only when managed resolution is used.
 
 **Security defaults**: TLS verification and SSH host-key verification are
 disabled for compatibility with trusted benchmark labs. Keep the documented
-`ssl.verify=false` default unless the project requirement changes, clearly warn
-users about its trust assumptions, and use `os.devnull` for portable SSH null
-known-host handling.
+`ssl.verify=false` and `SBK_ANALYTICS_BOOTSTRAP_TLS_VERIFY=false` defaults unless
+the project requirement changes, clearly warn users about their trust
+assumptions, and use `os.devnull` for portable SSH null known-host handling.
+Do not imply that sbk-analytics independently checks the managed-Python archive:
+the launcher checks uv, the lockfile records package artifact hashes, and the
+pinned uv release owns managed-Python download integrity.
 
 ### 4. Releases Module (`releases.py`)
 **Purpose**: Dependency resolution and caching

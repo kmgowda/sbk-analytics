@@ -79,6 +79,11 @@ The package respects these environment variables:
 - `JAVA_HOME` - User's JAVA_HOME (not modified by package)
 - `SBK_ANALYTICS_ENV_HOME` - persistent managed runtime override
 - `SBK_ANALYTICS_BOOTSTRAP_OFFLINE` - disable bootstrap downloads
+- `SBK_ANALYTICS_BOOTSTRAP_TLS_VERIFY=false` (in `sbk-bootstrap.env`) - shipped
+  default that disables certificate verification for curl/wget and uv while
+  retaining mandatory uv archive checksum verification; `uv.lock` records
+  application-package artifact hashes, while managed-Python integrity remains
+  delegated to the pinned uv release rather than a second application checksum
 - `PYTHONUNBUFFERED` - Unbuffered Python output
 
 ## Dependencies
