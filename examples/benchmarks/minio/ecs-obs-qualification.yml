@@ -1,7 +1,7 @@
 # Small, fixed-count ECS/OBS qualification. Credentials are intentionally not
 # stored here: export SBK_S3_ACCESS_KEY and SBK_S3_SECRET_KEY before running.
 mode: serial
-workdir: /tmp/sbk-analytics/classes/minio/ecs-obs-qualification
+workdir: /tmp/sbk-analytics/benchmarks/minio/ecs-obs-qualification
 cleanup_before_run: true
 
 sbk:

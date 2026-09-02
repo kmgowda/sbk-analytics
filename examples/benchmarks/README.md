@@ -5,9 +5,9 @@ class. Each class directory documents its preparation and measurement order.
 
 | Class | Workflows | Data location |
 | --- | --- | --- |
-| [file](file/README.md) | Fixed-size filesystem write and read | `/tmp/sbk-analytics/classes/file` |
-| [rocksdb](rocksdb/README.md) | Fixed-size RocksDB write and read | `/tmp/sbk-analytics/classes/rocksdb` |
-| [minio / ECS / ObjectScale](minio/README.md) | S3 qualification, multi-endpoint throughput, and distributed GEM | `/tmp/sbk-analytics/classes/minio` |
+| [file](file/README.md) | Fixed-size filesystem write and read | `/tmp/sbk-analytics/benchmarks/file` |
+| [rocksdb](rocksdb/README.md) | Fixed-size RocksDB write and read | `/tmp/sbk-analytics/benchmarks/rocksdb` |
+| [minio / ECS / ObjectScale](minio/README.md) | S3 qualification, multi-endpoint throughput, and distributed GEM | `/tmp/sbk-analytics/benchmarks/minio` |
 
 Run each class's write workflow before its read workflow. The write workflow
 uses `cleanup_before_run: true` to start with fresh class data. The corresponding

@@ -28,6 +28,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and real sbk-charts command health checks before cache publication.
 
 ### Changed
+- Renamed the persistent workflow catalog from `examples/classes/` to
+  `examples/benchmarks/` so the directory matches the canonical top-level
+  `benchmarks:` workflow key.
 - Generate SBK 10.6 GEM workflows with `GemPrometheusLogger` instead of the
   local-only `CSVLogger`, retaining per-instance CSV output for sbk-charts.
 - Extended immutable runtime policy coverage to dependency layouts and source

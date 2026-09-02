@@ -1,6 +1,6 @@
 # Prepare and measure two fixed-size local file-system datasets.
 mode: serial
-workdir: /tmp/sbk-analytics/classes/file
+workdir: /tmp/sbk-analytics/benchmarks/file
 
 # Start every write cycle with fresh data and fresh analytics artifacts.
 cleanup_before_run: true
@@ -16,7 +16,7 @@ benchmarks:
     writers: 1
     size: 4096
     records: 65536
-    file: /tmp/sbk-analytics/classes/file/file-4k.dat
+    file: /tmp/sbk-analytics/benchmarks/file/file-4k.dat
 
   # 4,096 × 64 KiB = 256 MiB.
   - name: file-write-64k
@@ -24,7 +24,7 @@ benchmarks:
     writers: 1
     size: 65536
     records: 4096
-    file: /tmp/sbk-analytics/classes/file/file-64k.dat
+    file: /tmp/sbk-analytics/benchmarks/file/file-64k.dat
 
 sbk-charts:
   output: file-write.xlsx

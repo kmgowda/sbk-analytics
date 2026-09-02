@@ -1,6 +1,6 @@
 # Prepare and measure two fixed-size local RocksDB datasets.
 mode: serial
-workdir: /tmp/sbk-analytics/classes/rocksdb
+workdir: /tmp/sbk-analytics/benchmarks/rocksdb
 
 # Remove previous databases and analytics artifacts before writing.
 cleanup_before_run: true
@@ -16,7 +16,7 @@ benchmarks:
     writers: 1
     size: 4096
     records: 65536
-    rfile: /tmp/sbk-analytics/classes/rocksdb/rocksdb-4k
+    rfile: /tmp/sbk-analytics/benchmarks/rocksdb/rocksdb-4k
 
   # 4,096 × 64 KiB = approximately 256 MiB plus RocksDB overhead.
   - name: rocksdb-write-64k
@@ -24,7 +24,7 @@ benchmarks:
     writers: 1
     size: 65536
     records: 4096
-    rfile: /tmp/sbk-analytics/classes/rocksdb/rocksdb-64k
+    rfile: /tmp/sbk-analytics/benchmarks/rocksdb/rocksdb-64k
 
 sbk-charts:
   output: rocksdb-write.xlsx

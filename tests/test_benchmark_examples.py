@@ -10,7 +10,7 @@ from analytics.yaml_gen import generate_instance_yaml
 
 
 ROOT = Path(__file__).resolve().parent.parent
-CLASS_EXAMPLES = ROOT / "examples" / "classes"
+BENCHMARK_EXAMPLES = ROOT / "examples" / "benchmarks"
 
 
 class ShippedExampleTests(unittest.TestCase):
@@ -29,19 +29,19 @@ class ShippedExampleTests(unittest.TestCase):
 class StorageClassExampleTests(unittest.TestCase):
     def test_file_and_rocksdb_write_read_workflows_are_complete(self):
         expected = {
-            CLASS_EXAMPLES / driver / f"{operation}.yml"
+            BENCHMARK_EXAMPLES / driver / f"{operation}.yml"
             for driver in ("file", "rocksdb")
             for operation in ("write", "read")
         }
         local_examples = {
-            path for path in CLASS_EXAMPLES.glob("*/*.yml")
+            path for path in BENCHMARK_EXAMPLES.glob("*/*.yml")
             if path.parent.name in {"file", "rocksdb"}
         }
         self.assertEqual(local_examples, expected)
 
         for driver in ("file", "rocksdb"):
-            write = load_config(CLASS_EXAMPLES / driver / "write.yml")
-            read = load_config(CLASS_EXAMPLES / driver / "read.yml")
+            write = load_config(BENCHMARK_EXAMPLES / driver / "write.yml")
+            read = load_config(BENCHMARK_EXAMPLES / driver / "read.yml")
             self.assertTrue(write.cleanup_before_run)
             self.assertFalse(read.cleanup_before_run)
             self.assertEqual(write.mode, "serial")
@@ -77,7 +77,7 @@ class StorageClassExampleTests(unittest.TestCase):
         interface = RUNTIME_POLICY.sbk_interface
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory)
-            for workflow in sorted(CLASS_EXAMPLES.glob("*/*.yml")):
+            for workflow in sorted(BENCHMARK_EXAMPLES.glob("*/*.yml")):
                 config = load_config(workflow)
                 for instance in config.instances:
                     rendered = generate_instance_yaml(
@@ -106,7 +106,7 @@ class StorageClassExampleTests(unittest.TestCase):
                     )
 
     def test_minio_ecs_workflows_are_credential_free_and_complete(self):
-        minio = CLASS_EXAMPLES / "minio"
+        minio = BENCHMARK_EXAMPLES / "minio"
         expected = {
             minio / "ecs-obs-qualification.yml",
             minio / "ecs-obs-throughput.yml",

@@ -2,7 +2,7 @@
 # every node over SSH. Export SBK_GEM_SSH_PASSWD, SBK_S3_ACCESS_KEY, and
 # SBK_S3_SECRET_KEY; never add those values to this file.
 mode: serial
-workdir: /tmp/sbk-analytics/classes/minio/ecs-obs-gem
+workdir: /tmp/sbk-analytics/benchmarks/minio/ecs-obs-gem
 cleanup_before_run: true
 
 sbk:

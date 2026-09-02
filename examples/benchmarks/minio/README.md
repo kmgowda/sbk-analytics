@@ -66,9 +66,9 @@ flowchart LR
    every listed load generator and controller-to-node SSH works.
 
 ```bash
-./sbk-analytics -c examples/classes/minio/ecs-obs-qualification.yml
-./sbk-analytics -c examples/classes/minio/ecs-obs-throughput.yml
-./sbk-analytics -c examples/classes/minio/ecs-obs-gem.yml
+./sbk-analytics -c examples/benchmarks/minio/ecs-obs-qualification.yml
+./sbk-analytics -c examples/benchmarks/minio/ecs-obs-throughput.yml
+./sbk-analytics -c examples/benchmarks/minio/ecs-obs-gem.yml
 ```
 
 `cleanup_before_run` only clears the local analytics work directory. It does

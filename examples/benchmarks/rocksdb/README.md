@@ -4,11 +4,11 @@ These workflows benchmark the embedded SBK `rocksdb` driver with two controlled
 datasets using 4 KiB and 64 KiB values. Run them in order:
 
 ```bash
-./sbk-analytics -c examples/classes/rocksdb/write.yml
-./sbk-analytics -c examples/classes/rocksdb/read.yml
+./sbk-analytics -c examples/benchmarks/rocksdb/write.yml
+./sbk-analytics -c examples/benchmarks/rocksdb/read.yml
 ```
 
-`write.yml` clears `/tmp/sbk-analytics/classes/rocksdb`, including previous
+`write.yml` clears `/tmp/sbk-analytics/benchmarks/rocksdb`, including previous
 RocksDB databases, before writing. `read.yml` preserves and reads those exact
 database paths with matching sizes and record counts. RocksDB results depend on
 the filesystem, device, OS cache, WAL, compaction, compression, and sync

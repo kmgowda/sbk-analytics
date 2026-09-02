@@ -1,7 +1,7 @@
 # Short single-load-generator run across four ECS data endpoints. Increase the
 # duration/repetitions only after the fixed-count qualification succeeds.
 mode: serial
-workdir: /tmp/sbk-analytics/classes/minio/ecs-obs-throughput
+workdir: /tmp/sbk-analytics/benchmarks/minio/ecs-obs-throughput
 cleanup_before_run: true
 
 sbk:

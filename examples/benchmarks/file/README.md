@@ -9,11 +9,11 @@ datasets:
 Run them in order:
 
 ```bash
-./sbk-analytics -c examples/classes/file/write.yml
-./sbk-analytics -c examples/classes/file/read.yml
+./sbk-analytics -c examples/benchmarks/file/write.yml
+./sbk-analytics -c examples/benchmarks/file/read.yml
 ```
 
-`write.yml` clears `/tmp/sbk-analytics/classes/file` before preparing the two
+`write.yml` clears `/tmp/sbk-analytics/benchmarks/file` before preparing the two
 files. `read.yml` deliberately preserves that directory and reads the same
 paths with identical sizes and record counts. Re-running the write workflow
 starts a new write/read cycle. Reports are written beside the generated YAML,
