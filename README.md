@@ -636,8 +636,9 @@ What this does, step by step:
      `sbk-charts.sha256`, and installs it into the isolated environment at
      `./.sbk/sbk-charts/<sbk-charts.version>/venv/`. It is cached on all hosts.
 3. **Generate per-instance YAMLs.** One YAML per `benchmarks:` entry under
-   `<work-dir>/yml/`, each forced to write CSV via `CSVLogger` to a unique
-   `<work-dir>/csv/sbk-<instance>.csv`.
+   `<work-dir>/yml/`, each forced to write CSV to a unique
+   `<work-dir>/csv/sbk-<instance>.csv`. Local jobs use `CSVLogger`;
+   distributed GEM jobs use SBK 10.6's CSV-capable `GemPrometheusLogger`.
 4. **Run SBK.** Invokes `sbk-yal` for local instances and `sbk-gem-yal` for
    instances with a non-empty `nodes:` value. In `serial` mode (default) SBK output is
    shown live; in `parallel` mode each instance writes to its own log file
@@ -922,7 +923,8 @@ Parameter precedence for the generated per-instance YAML (lowest to highest):
 1. shared `sbk:` block (defaults for every instance)
 2. `class_params[<class>]` (per-class defaults, if any)
 3. the entry's own keys (only for Style B mapping entries)
-4. the orchestrator's own overrides: `class`, `out: CSVLogger`, `csvfile`
+4. the orchestrator's own overrides: `class`, `csvfile`, and the matching
+   CSV-capable logger (`CSVLogger` locally or `GemPrometheusLogger` for GEM)
 
 Each instance can mix freely between **SBK parameters** (`writers`, `readers`,
 `size`, `seconds`, `time`, ...) and **class-specific parameters** (`file`

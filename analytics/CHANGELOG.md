@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Added credential-free MinIO/ECS/ObjectScale qualification, multi-endpoint,
+  and GEM examples with a validated lab runbook and sample results.
 - Added canonical top-level YAML `benchmarks` terminology. The former
   `classes` key remains accepted as a deprecated alias with a warning, while
   defining both keys is rejected to prevent ambiguous persistent workflows.
@@ -26,6 +28,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and real sbk-charts command health checks before cache publication.
 
 ### Changed
+- Generate SBK 10.6 GEM workflows with `GemPrometheusLogger` instead of the
+  local-only `CSVLogger`, retaining per-instance CSV output for sbk-charts.
 - Extended immutable runtime policy coverage to dependency layouts and source
   vocabulary, executable/environment names, SBK and charts interfaces, pip
   invocation, configuration/property aliases, CLI and lifecycle schemas,

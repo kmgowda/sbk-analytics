@@ -41,14 +41,20 @@ def generate_instance_yaml(
         sbkGemArgs:  for sbk-gem-yal (i.e. when ``nodes`` is present)
 
     The merged params from the Instance are written under that wrapper, with
-    ``class``, ``out=CSVLogger``, and ``csvfile`` forced so each instance
-    produces its own CSV.
+    ``class``, a CSV-capable logger, and ``csvfile`` are forced so each
+    instance produces its own CSV. SBK-YAL uses ``CSVLogger``; SBK-GEM-YAL
+    uses ``GemPrometheusLogger``, the SBK 10.6 GEM logger that persists CSV.
     """
     out_dir.mkdir(parents=True, exist_ok=True)
 
     params: dict[str, Any] = dict(inst.params)
     params[SBK_INTERFACE_POLICY.class_option] = inst.class_name
-    params[SBK_INTERFACE_POLICY.output_option] = SBK_INTERFACE_POLICY.csv_logger
+    logger = (
+        SBK_INTERFACE_POLICY.gem_csv_logger
+        if inst.uses_gem
+        else SBK_INTERFACE_POLICY.csv_logger
+    )
+    params[SBK_INTERFACE_POLICY.output_option] = logger
     params[SBK_INTERFACE_POLICY.csv_file_option] = str(csv_path)
 
     wrapper_key = SBK_INTERFACE_POLICY.local_arguments_wrapper

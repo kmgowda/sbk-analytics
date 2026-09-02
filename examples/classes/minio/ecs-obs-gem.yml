@@ -1,0 +1,45 @@
+# Distributed ECS/OBS qualification through SBK-GEM. The controller must reach
+# every node over SSH. Export SBK_GEM_SSH_PASSWD, SBK_S3_ACCESS_KEY, and
+# SBK_S3_SECRET_KEY; never add those values to this file.
+mode: serial
+workdir: /tmp/sbk-analytics/classes/minio/ecs-obs-gem
+cleanup_before_run: true
+
+sbk:
+  nodes: 10.236.65.98,10.236.65.99,10.236.65.100,10.236.65.101,10.236.65.102,10.236.65.103,10.236.65.104,10.236.65.105
+  gemuser: admin
+  gemport: 22
+  hostkeycheck: false
+  fullcopy: false
+  packagescleanup: true
+  totalrecords: 80
+  time: ms
+  idletimeoutseconds: 180
+  url: http://10.236.66.181:9020
+  endpoints: http://10.236.66.181:9020,http://10.236.66.182:9020,http://10.236.66.183:9020,http://10.236.66.184:9020
+  bucket: sbk-analytics-ecs-obs
+  extra-headers: x-emc-namespace=sbk-ns
+  retry-max-attempts: 1
+  data-seed: 20260902
+  data-compressibility: 0
+  data-dedupable: false
+
+benchmarks:
+  - name: ecs-gem-put-1m
+    class: minio
+    prefix: gem-qualification-1m
+    writers: 1
+    size: 1048576
+
+  - name: ecs-gem-get-1m
+    class: minio
+    prefix: gem-qualification-1m
+    readers: 1
+    size: 1048576
+    read-operation: get
+    verify-read-size: true
+
+sbk-charts:
+  output: ecs-obs-gem.xlsx
+  ai_model: noai
+  chat: false
