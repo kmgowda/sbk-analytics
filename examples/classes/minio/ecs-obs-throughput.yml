@@ -1,0 +1,38 @@
+# Short single-load-generator run across four ECS data endpoints. Increase the
+# duration/repetitions only after the fixed-count qualification succeeds.
+mode: serial
+workdir: /tmp/sbk-analytics/classes/minio/ecs-obs-throughput
+cleanup_before_run: true
+
+sbk:
+  time: ms
+  idletimeoutseconds: 120
+  url: http://10.236.66.181:9020
+  endpoints: http://10.236.66.181:9020,http://10.236.66.182:9020,http://10.236.66.183:9020,http://10.236.66.184:9020
+  bucket: sbk-analytics-ecs-obs
+  extra-headers: x-emc-namespace=sbk-ns
+  retry-max-attempts: 1
+  data-seed: 20260902
+  data-compressibility: 0
+  data-dedupable: false
+  seconds: 30
+
+benchmarks:
+  - name: ecs-four-endpoint-put-1m
+    class: minio
+    prefix: throughput-1m
+    writers: 4
+    size: 1048576
+
+  - name: ecs-four-endpoint-get-1m
+    class: minio
+    prefix: throughput-1m
+    readers: 4
+    size: 1048576
+    read-operation: get
+    verify-read-size: true
+
+sbk-charts:
+  output: ecs-obs-throughput.xlsx
+  ai_model: noai
+  chat: false

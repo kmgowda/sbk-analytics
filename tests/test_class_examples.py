@@ -33,7 +33,11 @@ class StorageClassExampleTests(unittest.TestCase):
             for driver in ("file", "rocksdb")
             for operation in ("write", "read")
         }
-        self.assertEqual(set(CLASS_EXAMPLES.glob("*/*.yml")), expected)
+        local_examples = {
+            path for path in CLASS_EXAMPLES.glob("*/*.yml")
+            if path.parent.name in {"file", "rocksdb"}
+        }
+        self.assertEqual(local_examples, expected)
 
         for driver in ("file", "rocksdb"):
             write = load_config(CLASS_EXAMPLES / driver / "write.yml")
@@ -82,14 +86,61 @@ class StorageClassExampleTests(unittest.TestCase):
                         output / f"{instance.name}.csv",
                     )
                     document = yaml.safe_load(rendered.read_text())
-                    self.assertEqual(list(document), [interface.local_arguments_wrapper])
-                    params = document[interface.local_arguments_wrapper]
+                    wrapper = (
+                        interface.gem_arguments_wrapper
+                        if instance.uses_gem
+                        else interface.local_arguments_wrapper
+                    )
+                    self.assertEqual(list(document), [wrapper])
+                    params = document[wrapper]
                     self.assertEqual(params[interface.class_option], instance.class_name)
-                    self.assertEqual(params[interface.output_option], interface.csv_logger)
+                    expected_logger = (
+                        interface.gem_csv_logger
+                        if instance.uses_gem
+                        else interface.csv_logger
+                    )
+                    self.assertEqual(params[interface.output_option], expected_logger)
                     self.assertEqual(
                         params[interface.csv_file_option],
                         str(output / f"{instance.name}.csv"),
                     )
+
+    def test_minio_ecs_workflows_are_credential_free_and_complete(self):
+        minio = CLASS_EXAMPLES / "minio"
+        expected = {
+            minio / "ecs-obs-qualification.yml",
+            minio / "ecs-obs-throughput.yml",
+            minio / "ecs-obs-gem.yml",
+        }
+        self.assertEqual(set(minio.glob("*.yml")), expected)
+
+        forbidden = {"key", "secret", "gempass"}
+        for workflow in sorted(expected):
+            with self.subTest(workflow=workflow.name):
+                document = yaml.safe_load(workflow.read_text())
+                config = load_config(workflow)
+                self.assertEqual(config.mode, "serial")
+                self.assertTrue(config.cleanup_before_run)
+                self.assertTrue(config.instances)
+                for instance in config.instances:
+                    self.assertEqual(instance.class_name, "minio")
+                    self.assertTrue(forbidden.isdisjoint(instance.params))
+                    self.assertEqual(instance.params["bucket"], "sbk-analytics-ecs-obs")
+                    self.assertEqual(instance.params["retry-max-attempts"], 1)
+                    self.assertNotIn("endpoint-metrics", instance.params)
+                self.assertNotIn("ChangeMe", workflow.read_text())
+
+        qualification = load_config(minio / "ecs-obs-qualification.yml")
+        operations = {instance.name for instance in qualification.instances}
+        self.assertEqual(
+            operations,
+            {
+                "ecs-put-1m", "ecs-get-1m", "ecs-range-get-4k",
+                "ecs-list", "ecs-multipart-put-15m",
+            },
+        )
+        gem = load_config(minio / "ecs-obs-gem.yml")
+        self.assertTrue(all(instance.uses_gem for instance in gem.instances))
 
 
 if __name__ == "__main__":

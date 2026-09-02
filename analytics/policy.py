@@ -245,6 +245,7 @@ class SbkInterfacePolicy:
     output_option: str = "out"
     csv_file_option: str = "csvfile"
     csv_logger: str = "CSVLogger"
+    gem_csv_logger: str = "GemPrometheusLogger"
     gem_user_option: str = "gemuser"
     gem_password_option: str = "gempass"
     gem_port_option: str = "gemport"

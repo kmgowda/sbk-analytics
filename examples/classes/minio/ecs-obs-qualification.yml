@@ -1,0 +1,69 @@
+# Small, fixed-count ECS/OBS qualification. Credentials are intentionally not
+# stored here: export SBK_S3_ACCESS_KEY and SBK_S3_SECRET_KEY before running.
+mode: serial
+workdir: /tmp/sbk-analytics/classes/minio/ecs-obs-qualification
+cleanup_before_run: true
+
+sbk:
+  time: ms
+  idletimeoutseconds: 120
+  url: http://10.236.66.181:9020
+  bucket: sbk-analytics-ecs-obs
+  extra-headers: x-emc-namespace=sbk-ns
+  retry-max-attempts: 1
+  data-seed: 20260902
+  data-compressibility: 0
+  data-dedupable: false
+
+benchmarks:
+  # Populate twenty reusable 1 MiB objects.
+  - name: ecs-put-1m
+    class: minio
+    prefix: qualification-1m
+    writers: 1
+    size: 1048576
+    records: 20
+
+  - name: ecs-get-1m
+    class: minio
+    prefix: qualification-1m
+    readers: 1
+    size: 1048576
+    records: 20
+    read-operation: get
+    verify-read-size: true
+
+  - name: ecs-range-get-4k
+    class: minio
+    prefix: qualification-1m
+    readers: 1
+    size: 4096
+    records: 20
+    read-operation: range-get
+    range-offset: 8192
+    range-length: 4096
+    verify-read-size: true
+
+  - name: ecs-list
+    class: minio
+    readers: 1
+    size: 1
+    records: 5
+    read-operation: list
+    list-prefixes: qualification-1m
+    list-max-keys: 1000
+
+  # Validate multipart completion separately from ordinary PUT.
+  - name: ecs-multipart-put-15m
+    class: minio
+    prefix: qualification-multipart-15m
+    writers: 1
+    size: 15728640
+    records: 2
+    part-size: 5242880
+    mpu-concurrent-parts: 3
+
+sbk-charts:
+  output: ecs-obs-qualification.xlsx
+  ai_model: noai
+  chat: false

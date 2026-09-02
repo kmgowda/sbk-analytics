@@ -594,7 +594,9 @@ Parameters are resolved in the following order (lowest to highest precedence):
 1. **Shared `sbk:` block** - Defaults for ALL instances
 2. **`class_params[<class>]`** - Per-class defaults (if specified)
 3. **Instance's own keys** - Per-instance overrides in `benchmarks:` list
-4. **Orchestrator-managed** - `class`, `out=CSVLogger`, `csvfile=<unique-path>`
+4. **Orchestrator-managed** - `class`, `csvfile=<unique-path>`, and the
+   SBK-mode-specific CSV logger (`CSVLogger` for YAL,
+   `GemPrometheusLogger` for GEM-YAL)
 
 This means an instance only needs to specify parameters that differ from the shared defaults.
 

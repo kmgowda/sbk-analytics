@@ -6,6 +6,7 @@ from pathlib import Path
 import yaml
 
 from analytics.config import load_config
+from analytics.policy import RUNTIME_POLICY
 from analytics.runner import run_jobs
 from analytics.yaml_gen import generate_instance_yaml
 
@@ -112,7 +113,15 @@ class ExecutionModeTests(unittest.TestCase):
                 remote, root / "yml", root / "remote.csv"
             )
             self.assertIn("sbkArgs", yaml.safe_load(local_yml.read_text()))
-            self.assertIn("sbkGemArgs", yaml.safe_load(remote_yml.read_text()))
+            remote_document = yaml.safe_load(remote_yml.read_text())
+            self.assertIn("sbkGemArgs", remote_document)
+            interface = RUNTIME_POLICY.sbk_interface
+            self.assertEqual(
+                remote_document[interface.gem_arguments_wrapper][
+                    interface.output_option
+                ],
+                interface.gem_csv_logger,
+            )
 
             for mode in ("serial", "parallel"):
                 with self.subTest(mode=mode):
