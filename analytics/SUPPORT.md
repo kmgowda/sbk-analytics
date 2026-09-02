@@ -18,6 +18,10 @@ If you're new to sbk-analytics, start with:
 - No host Python, venv, or Conda is required. The first uv download needs
   `curl` or `wget`.
 - Confirm GitHub and Python package repositories are reachable on first use
+- Bootstrap certificate verification defaults to disabled through
+  `SBK_ANALYTICS_BOOTSTRAP_TLS_VERIFY=false` in `sbk-bootstrap.env`; this avoids
+  certificate failures on TLS-intercepting lab networks. It does not bypass
+  DNS, proxy, firewall, or connectivity failures.
 - Confirm the per-user state directory, or `SBK_ANALYTICS_ENV_HOME`, is writable
 - Set `SBK_ANALYTICS_BOOTSTRAP_OFFLINE=1` only after the runtime is cached; a
   healthy saved environment is automatically reused without invoking uv

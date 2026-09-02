@@ -261,8 +261,12 @@ This disables SSL verification for:
 - SBK/JDK downloads via requests
 - pip dependency downloads for sbk-charts and its legacy no-digest Git fallback
 
-The stage-zero uv bootstrap is separate from this compatibility setting: it
-always requires HTTPS and verifies the pinned archive SHA-256 before execution.
+The stage-zero launcher has the matching default
+`SBK_ANALYTICS_BOOTSTRAP_TLS_VERIFY=false` in `sbk-bootstrap.env`. It invokes
+`curl --insecure` or `wget --no-check-certificate` for the initial uv download
+and supplies the centralized insecure-host list to uv for managed-Python and
+locked-package downloads. HTTPS URLs are still required and the pinned uv
+archive SHA-256 is always verified before execution.
 
 When TLS verification is disabled, dependency resolution also supplies the
 centralized trusted-host list to pip. Remote system-information probes likewise
@@ -270,9 +274,10 @@ disable SSH host-key checking and use the operating system's null
 known-hosts file. Use those SSH features only with dedicated, trusted benchmark
 nodes unless the centralized SSH policy is hardened for your environment.
 
-For stricter environments, set `ssl.verify=true`. A private trust root can be
-selected with `ssl.ca.bundle=/path/to/company-ca.pem`. Invalid boolean values
-are rejected instead of being treated as false.
+For stricter environments, set `ssl.verify=true` and
+`SBK_ANALYTICS_BOOTSTRAP_TLS_VERIFY=true`. A private trust root for application
+downloads can be selected with `ssl.ca.bundle=/path/to/company-ca.pem`.
+Invalid boolean values are rejected instead of being treated as false.
 
 ## Build / install
 

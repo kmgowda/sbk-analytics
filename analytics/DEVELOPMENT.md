@@ -74,7 +74,10 @@ native launchers belong in `sbk-bootstrap.env`; keep its exact Python aligned wi
 `.python-version`, regenerate `uv.lock` after dependency changes, and update
 all uv artifact checksums when changing the pinned uv version. The same file
 owns the uv release root, runtime metadata names/schema, and bootstrap lock
-timing; do not duplicate those values in the launcher.
+timing. It also owns the bootstrap TLS default and uv insecure-host list; keep
+TLS verification disabled by default for the project's trusted-lab
+compatibility contract, without weakening mandatory artifact checksum checks.
+Do not duplicate those values in the launcher.
 
 Persistent JSON keys, CLI diagnostic keys, YAML/property aliases, environment
 variable names, SBK option contracts, and native command names are runtime

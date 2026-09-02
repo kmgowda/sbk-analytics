@@ -213,6 +213,14 @@ class PolicyTests(unittest.TestCase):
             bootstrap["SBK_ANALYTICS_PYTHON_VERSION"],
         )
         self.assertRegex(bootstrap["SBK_ANALYTICS_UV_VERSION"], r"^\d+\.\d+\.\d+$")
+        self.assertEqual(
+            bootstrap["SBK_ANALYTICS_BOOTSTRAP_TLS_VERIFY"],
+            "false",
+        )
+        self.assertIn(
+            "github.com",
+            bootstrap["SBK_ANALYTICS_BOOTSTRAP_INSECURE_HOSTS"].strip('"').split(),
+        )
         checksum_keys = [key for key in bootstrap if key.endswith("_SHA256")]
         self.assertEqual(len(checksum_keys), 4)
         self.assertFalse(any("WINDOWS" in key for key in bootstrap))
@@ -225,6 +233,8 @@ class PolicyTests(unittest.TestCase):
             "SBK_ANALYTICS_PYTHON_VERSION",
             "SBK_ANALYTICS_UV_VERSION",
             "SBK_ANALYTICS_UV_RELEASE_BASE",
+            "SBK_ANALYTICS_BOOTSTRAP_TLS_VERIFY",
+            "SBK_ANALYTICS_BOOTSTRAP_INSECURE_HOSTS",
             "SBK_ANALYTICS_RUNTIME_FOLDER",
             "SBK_ANALYTICS_BOOTSTRAP_MARKER",
             "SBK_ANALYTICS_ENV_METADATA",
