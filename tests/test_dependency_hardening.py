@@ -62,7 +62,7 @@ class PropertiesHardeningTests(unittest.TestCase):
             executable.write_text("#!/bin/sh\necho 'sbk-charts 1.2.3'\n")
             executable.chmod(executable.stat().st_mode | stat.S_IXUSR)
             with mock.patch(
-                "analytics.releases._charts_version", return_value="1.2.3"
+                "analytics.releases._shared._charts_version", return_value="1.2.3"
             ):
                 install = resolve_local_sbk_charts(
                     executable=executable, expected_version="1.2.3",
@@ -70,7 +70,7 @@ class PropertiesHardeningTests(unittest.TestCase):
                 )
             self.assertEqual(install.cli, executable.resolve())
             with mock.patch(
-                "analytics.releases._charts_version", return_value="1.2.3"
+                "analytics.releases._shared._charts_version", return_value="1.2.3"
             ), self.assertRaisesRegex(LocalPackageError, "version mismatch"):
                 resolve_local_sbk_charts(
                     executable=executable, expected_version="9.9.9",
@@ -152,14 +152,14 @@ class JdkPublicationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             cache = Path(directory) / "jdk" / "25"
             with mock.patch(
-                "analytics.releases._jdk_asset",
+                "analytics.releases.jdk._jdk_asset",
                 return_value=("https://example.invalid/jdk.tar.gz", "a" * 64),
             ), mock.patch(
-                "analytics.releases._download", return_value="a" * 64
+                "analytics.releases.jdk._download", return_value="a" * 64
             ), mock.patch(
-                "analytics.releases._extract", side_effect=self._fake_extract
+                "analytics.releases.jdk._extract", side_effect=self._fake_extract
             ), mock.patch(
-                "analytics.releases._java_major_version", return_value=21
+                "analytics.releases.jdk._java_major_version", return_value=21
             ), self.assertRaisesRegex(CacheError, "required major 25"):
                 _install_jdk_locked("25", cache, False)
             self.assertFalse((cache / ".ok").exists())
@@ -185,11 +185,11 @@ class JdkPublicationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             cache = Path(directory) / "jdk" / "25"
             with mock.patch(
-                "analytics.releases._jdk_asset",
+                "analytics.releases.jdk._jdk_asset",
                 return_value=("https://example.invalid/jdk.tar.gz", "a" * 64),
             ), mock.patch(
-                "analytics.releases._download", return_value="b" * 64
-            ), mock.patch("analytics.releases._extract") as extract, \
+                "analytics.releases.jdk._download", return_value="b" * 64
+            ), mock.patch("analytics.releases.jdk._extract") as extract, \
                     self.assertRaisesRegex(CacheError, "checksum mismatch"):
                 _install_jdk_locked("25", cache, False)
             extract.assert_not_called()
@@ -199,14 +199,14 @@ class JdkPublicationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             cache = Path(directory) / "jdk" / "25"
             with mock.patch(
-                "analytics.releases._jdk_asset",
+                "analytics.releases.jdk._jdk_asset",
                 return_value=("https://example.invalid/jdk.tar.gz", "a" * 64),
             ), mock.patch(
-                "analytics.releases._download", return_value="a" * 64
+                "analytics.releases.jdk._download", return_value="a" * 64
             ), mock.patch(
-                "analytics.releases._extract", side_effect=self._fake_extract
+                "analytics.releases.jdk._extract", side_effect=self._fake_extract
             ), mock.patch(
-                "analytics.releases._java_major_version", return_value=25
+                "analytics.releases.jdk._java_major_version", return_value=25
             ):
                 install = _install_jdk_locked("25", cache, False)
             self.assertTrue((cache / ".ok").is_file())

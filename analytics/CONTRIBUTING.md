@@ -40,10 +40,11 @@ sbk-analytics/
 │   ├── __main__.py              # Entry point for CLI
 │   ├── banner.txt               # ASCII art banner
 │   ├── cli.py                   # Command-line interface
+│   ├── workflow.py              # Workflow execution pipeline
 │   ├── config.py                # YAML configuration parsing
 │   ├── charts.py                # sbk-charts invocation
 │   ├── properties.py            # .env file parsing
-│   ├── releases.py              # Dependency resolution
+│   ├── releases/                # Per-artifact dependency resolution
 │   ├── runner.py                # SBK execution
 │   ├── system_info.py           # System information collection
 │   └── yaml_gen.py              # YAML generation
@@ -92,7 +93,7 @@ sbk-analytics/
 4. Update documentation
 
 ### 2. Improving JDK Resolution
-- Modify `analytics/releases.py:ensure_jdk()`
+- Modify `analytics/releases/jdk.py:ensure_jdk()`
 - Test with different JAVA_HOME settings
 - Test on different platforms
 - Update documentation

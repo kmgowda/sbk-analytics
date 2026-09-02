@@ -258,16 +258,19 @@ class PolicyTests(unittest.TestCase):
 
     def test_policy_consumers_do_not_reintroduce_cross_cutting_literals(self):
         consumers = (
-            "charts.py",
-            "cli.py",
-            "config.py",
-            "lifecycle.py",
-            "processes.py",
-            "properties.py",
-            "releases.py",
-            "runner.py",
-            "sbk_contract.py",
-            "system_info.py",
+            Path("charts.py"),
+            Path("cli.py"),
+            Path("config.py"),
+            Path("lifecycle.py"),
+            Path("processes.py"),
+            Path("properties.py"),
+            Path("runner.py"),
+            Path("sbk_contract.py"),
+            Path("system_info.py"),
+            Path("workflow.py"),
+            *(path.relative_to(ROOT / "analytics") for path in sorted(
+                (ROOT / "analytics" / "releases").glob("*.py")
+            )),
         )
         forbidden_strings = {
             ".ok",
@@ -374,6 +377,42 @@ class PolicyTests(unittest.TestCase):
                 ):
                     violations.append(f"{filename}:{node.lineno}: numeric sleep")
         self.assertEqual(violations, [])
+
+    def test_dependency_resolvers_have_artifact_boundaries(self):
+        releases = ROOT / "analytics" / "releases"
+        self.assertFalse((ROOT / "analytics" / "releases.py").exists())
+        expected_definitions = {
+            "sbk.py": "ensure_sbk",
+            "charts.py": "ensure_sbk_charts",
+            "jdk.py": "ensure_jdk",
+        }
+        for filename, function_name in expected_definitions.items():
+            tree = ast.parse((releases / filename).read_text())
+            definitions = {
+                node.name for node in tree.body
+                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            }
+            self.assertIn(function_name, definitions)
+
+        facade = ast.parse((releases / "__init__.py").read_text())
+        facade_definitions = {
+            node.name for node in facade.body
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        }
+        self.assertFalse(facade_definitions)
+
+    def test_cli_execute_delegates_to_workflow_module(self):
+        tree = ast.parse((ROOT / "analytics" / "cli.py").read_text())
+        execute = next(
+            node for node in tree.body
+            if isinstance(node, ast.FunctionDef) and node.name == "_execute"
+        )
+        self.assertLessEqual(execute.end_lineno - execute.lineno + 1, 175)
+        calls = {
+            node.func.id for node in ast.walk(execute)
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+        }
+        self.assertIn("execute_workflow", calls)
 
 
 if __name__ == "__main__":

@@ -23,12 +23,17 @@ sbk-analytics/
 │   ├── banner.txt               # ASCII art banner
 │   ├── default-sbk-config.env   # Installed-package configuration fallback
 │   ├── cli.py                   # Command-line interface
+│   ├── workflow.py              # Ordered benchmark/report pipeline
 │   ├── config.py                # YAML configuration parsing
 │   ├── errors.py                # User-facing dependency/config error types
 │   ├── charts.py                # sbk-charts invocation
 │   ├── properties.py            # .env file parsing
 │   ├── policy.py                # Runtime policy and artifact registry
-│   ├── releases.py              # Dependency resolution (JDK, SBK, sbk-charts)
+│   ├── releases/                # Dependency resolution package
+│   │   ├── _shared.py           # Common cache/download/provenance primitives
+│   │   ├── sbk.py               # SBK resolver
+│   │   ├── charts.py            # sbk-charts resolver
+│   │   └── jdk.py               # JDK resolver
 │   ├── runner.py                # SBK execution (serial/parallel)
 │   ├── processes.py             # Managed process trees and signal cleanup
 │   ├── lifecycle.py             # Durable ownership and stale-run reconciliation
@@ -54,8 +59,8 @@ sbk-analytics/
 
 ## Core Components
 
-### 1. CLI Module (`cli.py`)
-**Purpose**: Command-line argument parsing and main entry point
+### 1. CLI and Workflow Modules (`cli.py`, `workflow.py`)
+**Purpose**: command parsing/dispatch plus an isolated execution pipeline
 
 **Key Functions**:
 - `main()`: Main entry point, orchestrates the entire workflow
@@ -122,7 +127,7 @@ Do not imply that sbk-analytics independently checks the managed-Python archive:
 the launcher checks uv, the lockfile records package artifact hashes, and the
 pinned uv release owns managed-Python download integrity.
 
-### 4. Releases Module (`releases.py`)
+### 4. Releases Package (`releases/`)
 **Purpose**: Dependency resolution and caching
 
 **Key Functions**:
@@ -477,15 +482,16 @@ sbk-analytics -c examples/config.yml
 
 ```mermaid
 flowchart TB
-    Input["Benchmark YAML + sbk-config.env"] --> CLI["CLI orchestration<br/>cli.py"]
+    Input["Benchmark YAML + sbk-config.env"] --> CLI["CLI dispatch<br/>cli.py"]
+    CLI --> Workflow["Execution pipeline<br/>workflow.py"]
     CLI --> Config["Parse and validate configuration<br/>config.py + sbk_contract.py"]
     CLI --> Properties["Parse dependency selection<br/>properties.py"]
-    Properties --> Resolver["Resolve SBK and JDK<br/>releases.py"]
+    Properties --> Resolver["Resolve SBK and JDK<br/>releases package"]
     Config --> Generator["Generate per-instance YAML<br/>yaml_gen.py"]
     Resolver --> Runner["Execute SBK instances<br/>runner.py"]
     Generator --> Runner
     Runner --> CSV["Successful CSV collection"]
-    CSV --> ChartsResolver["Lazy sbk-charts resolution<br/>releases.py"]
+    CSV --> ChartsResolver["Lazy sbk-charts resolution<br/>releases/charts.py"]
     ChartsResolver --> Charts["Generate charts and analysis<br/>charts.py"]
     Charts --> System["Append system information<br/>system_info.py"]
     System --> Output["Final Excel report"]

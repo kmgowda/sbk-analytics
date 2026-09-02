@@ -28,6 +28,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and real sbk-charts command health checks before cache publication.
 
 ### Changed
+- Decomposed the CLI into a small command dispatcher plus a dedicated workflow
+  orchestration module, and split dependency resolution into stable shared
+  primitives with separate SBK, sbk-charts, and JDK resolver modules. The
+  public `analytics.releases` imports remain compatible.
 - Renamed the persistent workflow catalog from `examples/classes/` to
   `examples/benchmarks/` so the directory matches the canonical top-level
   `benchmarks:` workflow key.

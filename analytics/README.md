@@ -10,11 +10,17 @@ analytics/
 ├── __main__.py           # Entry point for python -m analytics
 ├── banner.txt            # ASCII art banner
 ├── cli.py                # Command-line interface
+├── workflow.py           # Benchmark/report execution pipeline
 ├── config.py             # YAML configuration parsing
 ├── charts.py             # sbk-charts invocation
 ├── properties.py         # .env file parsing
 ├── policy.py             # runtime policy and artifact metadata
-├── releases.py           # Dependency resolution (JDK, SBK, sbk-charts)
+├── releases/             # Dependency resolution package
+│   ├── __init__.py       # Stable public resolver API
+│   ├── _shared.py        # Cache, download, archive, provenance primitives
+│   ├── sbk.py            # SBK resolution
+│   ├── charts.py         # sbk-charts resolution
+│   └── jdk.py            # JDK resolution
 ├── lifecycle.py          # Durable workload ownership and reconciliation
 ├── runner.py             # SBK execution (serial/parallel)
 ├── system_info.py        # System information collection
@@ -23,8 +29,10 @@ analytics/
 
 ## Module Descriptions
 
-### cli.py
-Main entry point for the sbk-analytics CLI. Handles argument parsing, logging setup, and orchestrates the entire workflow.
+### cli.py and workflow.py
+`cli.py` handles argument parsing, logging, diagnostics, and command dispatch.
+`workflow.py` owns the ordered dependency, benchmark, chart, system-info, and
+cleanup pipeline through injected service boundaries.
 
 ### config.py
 Parses and validates YAML configuration files. Defines the `OrchestratorConfig` class with all benchmark parameters.
@@ -40,7 +48,7 @@ diagnostic schemas, cache/network operations, display units, process and
 benchmark timing, SSH/native probe behavior, configuration defaults, and exit
 codes.
 
-### releases.py
+### releases package
 Resolves and caches external dependencies:
 - JDK resolution with priority order plus upstream checksum, executable, and
   exact-major validation before managed publication
@@ -48,6 +56,11 @@ Resolves and caches external dependencies:
 - sbk-charts resolution with priority order (explicit local folder, verified
   isolated cache, install)
 - read-only shared-folder inspection and release/workspace provenance reporting
+
+`analytics.releases` remains the stable import facade. Artifact-specific
+install logic lives in `releases/sbk.py`, `releases/charts.py`, and
+`releases/jdk.py`; `_shared.py` contains only common resolution primitives and
+local-source models/inspection.
 
 ### runner.py
 Executes SBK instances in serial or parallel mode. Handles subprocess

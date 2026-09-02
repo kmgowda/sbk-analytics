@@ -157,7 +157,7 @@ sbk-analytics -c examples/file-rocksdb-write-60s.yml
 - **Benchmark workflows**: `examples/benchmarks/` contains persistent write/read
   benchmark pairs grouped by SBK driver
 - **Dependencies**: `requirements.txt` and `pyproject.toml`
-- **Key modules**: `cli.py`, `releases.py`, `runner.py`, `processes.py`,
+- **Key modules**: `cli.py`, `workflow.py`, `releases/`, `runner.py`, `processes.py`,
   `lifecycle.py`, `charts.py`, `yaml_gen.py`
 
 ## Additional Documentation
@@ -1215,10 +1215,11 @@ sbk-analytics/
 │   └── file-rocksdb-write.yml      # 120s file + rocksdb single-writer example
 └── analytics/
     ├── cli.py                # argument parsing + orchestration
+    ├── workflow.py           # dependency/benchmark/report execution pipeline
     ├── policy.py             # runtime policy + artifact metadata
     ├── properties.py         # sbk-config.env parser
     ├── config.py             # input YAML parser (sbk, benchmarks, sbk-charts)
-    ├── releases.py           # GitHub release download + cached install
+    ├── releases/             # shared + per-artifact dependency resolvers
     ├── yaml_gen.py           # per-instance sbkArgs/sbkGemArgs YAML generator
     ├── runner.py             # serial/parallel SBK-native lifecycle execution
     ├── processes.py          # managed workload trees + signal cleanup

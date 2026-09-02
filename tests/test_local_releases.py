@@ -119,7 +119,7 @@ class LocalSbkResolutionTests(unittest.TestCase):
             revision = mock.Mock(returncode=0, stdout="abc123def456\n")
             changes = mock.Mock(returncode=0, stdout=" M sbk-yal/source.java\n")
             with mock.patch(
-                "analytics.releases._command_version", return_value="10.7"
+                "analytics.releases._shared._command_version", return_value="10.7"
             ), mock.patch(
                 "analytics.releases.subprocess.run",
                 side_effect=(revision, changes),
@@ -185,7 +185,7 @@ class LocalSbkResolutionTests(unittest.TestCase):
     def test_invalid_explicit_folder_never_falls_back_to_github(self):
         with tempfile.TemporaryDirectory() as directory:
             missing = Path(directory) / "missing"
-            with mock.patch("analytics.releases._gh_release") as github:
+            with mock.patch("analytics.releases.sbk._gh_release") as github:
                 with self.assertRaisesRegex(RuntimeError, "does not exist"):
                     ensure_sbk("10.6", local_folder=missing)
             github.assert_not_called()
@@ -199,7 +199,7 @@ class LocalSbkResolutionTests(unittest.TestCase):
             (cache / ".home").write_text(str(home), encoding="utf-8")
             (cache / ".ok").touch()
 
-            with mock.patch("analytics.releases._gh_release") as github:
+            with mock.patch("analytics.releases.sbk._gh_release") as github:
                 install = ensure_sbk("10.6", downloads_folder=downloads)
 
             self.assertEqual(install.source, DependencySource.MANAGED_CACHE)
@@ -226,9 +226,9 @@ class LocalSbkResolutionTests(unittest.TestCase):
                     }
                 ]
             }
-            with mock.patch("analytics.releases._gh_release", return_value=release), \
-                    mock.patch("analytics.releases._download", side_effect=fake_download), \
-                    mock.patch("analytics.releases._extract", side_effect=fake_extract):
+            with mock.patch("analytics.releases.sbk._gh_release", return_value=release), \
+                    mock.patch("analytics.releases.sbk._download", side_effect=fake_download), \
+                    mock.patch("analytics.releases.sbk._extract", side_effect=fake_extract):
                 install = ensure_sbk("10.6", downloads_folder=downloads)
 
             self.assertEqual(install.source, DependencySource.DOWNLOADED)
@@ -251,10 +251,10 @@ class LocalSbkResolutionTests(unittest.TestCase):
                 return "b" * 64
 
             with mock.patch(
-                "analytics.releases._gh_release", return_value=release
+                "analytics.releases.sbk._gh_release", return_value=release
             ), mock.patch(
-                "analytics.releases._download", side_effect=fake_download
-            ), mock.patch("analytics.releases._extract") as extract:
+                "analytics.releases.sbk._download", side_effect=fake_download
+            ), mock.patch("analytics.releases.sbk._extract") as extract:
                 with self.assertRaisesRegex(RuntimeError, "checksum mismatch"):
                     ensure_sbk("10.6", downloads_folder=downloads)
             extract.assert_not_called()
@@ -485,7 +485,7 @@ class LocalChartsResolutionTests(unittest.TestCase):
             with mock.patch(
                 "analytics.releases.venv.EnvBuilder", FakeVenvBuilder
             ), mock.patch(
-                "analytics.releases._download", side_effect=fake_download
+                "analytics.releases.charts._download", side_effect=fake_download
             ), mock.patch(
                 "analytics.releases.subprocess.run",
                 return_value=mock.Mock(returncode=0, stdout="", stderr=""),
@@ -543,7 +543,7 @@ class LocalChartsResolutionTests(unittest.TestCase):
             with mock.patch(
                 "analytics.releases.venv.EnvBuilder", FakeVenvBuilder
             ), mock.patch(
-                "analytics.releases._download", return_value="b" * 64
+                "analytics.releases.charts._download", return_value="b" * 64
             ), mock.patch("analytics.releases.subprocess.run") as run:
                 with self.assertRaisesRegex(RuntimeError, "checksum mismatch"):
                     ensure_sbk_charts(

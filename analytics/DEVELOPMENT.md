@@ -32,10 +32,15 @@ sbk-analytics --sbk-local /path/to/SBK \
 ```
 analytics/              # Main package
 ├── cli.py             # CLI entry point
+├── workflow.py        # ordered benchmark/report execution pipeline
 ├── policy.py          # runtime policy and managed-artifact metadata
 ├── config.py          # YAML config parsing
 ├── sbk_contract.py    # supported SBK option contract and migrations
-├── releases.py        # Dependency resolution (JDK, SBK, sbk-charts)
+├── releases/          # Dependency resolution package
+│   ├── _shared.py     # cache/download/archive/provenance primitives
+│   ├── sbk.py         # SBK resolver
+│   ├── charts.py      # sbk-charts resolver
+│   └── jdk.py         # JDK resolver
 ├── runner.py          # SBK execution (serial/parallel)
 ├── charts.py          # sbk-charts invocation
 ├── processes.py       # managed process trees and signal cleanup
