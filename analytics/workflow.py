@@ -48,16 +48,7 @@ class WorkflowServices:
     _emit_json: Callable[..., Any]
 
 
-def execute_workflow(
-    args: Any,
-    *,
-    properties_path: Path,
-    versions: Any,
-    verify: bool | str,
-    services: WorkflowServices,
-    json_stream: Any = None,
-) -> int:
-    """Resolve dependencies, run benchmarks, and publish the final report."""
+def _prepare_workflow(args: Any, versions: Any, services: WorkflowServices):
     cfg = services.load_config(args.config) if args.config is not None else None
 
     if versions.sbk_local_folder is not None:
@@ -101,7 +92,15 @@ def execute_workflow(
             f"Filesystem free space: {usage.free / gibibyte:.2f} GiB",
             flush=True,
         )
+    return cfg, work
 
+
+def _resolve_dependencies(
+    cfg: Any,
+    versions: Any,
+    verify: bool | str,
+    services: WorkflowServices,
+):
     # 1. Resolve the required JDK (used via SBK_JAVA_HOME), SBK, and sbk-charts.
     #    services.ensure_jdk() first checks the existing SBK_JAVA_HOME / JAVA_HOME /
     #    `java` on PATH for a matching major version; only downloads if none
@@ -131,30 +130,49 @@ def execute_workflow(
     )
     log.info("JDK %s home: %s", versions.sbk_jdk, jdk.home)
     print(f"[ok] JDK {versions.sbk_jdk} ready at {jdk.home}", flush=True)
+    return sbk, jdk
 
-    if args.command == CLI_POLICY.dependencies_command or args.resolve_only:
-        charts = services.ensure_sbk_charts(
-            versions.sbk_charts, repo_url=versions.sbk_charts_url,
-            source_sha256=versions.sbk_charts_sha256,
-            downloads_folder=versions.downloads_folder, ssl_verify=verify,
-            local_folder=versions.sbk_charts_local_folder,
-            local_executable=versions.sbk_charts_local_executable,
-            version_policy=versions.sbk_charts_version_policy,
-            preflight=(
-                args.command == CLI_POLICY.dependencies_command
-                and args.subcommand == CLI_POLICY.doctor_subcommand
-            ),
-        )
-        services._print_charts_resolution(charts, versions.sbk_charts)
-        summary = services._dependency_summary(sbk, charts, versions)
-        summary[DIAGNOSTIC_FIELDS.status] = CLI_POLICY.success_status
-        summary[DIAGNOSTIC_FIELDS.exit_code] = EXIT_CODES.success
-        services._emit_json(json_stream, summary)
-        print("\nDependency check passed.", flush=True)
-        return EXIT_CODES.success
 
-    assert cfg is not None and work is not None
+def _complete_dependency_check(
+    args: Any,
+    sbk: Any,
+    versions: Any,
+    verify: bool | str,
+    services: WorkflowServices,
+    json_stream: Any,
+) -> int:
+    charts = services.ensure_sbk_charts(
+        versions.sbk_charts, repo_url=versions.sbk_charts_url,
+        source_sha256=versions.sbk_charts_sha256,
+        downloads_folder=versions.downloads_folder, ssl_verify=verify,
+        local_folder=versions.sbk_charts_local_folder,
+        local_executable=versions.sbk_charts_local_executable,
+        version_policy=versions.sbk_charts_version_policy,
+        preflight=(
+            args.command == CLI_POLICY.dependencies_command
+            and args.subcommand == CLI_POLICY.doctor_subcommand
+        ),
+    )
+    services._print_charts_resolution(charts, versions.sbk_charts)
+    summary = services._dependency_summary(sbk, charts, versions)
+    summary[DIAGNOSTIC_FIELDS.status] = CLI_POLICY.success_status
+    summary[DIAGNOSTIC_FIELDS.exit_code] = EXIT_CODES.success
+    services._emit_json(json_stream, summary)
+    print("\nDependency check passed.", flush=True)
+    return EXIT_CODES.success
 
+
+def _run_benchmarks(
+    args: Any,
+    cfg: Any,
+    work: Path,
+    properties_path: Path,
+    versions: Any,
+    sbk: Any,
+    jdk: Any,
+    services: WorkflowServices,
+    json_stream: Any,
+):
     executable = sbk.sbk_gem_yal if cfg.uses_gem else sbk.sbk_yal
     executables = {
         inst.name: sbk.sbk_gem_yal if inst.uses_gem else sbk.sbk_yal
@@ -215,7 +233,10 @@ def execute_workflow(
         status = "OK" if r.ok else f"FAIL(rc={r.returncode})"
         extra = f" log={r.log_path}" if r.log_path else ""
         print(f"  {status:14s} instance={r.class_name} csv={r.csv_path}{extra}")
+    return succeeded, failed, pre_run_removed
 
+
+def _collect_extra_csvs(cfg: Any, work: Path) -> list[Path]:
     # Resolve sbk-charts.use_files: take each entry as a CSV path, optionally
     # relative to the working directory. Drop (with a warning) any that don't
     # exist; sbk-charts would fail anyway.
@@ -238,7 +259,17 @@ def execute_workflow(
         print("\n=== sbk-charts use_files (pre-existing) ===", flush=True)
         for p in extra_csvs:
             print(f"  USE            csv={p}")
+    return extra_csvs
 
+
+def _validate_usable_inputs(
+    succeeded: list[Any],
+    failed: list[Any],
+    extra_csvs: list[Path],
+    sbk: Any,
+    services: WorkflowServices,
+    json_stream: Any,
+) -> int | None:
     if not succeeded and not extra_csvs:
         print(
             "All SBK instances failed and no use_files supplied; skipping "
@@ -259,14 +290,31 @@ def execute_workflow(
         return EXIT_CODES.no_usable_csv
 
     if failed:
+        total_runs = len(succeeded) + len(failed)
         print(
-            f"WARNING: {len(failed)} of {len(results)} SBK runs failed; "
+            f"WARNING: {len(failed)} of {total_runs} SBK runs failed; "
             f"continuing with {len(succeeded)} fresh CSV(s) and "
             f"{len(extra_csvs)} pre-existing use_files.",
             file=sys.stderr,
             flush=True,
         )
+    return None
 
+
+def _publish_report(
+    args: Any,
+    cfg: Any,
+    work: Path,
+    versions: Any,
+    verify: bool | str,
+    sbk: Any,
+    succeeded: list[Any],
+    failed: list[Any],
+    extra_csvs: list[Path],
+    pre_run_removed: list[Path],
+    services: WorkflowServices,
+    json_stream: Any,
+) -> int:
     # 4. Resolve sbk-charts lazily, only after usable CSV input exists.
     charts = services.ensure_sbk_charts(
         versions.sbk_charts, repo_url=versions.sbk_charts_url,
@@ -360,3 +408,37 @@ def execute_workflow(
     print(f"Filesystem free space after run: {usage.free / gibibyte:.2f} GiB")
     print(f"\nDone. Output: {output_xlsx}", flush=True)
     return EXIT_CODES.success
+
+
+def execute_workflow(
+    args: Any,
+    *,
+    properties_path: Path,
+    versions: Any,
+    verify: bool | str,
+    services: WorkflowServices,
+    json_stream: Any = None,
+) -> int:
+    """Run the explicit dependency, benchmark, and report phases."""
+    cfg, work = _prepare_workflow(args, versions, services)
+    sbk, jdk = _resolve_dependencies(cfg, versions, verify, services)
+    if args.command == CLI_POLICY.dependencies_command or args.resolve_only:
+        return _complete_dependency_check(
+            args, sbk, versions, verify, services, json_stream
+        )
+
+    assert cfg is not None and work is not None
+    succeeded, failed, pre_run_removed = _run_benchmarks(
+        args, cfg, work, properties_path, versions, sbk, jdk, services,
+        json_stream,
+    )
+    extra_csvs = _collect_extra_csvs(cfg, work)
+    early_exit = _validate_usable_inputs(
+        succeeded, failed, extra_csvs, sbk, services, json_stream
+    )
+    if early_exit is not None:
+        return early_exit
+    return _publish_report(
+        args, cfg, work, versions, verify, sbk, succeeded, failed, extra_csvs,
+        pre_run_removed, services, json_stream,
+    )

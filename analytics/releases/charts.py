@@ -6,31 +6,34 @@
 # You may obtain a copy of the License at
 #
 #     http://www.apache.org/licenses/LICENSE-2.0
-#
-from __future__ import annotations
-
 """Resolve shared or managed sbk-charts installations."""
+from __future__ import annotations
 
 import logging
 import os
+import re
 import shutil
+import subprocess
+import sys
 import venv
 from pathlib import Path
 from urllib.parse import quote
 
 from ._shared import (
     CACHE_METADATA_POLICY, CACHE_POLICY, DEPENDENCY_POLICY,
-    ENVIRONMENT_POLICY, LAYOUT_POLICY, NETWORK_POLICY, ChartsInstall,
-    DependencyResolutionError, DependencySource, LocalPackageError,
+    DIAGNOSTIC_FIELDS, DISPLAY_POLICY, ENVIRONMENT_POLICY, LAYOUT_POLICY,
+    NETWORK_POLICY, PROVENANCE_POLICY, ChartsInstall, DependencyResolutionError,
+    DependencySource, LocalPackageError, _check_version, _command_version,
     _cache_lock, _cache_lock_path, _cache_root, _cache_stage_path,
-    _charts_version, _download, _entrypoint_interpreter_ready,
+    _download, _entrypoint_interpreter_ready, _git_details, _local_directory,
     _pip_trusted_host_args, _read_metadata, _release_provenance,
-    _relocate_venv_scripts, _run_pip, _write_metadata,
-    resolve_local_sbk_charts,
+    _relocate_venv_scripts, _require_executable, _run_pip,
+    _shared_provenance, _write_metadata,
 )
 from ..policy import SBK_CHARTS_ARTIFACT
 
 log = logging.getLogger(__name__)
+
 
 def ensure_sbk_charts(
     version: str,
@@ -255,3 +258,172 @@ def _ensure_sbk_charts_locked(
             metadata={CACHE_METADATA_POLICY.source_sha256: source_sha256},
         ),
     )
+
+
+def _charts_local_candidates(
+    root: Path, *, explicit_cli: Path | None = None,
+) -> tuple[tuple[Path, str], ...]:
+    """Return canonical sbk-charts commands in their resolution order."""
+    if explicit_cli is not None:
+        return ((explicit_cli, PROVENANCE_POLICY.explicit_executable_layout),)
+    executable = SBK_CHARTS_ARTIFACT.primary_executable
+    return (
+        (root / executable, PROVENANCE_POLICY.source_launcher_layout),
+        (
+            root / LAYOUT_POLICY.executable_directory / executable,
+            PROVENANCE_POLICY.environment_layout,
+        ),
+    )
+
+
+def _charts_version(cli: Path, *, require_ready: bool = False) -> str | None:
+    try:
+        result = subprocess.run(
+            [str(cli), *SBK_CHARTS_ARTIFACT.version_arguments],
+            capture_output=True, text=True,
+            timeout=DEPENDENCY_POLICY.charts_readiness_timeout_s,
+        )
+    except subprocess.TimeoutExpired as exc:
+        if require_ready:
+            raise LocalPackageError(
+                "sbk-charts readiness check timed out after "
+                f"{DEPENDENCY_POLICY.charts_readiness_timeout_s:g}s: {cli}"
+            ) from exc
+        result = None
+    if result is not None:
+        stdout = result.stdout if isinstance(result.stdout, str) else ""
+        stderr = result.stderr if isinstance(result.stderr, str) else ""
+        output = stdout + stderr
+        match = re.search(
+            SBK_CHARTS_ARTIFACT.version_pattern or "",
+            output,
+            re.I,
+        )
+        if require_ready and result.returncode != 0:
+            raise LocalPackageError(
+                f"sbk-charts readiness check failed (rc={result.returncode}): "
+                f"{cli}; "
+                f"{output.strip()[-DISPLAY_POLICY.diagnostic_tail_characters:]}"
+            )
+        if match:
+            return match.group(1)
+    python = cli.parent / LAYOUT_POLICY.python_executable
+    if not python.is_file():
+        return None
+    return _command_version(
+        python,
+        [
+            "-c",
+            DEPENDENCY_POLICY.python_metadata_script_template.format(
+                distribution=SBK_CHARTS_ARTIFACT.distribution_name
+            ),
+        ],
+        DEPENDENCY_POLICY.generic_version_pattern,
+    )
+
+
+def resolve_local_sbk_charts(
+    folder: Path | None = None, *, executable: Path | None = None,
+    expected_version: str = "",
+    version_policy: str = DEPENDENCY_POLICY.default_version_policy,
+    preflight: bool = False,
+) -> ChartsInstall:
+    """Resolve a ready-to-run local sbk-charts checkout or environment."""
+    if executable is not None:
+        cli = executable.expanduser().resolve(strict=True)
+        _require_executable(cli, SBK_CHARTS_ARTIFACT.display_name)
+        root = cli.parent
+        candidates = _charts_local_candidates(root, explicit_cli=cli)
+        configured = executable
+    elif folder is not None:
+        root = _local_directory(folder, SBK_CHARTS_ARTIFACT.display_name)
+        candidates = _charts_local_candidates(root)
+        configured = folder
+    else:
+        raise LocalPackageError("sbk-charts local folder or executable is required")
+    for cli, layout in candidates:
+        if cli.is_file():
+            resolved_cli = _require_executable(
+                cli, SBK_CHARTS_ARTIFACT.display_name
+            )
+            detected = _charts_version(cli, require_ready=preflight)
+            if expected_version:
+                _check_version(
+                    SBK_CHARTS_ARTIFACT.display_name,
+                    detected,
+                    expected_version,
+                    version_policy,
+                )
+            return ChartsInstall(
+                venv_dir=root,
+                source=DependencySource.LOCAL,
+                _cli=resolved_cli,
+                _python=Path(sys.executable),
+                detected_version=detected,
+                provenance=_shared_provenance(
+                    configured,
+                    cli,
+                    layout,
+                ),
+            )
+    checked = ", ".join(str(candidate) for candidate, _layout in candidates)
+    raise LocalPackageError(
+        f"sbk-charts local folder has no supported executable: {root}; "
+        f"checked: {checked}"
+    )
+
+
+def inspect_shared_sbk_charts(
+    folder: Path | None = None, *, executable: Path | None = None,
+) -> dict:
+    """Describe shared sbk-charts paths without starting or modifying them."""
+    configured = executable or folder
+    result: dict = {
+        DIAGNOSTIC_FIELDS.configured_location: (
+            str(configured) if configured is not None else None
+        ),
+        DIAGNOSTIC_FIELDS.read_only: True,
+        DIAGNOSTIC_FIELDS.install_performed: False,
+        DIAGNOSTIC_FIELDS.valid: False,
+    }
+    try:
+        if executable is not None:
+            cli = executable.expanduser().resolve(strict=True)
+            root = cli.parent
+            candidates = _charts_local_candidates(root, explicit_cli=cli)
+            provenance_root = cli
+        elif folder is not None:
+            root = _local_directory(folder, SBK_CHARTS_ARTIFACT.display_name)
+            candidates = _charts_local_candidates(root)
+            provenance_root = root
+        else:
+            raise LocalPackageError(
+                "sbk-charts local folder or executable is required"
+            )
+    except (LocalPackageError, OSError, RuntimeError) as exc:
+        result[DIAGNOSTIC_FIELDS.error] = str(exc)
+        return result
+    for cli, layout in candidates:
+        if not cli.is_file():
+            continue
+        ready = os.access(cli, os.X_OK)
+        revision, dirty = _git_details(provenance_root)
+        result.update({
+            DIAGNOSTIC_FIELDS.valid: ready,
+            DIAGNOSTIC_FIELDS.layout: layout,
+            DIAGNOSTIC_FIELDS.resolved_location: str(root),
+            DIAGNOSTIC_FIELDS.executable: str(cli),
+            DIAGNOSTIC_FIELDS.executable_ready: ready,
+            DIAGNOSTIC_FIELDS.revision: revision,
+            DIAGNOSTIC_FIELDS.dirty: dirty,
+        })
+        if not ready:
+            result[DIAGNOSTIC_FIELDS.error] = (
+                f"{SBK_CHARTS_ARTIFACT.display_name} executable is not "
+                f"executable: {cli}"
+            )
+        return result
+    result[DIAGNOSTIC_FIELDS.error] = (
+        "no supported executable sbk-charts command found"
+    )
+    return result

@@ -6,10 +6,8 @@
 # You may obtain a copy of the License at
 #
 #     http://www.apache.org/licenses/LICENSE-2.0
-#
-from __future__ import annotations
-
 """Resolve and validate local or managed Temurin JDKs."""
+from __future__ import annotations
 
 import logging
 import os
@@ -25,8 +23,7 @@ from ._shared import (
     CACHE_METADATA_POLICY, CACHE_POLICY, DEPENDENCY_POLICY,
     ENVIRONMENT_POLICY, LAYOUT_POLICY, NETWORK_POLICY, CacheError,
     DependencyResolutionError, JdkInstall, _cache_lock, _cache_lock_path,
-    _cache_root, _cache_stage_path, _download, _extract, _jdk_executable,
-    _write_metadata,
+    _cache_root, _cache_stage_path, _download, _extract, _write_metadata,
 )
 from ..policy import JDK_ARTIFACT
 
@@ -366,3 +363,10 @@ def _install_jdk_locked(
     stage.replace(cache)
     log.info("JDK %s downloaded and validated at %s", version, final_home)
     return JdkInstall(home=final_home)
+
+
+def _jdk_executable(home: Path) -> Path:
+    return (
+        home / LAYOUT_POLICY.executable_directory
+        / JDK_ARTIFACT.primary_executable
+    )

@@ -6,10 +6,8 @@
 # You may obtain a copy of the License at
 #
 #     http://www.apache.org/licenses/LICENSE-2.0
-#
-from __future__ import annotations
-
 """Resolve shared or managed SBK distributions."""
+from __future__ import annotations
 
 import logging
 import os
@@ -19,14 +17,17 @@ from urllib.parse import urlparse
 
 from ._shared import (
     ARCHIVE_POLICY, CACHE_METADATA_POLICY, CACHE_POLICY, DEPENDENCY_POLICY,
-    LAYOUT_POLICY, NETWORK_POLICY, CacheError, DependencySource, SbkInstall,
+    DIAGNOSTIC_FIELDS, LAYOUT_POLICY, NETWORK_POLICY, PROVENANCE_POLICY,
+    CacheError, DependencySource, LocalPackageError, SbkInstall,
     _cache_lock, _cache_lock_path, _cache_root, _cache_stage_path, _download,
-    _extract, _gh_release, _read_metadata, _release_provenance,
-    _require_executable, _write_metadata, resolve_local_sbk,
+    _check_version, _command_version, _extract, _gh_release, _local_directory,
+    _read_metadata, _release_provenance, _require_executable,
+    _shared_provenance, _write_metadata,
 )
 from ..policy import SBK_ARTIFACT
 
 log = logging.getLogger(__name__)
+
 
 def ensure_sbk(
     version: str,
@@ -240,3 +241,137 @@ def _ensure_sbk_locked(
             },
         ),
     )
+
+
+def _sbk_local_candidates(
+    root: Path,
+) -> tuple[tuple[Path, str, Path, Path], ...]:
+    """Return the canonical SBK layouts in their resolution order."""
+    candidates = (
+        (root, PROVENANCE_POLICY.distribution_layout),
+        (
+            root.joinpath(*LAYOUT_POLICY.sbk_gradle_install_path),
+            PROVENANCE_POLICY.gradle_install_layout,
+        ),
+    )
+    return tuple(
+        (
+            home,
+            layout,
+            home / LAYOUT_POLICY.executable_directory
+            / SBK_ARTIFACT.primary_executable,
+            home / LAYOUT_POLICY.executable_directory
+            / SBK_ARTIFACT.additional_executables[0],
+        )
+        for home, layout in candidates
+    )
+
+
+def resolve_local_sbk(
+    folder: Path, *, require_gem: bool = False, expected_version: str = "",
+    version_policy: str = DEPENDENCY_POLICY.default_version_policy,
+) -> SbkInstall:
+    """Resolve a ready-to-run SBK distribution or built source checkout.
+
+    Supported roots contain either ``bin/sbk-yal`` (a distribution) or
+    ``build/install/sbk/bin/sbk-yal`` (a Gradle ``installDist`` checkout).
+    The bounded list deliberately avoids selecting stale artifacts via a
+    recursive filesystem search.
+    """
+    root = _local_directory(folder, SBK_ARTIFACT.display_name)
+    candidates = _sbk_local_candidates(root)
+    for home, layout, sbk_yal, sbk_gem_yal in candidates:
+        if not sbk_yal.is_file():
+            continue
+        resolved_gem = None
+        if sbk_gem_yal.is_file() and os.access(sbk_gem_yal, os.X_OK):
+            resolved_gem = sbk_gem_yal
+        elif require_gem:
+            _require_executable(
+                sbk_gem_yal,
+                f"{SBK_ARTIFACT.display_name} "
+                f"{SBK_ARTIFACT.additional_executables[0]}",
+            )
+        detected = _command_version(
+            sbk_yal,
+            list(SBK_ARTIFACT.version_arguments),
+            SBK_ARTIFACT.version_pattern or "",
+        )
+        if expected_version:
+            _check_version(
+                SBK_ARTIFACT.display_name,
+                detected,
+                expected_version,
+                version_policy,
+            )
+        return SbkInstall(
+            home=home,
+            source=DependencySource.LOCAL,
+            _sbk_yal=_require_executable(
+                sbk_yal,
+                f"{SBK_ARTIFACT.display_name} "
+                f"{SBK_ARTIFACT.primary_executable}",
+            ),
+            _sbk_gem_yal=resolved_gem,
+            detected_version=detected,
+            provenance=_shared_provenance(
+                folder,
+                home,
+                layout,
+            ),
+        )
+    checked = ", ".join(
+        str(sbk_yal) for _home, _layout, sbk_yal, _sbk_gem_yal in candidates
+    )
+    raise LocalPackageError(
+        "SBK local folder is not a ready-to-run distribution or built "
+        f"checkout: {root}; checked: {checked}"
+    )
+
+
+def inspect_shared_sbk(folder: Path, *, require_gem: bool = False) -> dict:
+    """Describe a shared SBK selection without executing or modifying it."""
+    result: dict = {
+        DIAGNOSTIC_FIELDS.configured_location: str(folder),
+        DIAGNOSTIC_FIELDS.read_only: True,
+        DIAGNOSTIC_FIELDS.build_performed: False,
+        DIAGNOSTIC_FIELDS.valid: False,
+    }
+    try:
+        root = _local_directory(folder, SBK_ARTIFACT.display_name)
+    except LocalPackageError as exc:
+        result[DIAGNOSTIC_FIELDS.error] = str(exc)
+        return result
+    for home, layout, sbk_yal, sbk_gem_yal in _sbk_local_candidates(root):
+        if not sbk_yal.is_file():
+            continue
+        yal_ready = sbk_yal.is_file() and os.access(sbk_yal, os.X_OK)
+        gem_ready = sbk_gem_yal.is_file() and os.access(sbk_gem_yal, os.X_OK)
+        provenance = _shared_provenance(root, home, layout)
+        result.update({
+            DIAGNOSTIC_FIELDS.valid:
+                yal_ready and (gem_ready or not require_gem),
+            DIAGNOSTIC_FIELDS.layout: layout,
+            DIAGNOSTIC_FIELDS.resolved_location: str(home),
+            DIAGNOSTIC_FIELDS.sbk_yal: str(sbk_yal),
+            DIAGNOSTIC_FIELDS.sbk_yal_executable: yal_ready,
+            DIAGNOSTIC_FIELDS.sbk_gem_yal: str(sbk_gem_yal),
+            DIAGNOSTIC_FIELDS.sbk_gem_yal_executable: gem_ready,
+            DIAGNOSTIC_FIELDS.revision: provenance.revision,
+            DIAGNOSTIC_FIELDS.dirty: provenance.dirty,
+        })
+        if require_gem and not gem_ready:
+            result[DIAGNOSTIC_FIELDS.error] = (
+                "GEM workload requires executable sbk-gem-yal"
+            )
+        elif not yal_ready:
+            result[DIAGNOSTIC_FIELDS.error] = (
+                f"SBK {SBK_ARTIFACT.primary_executable} executable is not "
+                f"executable: {sbk_yal}"
+            )
+        return result
+    result[DIAGNOSTIC_FIELDS.error] = (
+        "no executable sbk-yal in the distribution root or "
+        "build/install/sbk; sbk-analytics does not build shared SBK folders"
+    )
+    return result

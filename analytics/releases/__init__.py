@@ -10,26 +10,15 @@
 """Stable dependency-resolution API grouped by artifact implementation."""
 from __future__ import annotations
 
-# Imported modules remain available for compatibility with existing diagnostic
-# and test tooling that patches native process/network helpers on this facade.
-from ._shared import requests, subprocess, venv
 from ._shared import (
     ChartsInstall, DependencySource, JdkInstall, SbkInstall, SourceProvenance,
-    _cache_lock, _cache_lock_path, _cache_root, _cache_stage_path,
-    _charts_local_candidates, _charts_version, _command_version, _download,
-    _entrypoint_interpreter_ready, _extract, _gh_release, _git_details,
-    _jdk_executable, _local_directory, _read_metadata, _release_provenance,
-    _relocate_venv_scripts, _require_executable, _run_pip,
-    _sbk_local_candidates, _shared_provenance,
-    cache_root, inspect_shared_sbk, inspect_shared_sbk_charts,
-    managed_metadata, resolve_local_sbk, resolve_local_sbk_charts,
+    cache_root, managed_metadata,
 )
-from .charts import ensure_sbk_charts
-from .jdk import (
-    _candidate_jdk_homes, _install_jdk_locked, _java_major_version,
-    _jdk_asset, _jdk_platform, ensure_jdk, find_existing_jdk,
+from .charts import (
+    ensure_sbk_charts, inspect_shared_sbk_charts, resolve_local_sbk_charts,
 )
-from .sbk import _ensure_sbk_locked, ensure_sbk
+from .jdk import ensure_jdk, find_existing_jdk
+from .sbk import ensure_sbk, inspect_shared_sbk, resolve_local_sbk
 
 __all__ = (
     "ChartsInstall", "DependencySource", "JdkInstall", "SbkInstall",

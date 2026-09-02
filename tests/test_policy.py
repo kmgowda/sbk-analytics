@@ -401,6 +401,43 @@ class PolicyTests(unittest.TestCase):
         }
         self.assertFalse(facade_definitions)
 
+        from analytics import releases
+
+        self.assertTrue(all(not name.startswith("_") for name in releases.__all__))
+        self.assertNotIn("_download", vars(releases))
+        self.assertNotIn("_gh_release", vars(releases))
+        self.assertNotIn("_extract", vars(releases))
+
+    def test_artifact_modules_expose_module_docstrings(self):
+        from analytics.releases import charts, jdk, sbk
+
+        self.assertIn("SBK", sbk.__doc__ or "")
+        self.assertIn("sbk-charts", charts.__doc__ or "")
+        self.assertIn("JDK", jdk.__doc__ or "")
+
+    def test_local_resolvers_belong_to_artifact_modules(self):
+        releases = ROOT / "analytics" / "releases"
+        definitions = {}
+        for filename in ("_shared.py", "sbk.py", "charts.py", "jdk.py"):
+            tree = ast.parse((releases / filename).read_text())
+            definitions[filename] = {
+                node.name for node in tree.body
+                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            }
+        self.assertIn("resolve_local_sbk", definitions["sbk.py"])
+        self.assertIn("inspect_shared_sbk", definitions["sbk.py"])
+        self.assertIn("resolve_local_sbk_charts", definitions["charts.py"])
+        self.assertIn("inspect_shared_sbk_charts", definitions["charts.py"])
+        self.assertIn("_jdk_executable", definitions["jdk.py"])
+        for name in (
+            "resolve_local_sbk",
+            "inspect_shared_sbk",
+            "resolve_local_sbk_charts",
+            "inspect_shared_sbk_charts",
+            "_jdk_executable",
+        ):
+            self.assertNotIn(name, definitions["_shared.py"])
+
     def test_cli_execute_delegates_to_workflow_module(self):
         tree = ast.parse((ROOT / "analytics" / "cli.py").read_text())
         execute = next(
@@ -413,6 +450,19 @@ class PolicyTests(unittest.TestCase):
             if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
         }
         self.assertIn("execute_workflow", calls)
+
+        workflow_tree = ast.parse(
+            (ROOT / "analytics" / "workflow.py").read_text()
+        )
+        workflow_execute = next(
+            node for node in workflow_tree.body
+            if isinstance(node, ast.FunctionDef)
+            and node.name == "execute_workflow"
+        )
+        self.assertLessEqual(
+            workflow_execute.end_lineno - workflow_execute.lineno + 1,
+            50,
+        )
 
 
 if __name__ == "__main__":

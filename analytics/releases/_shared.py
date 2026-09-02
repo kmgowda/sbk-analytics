@@ -225,7 +225,10 @@ class JdkInstall:
 
     @property
     def java(self) -> Path:
-        return _jdk_executable(self.home)
+        return (
+            self.home / LAYOUT_POLICY.executable_directory
+            / JDK_ARTIFACT.primary_executable
+        )
 
 
 @dataclass
@@ -257,13 +260,6 @@ class ChartsInstall:
 
 
 # ---------- helpers ----------
-
-
-def _jdk_executable(home: Path) -> Path:
-    return (
-        home / LAYOUT_POLICY.executable_directory
-        / JDK_ARTIFACT.primary_executable
-    )
 
 
 def _local_directory(folder: Path, dependency: str) -> Path:
@@ -346,46 +342,6 @@ def _git_details(path: Path) -> tuple[str | None, bool | None]:
     return revision or None, dirty
 
 
-def _sbk_local_candidates(
-    root: Path,
-) -> tuple[tuple[Path, str, Path, Path], ...]:
-    """Return the canonical SBK layouts in their resolution order."""
-    candidates = (
-        (root, PROVENANCE_POLICY.distribution_layout),
-        (
-            root.joinpath(*LAYOUT_POLICY.sbk_gradle_install_path),
-            PROVENANCE_POLICY.gradle_install_layout,
-        ),
-    )
-    return tuple(
-        (
-            home,
-            layout,
-            home / LAYOUT_POLICY.executable_directory
-            / SBK_ARTIFACT.primary_executable,
-            home / LAYOUT_POLICY.executable_directory
-            / SBK_ARTIFACT.additional_executables[0],
-        )
-        for home, layout in candidates
-    )
-
-
-def _charts_local_candidates(
-    root: Path, *, explicit_cli: Path | None = None,
-) -> tuple[tuple[Path, str], ...]:
-    """Return canonical sbk-charts commands in their resolution order."""
-    if explicit_cli is not None:
-        return ((explicit_cli, PROVENANCE_POLICY.explicit_executable_layout),)
-    executable = SBK_CHARTS_ARTIFACT.primary_executable
-    return (
-        (root / executable, PROVENANCE_POLICY.source_launcher_layout),
-        (
-            root / LAYOUT_POLICY.executable_directory / executable,
-            PROVENANCE_POLICY.environment_layout,
-        ),
-    )
-
-
 def _shared_provenance(
     configured: Path, resolved: Path, layout: str
 ) -> SourceProvenance:
@@ -447,52 +403,6 @@ def _command_version(command: Path, args: list[str], pattern: str) -> str | None
     return match.group(1) if match else None
 
 
-def _charts_version(cli: Path, *, require_ready: bool = False) -> str | None:
-    try:
-        result = subprocess.run(
-            [str(cli), *SBK_CHARTS_ARTIFACT.version_arguments],
-            capture_output=True, text=True,
-            timeout=DEPENDENCY_POLICY.charts_readiness_timeout_s,
-        )
-    except subprocess.TimeoutExpired as exc:
-        if require_ready:
-            raise LocalPackageError(
-                "sbk-charts readiness check timed out after "
-                f"{DEPENDENCY_POLICY.charts_readiness_timeout_s:g}s: {cli}"
-            ) from exc
-        result = None
-    if result is not None:
-        stdout = result.stdout if isinstance(result.stdout, str) else ""
-        stderr = result.stderr if isinstance(result.stderr, str) else ""
-        output = stdout + stderr
-        match = re.search(
-            SBK_CHARTS_ARTIFACT.version_pattern or "",
-            output,
-            re.I,
-        )
-        if require_ready and result.returncode != 0:
-            raise LocalPackageError(
-                f"sbk-charts readiness check failed (rc={result.returncode}): "
-                f"{cli}; "
-                f"{output.strip()[-DISPLAY_POLICY.diagnostic_tail_characters:]}"
-            )
-        if match:
-            return match.group(1)
-    python = cli.parent / LAYOUT_POLICY.python_executable
-    if not python.is_file():
-        return None
-    return _command_version(
-        python,
-        [
-            "-c",
-            DEPENDENCY_POLICY.python_metadata_script_template.format(
-                distribution=SBK_CHARTS_ARTIFACT.distribution_name
-            ),
-        ],
-        DEPENDENCY_POLICY.generic_version_pattern,
-    )
-
-
 def _check_version(name: str, detected: str | None, expected: str, policy: str) -> None:
     if policy == DEPENDENCY_POLICY.ignore_version_policy:
         return
@@ -505,223 +415,6 @@ def _check_version(name: str, detected: str | None, expected: str, policy: str) 
     if policy == DEPENDENCY_POLICY.exact_version_policy:
         raise LocalPackageError(message)
     log.warning("%s (policy=warn)", message)
-
-
-def resolve_local_sbk(
-    folder: Path, *, require_gem: bool = False, expected_version: str = "",
-    version_policy: str = DEPENDENCY_POLICY.default_version_policy,
-) -> SbkInstall:
-    """Resolve a ready-to-run SBK distribution or built source checkout.
-
-    Supported roots contain either ``bin/sbk-yal`` (a distribution) or
-    ``build/install/sbk/bin/sbk-yal`` (a Gradle ``installDist`` checkout).
-    The bounded list deliberately avoids selecting stale artifacts via a
-    recursive filesystem search.
-    """
-    root = _local_directory(folder, SBK_ARTIFACT.display_name)
-    candidates = _sbk_local_candidates(root)
-    for home, layout, sbk_yal, sbk_gem_yal in candidates:
-        if not sbk_yal.is_file():
-            continue
-        resolved_gem = None
-        if sbk_gem_yal.is_file() and os.access(sbk_gem_yal, os.X_OK):
-            resolved_gem = sbk_gem_yal
-        elif require_gem:
-            _require_executable(
-                sbk_gem_yal,
-                f"{SBK_ARTIFACT.display_name} "
-                f"{SBK_ARTIFACT.additional_executables[0]}",
-            )
-        detected = _command_version(
-            sbk_yal,
-            list(SBK_ARTIFACT.version_arguments),
-            SBK_ARTIFACT.version_pattern or "",
-        )
-        if expected_version:
-            _check_version(
-                SBK_ARTIFACT.display_name,
-                detected,
-                expected_version,
-                version_policy,
-            )
-        return SbkInstall(
-            home=home,
-            source=DependencySource.LOCAL,
-            _sbk_yal=_require_executable(
-                sbk_yal,
-                f"{SBK_ARTIFACT.display_name} "
-                f"{SBK_ARTIFACT.primary_executable}",
-            ),
-            _sbk_gem_yal=resolved_gem,
-            detected_version=detected,
-            provenance=_shared_provenance(
-                folder,
-                home,
-                layout,
-            ),
-        )
-    checked = ", ".join(
-        str(sbk_yal) for _home, _layout, sbk_yal, _sbk_gem_yal in candidates
-    )
-    raise LocalPackageError(
-        "SBK local folder is not a ready-to-run distribution or built "
-        f"checkout: {root}; checked: {checked}"
-    )
-
-
-def resolve_local_sbk_charts(
-    folder: Path | None = None, *, executable: Path | None = None,
-    expected_version: str = "",
-    version_policy: str = DEPENDENCY_POLICY.default_version_policy,
-    preflight: bool = False,
-) -> ChartsInstall:
-    """Resolve a ready-to-run local sbk-charts checkout or environment."""
-    if executable is not None:
-        cli = executable.expanduser().resolve(strict=True)
-        _require_executable(cli, SBK_CHARTS_ARTIFACT.display_name)
-        root = cli.parent
-        candidates = _charts_local_candidates(root, explicit_cli=cli)
-        configured = executable
-    elif folder is not None:
-        root = _local_directory(folder, SBK_CHARTS_ARTIFACT.display_name)
-        candidates = _charts_local_candidates(root)
-        configured = folder
-    else:
-        raise LocalPackageError("sbk-charts local folder or executable is required")
-    for cli, layout in candidates:
-        if cli.is_file():
-            resolved_cli = _require_executable(
-                cli, SBK_CHARTS_ARTIFACT.display_name
-            )
-            detected = _charts_version(cli, require_ready=preflight)
-            if expected_version:
-                _check_version(
-                    SBK_CHARTS_ARTIFACT.display_name,
-                    detected,
-                    expected_version,
-                    version_policy,
-                )
-            return ChartsInstall(
-                venv_dir=root,
-                source=DependencySource.LOCAL,
-                _cli=resolved_cli,
-                _python=Path(sys.executable),
-                detected_version=detected,
-                provenance=_shared_provenance(
-                    configured,
-                    cli,
-                    layout,
-                ),
-            )
-    checked = ", ".join(str(candidate) for candidate, _layout in candidates)
-    raise LocalPackageError(
-        f"sbk-charts local folder has no supported executable: {root}; "
-        f"checked: {checked}"
-    )
-
-
-def inspect_shared_sbk(folder: Path, *, require_gem: bool = False) -> dict:
-    """Describe a shared SBK selection without executing or modifying it."""
-    result: dict = {
-        DIAGNOSTIC_FIELDS.configured_location: str(folder),
-        DIAGNOSTIC_FIELDS.read_only: True,
-        DIAGNOSTIC_FIELDS.build_performed: False,
-        DIAGNOSTIC_FIELDS.valid: False,
-    }
-    try:
-        root = _local_directory(folder, SBK_ARTIFACT.display_name)
-    except LocalPackageError as exc:
-        result[DIAGNOSTIC_FIELDS.error] = str(exc)
-        return result
-    for home, layout, sbk_yal, sbk_gem_yal in _sbk_local_candidates(root):
-        if not sbk_yal.is_file():
-            continue
-        yal_ready = sbk_yal.is_file() and os.access(sbk_yal, os.X_OK)
-        gem_ready = sbk_gem_yal.is_file() and os.access(sbk_gem_yal, os.X_OK)
-        provenance = _shared_provenance(root, home, layout)
-        result.update({
-            DIAGNOSTIC_FIELDS.valid:
-                yal_ready and (gem_ready or not require_gem),
-            DIAGNOSTIC_FIELDS.layout: layout,
-            DIAGNOSTIC_FIELDS.resolved_location: str(home),
-            DIAGNOSTIC_FIELDS.sbk_yal: str(sbk_yal),
-            DIAGNOSTIC_FIELDS.sbk_yal_executable: yal_ready,
-            DIAGNOSTIC_FIELDS.sbk_gem_yal: str(sbk_gem_yal),
-            DIAGNOSTIC_FIELDS.sbk_gem_yal_executable: gem_ready,
-            DIAGNOSTIC_FIELDS.revision: provenance.revision,
-            DIAGNOSTIC_FIELDS.dirty: provenance.dirty,
-        })
-        if require_gem and not gem_ready:
-            result[DIAGNOSTIC_FIELDS.error] = (
-                "GEM workload requires executable sbk-gem-yal"
-            )
-        elif not yal_ready:
-            result[DIAGNOSTIC_FIELDS.error] = (
-                f"SBK {SBK_ARTIFACT.primary_executable} executable is not "
-                f"executable: {sbk_yal}"
-            )
-        return result
-    result[DIAGNOSTIC_FIELDS.error] = (
-        "no executable sbk-yal in the distribution root or "
-        "build/install/sbk; sbk-analytics does not build shared SBK folders"
-    )
-    return result
-
-
-def inspect_shared_sbk_charts(
-    folder: Path | None = None, *, executable: Path | None = None,
-) -> dict:
-    """Describe shared sbk-charts paths without starting or modifying them."""
-    configured = executable or folder
-    result: dict = {
-        DIAGNOSTIC_FIELDS.configured_location: (
-            str(configured) if configured is not None else None
-        ),
-        DIAGNOSTIC_FIELDS.read_only: True,
-        DIAGNOSTIC_FIELDS.install_performed: False,
-        DIAGNOSTIC_FIELDS.valid: False,
-    }
-    try:
-        if executable is not None:
-            cli = executable.expanduser().resolve(strict=True)
-            root = cli.parent
-            candidates = _charts_local_candidates(root, explicit_cli=cli)
-            provenance_root = cli
-        elif folder is not None:
-            root = _local_directory(folder, SBK_CHARTS_ARTIFACT.display_name)
-            candidates = _charts_local_candidates(root)
-            provenance_root = root
-        else:
-            raise LocalPackageError(
-                "sbk-charts local folder or executable is required"
-            )
-    except (LocalPackageError, OSError, RuntimeError) as exc:
-        result[DIAGNOSTIC_FIELDS.error] = str(exc)
-        return result
-    for cli, layout in candidates:
-        if not cli.is_file():
-            continue
-        ready = os.access(cli, os.X_OK)
-        revision, dirty = _git_details(provenance_root)
-        result.update({
-            DIAGNOSTIC_FIELDS.valid: ready,
-            DIAGNOSTIC_FIELDS.layout: layout,
-            DIAGNOSTIC_FIELDS.resolved_location: str(root),
-            DIAGNOSTIC_FIELDS.executable: str(cli),
-            DIAGNOSTIC_FIELDS.executable_ready: ready,
-            DIAGNOSTIC_FIELDS.revision: revision,
-            DIAGNOSTIC_FIELDS.dirty: dirty,
-        })
-        if not ready:
-            result[DIAGNOSTIC_FIELDS.error] = (
-                f"{SBK_CHARTS_ARTIFACT.display_name} executable is not "
-                f"executable: {cli}"
-            )
-        return result
-    result[DIAGNOSTIC_FIELDS.error] = (
-        "no supported executable sbk-charts command found"
-    )
-    return result
 
 
 def _gh_release(

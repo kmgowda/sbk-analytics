@@ -57,10 +57,10 @@ Resolves and caches external dependencies:
   isolated cache, install)
 - read-only shared-folder inspection and release/workspace provenance reporting
 
-`analytics.releases` remains the stable import facade. Artifact-specific
-install logic lives in `releases/sbk.py`, `releases/charts.py`, and
-`releases/jdk.py`; `_shared.py` contains only common resolution primitives and
-local-source models/inspection.
+`analytics.releases` remains the stable public import facade. Artifact-specific
+managed and local resolution/inspection lives in `releases/sbk.py`,
+`releases/charts.py`, and `releases/jdk.py`; `_shared.py` contains common
+models plus cache, network, archive-safety, and provenance primitives.
 
 ### runner.py
 Executes SBK instances in serial or parallel mode. Handles subprocess
