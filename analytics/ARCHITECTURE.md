@@ -148,6 +148,56 @@ Archive members are checked before extraction, and managed installs are
 published only after executable validation and metadata creation. Directory
 publication is atomic and coordinated by a per-version lock.
 
+### Architectural decision: dependency providers, not Git subprojects
+
+SBK and sbk-charts remain independently built and released projects.
+sbk-analytics consumes them through a provider boundary:
+
+```mermaid
+flowchart TB
+    subgraph Owners["Dependency project ownership"]
+        SBKSource["SBK source"] --> SBKBuild["SBK build and tests"] --> SBKArtifact["Prebuilt release distribution"]
+        ChartsSource["sbk-charts source"] --> ChartsBuild["Package and tests"] --> ChartsArtifact["Pinned release archive"]
+    end
+
+    subgraph Providers["Supported sbk-analytics providers"]
+        Releases["Managed GitHub releases<br/>verified and cached"]
+        Shared["Ready-to-run shared folders<br/>validated read-only"]
+    end
+
+    SBKArtifact --> Releases
+    ChartsArtifact --> Releases
+    SBKBuild -. "development output" .-> Shared
+    ChartsBuild -. "development checkout/runtime" .-> Shared
+    Releases --> Orchestrator["sbk-analytics orchestration lifecycle"]
+    Shared --> Orchestrator
+```
+
+Mandatory Git submodules are intentionally excluded from the runtime design:
+
+- **Ownership:** the orchestrator must not acquire responsibility for SBK's
+  Gradle build or sbk-charts project packaging.
+- **Reproducibility:** release versions, checksums, cache metadata, and source
+  diagnostics identify what actually ran; mutable or dirty submodules weaken
+  that guarantee.
+- **Independent delivery:** each dependency can release, test, and patch on its
+  own cadence without forcing an sbk-analytics source update.
+- **Bootstrap stability:** cloning and running sbk-analytics must not require
+  recursive submodule initialization or dependency build toolchains.
+- **Operational simplicity:** validated caches support repeat and offline runs
+  without rebuilding dependencies.
+
+Shared-folder providers preserve the development workflow that submodules are
+often proposed to solve. An SBK developer builds SBK using its owning project,
+then points `sbk.local.folder` at that output. A charts developer points the
+local-folder or explicit-executable setting at a ready command. Resolution,
+execution, lifecycle handling, diagnostics, and reporting then follow the same
+pipeline as managed releases.
+
+An integration CI job may coordinate explicit checkouts and revisions, but it
+must hand ready providers to sbk-analytics. It does not change this runtime
+ownership boundary.
+
 ### 3. Execution Flow
 ```mermaid
 flowchart LR

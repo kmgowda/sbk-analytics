@@ -63,6 +63,14 @@ managed and local resolution/inspection lives in `releases/sbk.py`,
 `releases/charts.py`, and `releases/jdk.py`; `_shared.py` contains common
 models plus cache, network, archive-safety, and provenance primitives.
 
+SBK and sbk-charts are dependency providers, not Git subprojects of
+sbk-analytics. Managed workflows consume pinned GitHub releases; development
+workflows may select ready-to-run shared folders. Compilation and packaging
+remain owned by the dependency repositories. The orchestrator must not require
+Git submodule initialization or build SBK during bootstrap or execution. See
+the dependency-provider decision in `ARCHITECTURE.md` for the rationale and
+supported integration boundary.
+
 ### runner.py
 Executes SBK instances in serial or parallel mode. Handles subprocess
 management and log forwarding while SBK owns its native lifecycle.
