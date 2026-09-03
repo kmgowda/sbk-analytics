@@ -392,7 +392,10 @@ selections never fall back to the network.
 5. **Error Handling**: Graceful degradation for missing dependencies
 6. **Local packages**: Explicit shared folders are authoritative, validated,
    never built or modified, and never silently replaced by downloads. SBK
-   development builds remain the responsibility of the SBK project workflow
+   development builds remain the responsibility of the SBK project workflow.
+   Do not introduce mandatory SBK/sbk-charts Git submodules or make the
+   sbk-analytics launcher/workflow own their source builds. Cross-repository
+   tests may prepare ready providers externally.
 7. **Lazy charts**: Normal runs resolve sbk-charts only after usable CSV input
 8. **Machine output**: `--json` reserves stdout for one JSON document
 9. **Process ownership**: SBK and charts launches must use `managed_popen()`;

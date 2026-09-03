@@ -192,6 +192,22 @@ layout, resolved path, Git revision/tracked-file state, and release/cache
 provenance. Inspection and runtime resolution share the same ordered layout
 candidate helpers; update those helpers instead of creating a parallel search.
 
+### Dependency ownership boundary
+
+Do not add SBK or sbk-charts as mandatory Git submodules, and do not add an SBK
+build step to the launcher, resolver, or workflow. sbk-analytics consumes
+versioned release providers or explicitly configured ready-to-run shared
+providers. The dependency project owns compilation, packaging, and its build
+toolchain; sbk-analytics owns validation, orchestration, lifecycle safety,
+provenance, and reporting.
+
+For unreleased integration work, build SBK in the SBK repository and configure
+the resulting distribution or checkout through `sbk.local.folder`. Point
+charts configuration at a ready checkout, environment, or launcher.
+Cross-repository CI may prepare those providers before invoking sbk-analytics,
+but production bootstrap must remain independent of submodule initialization
+and dependency source builds.
+
 ### Common issues
 - **JDK version mismatch**: Check `sbk.jdk.version` in sbk-config.env
 - **macOS logging**: Use `--forward-logs` flag

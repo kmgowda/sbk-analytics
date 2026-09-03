@@ -28,6 +28,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and real sbk-charts command health checks before cache publication.
 
 ### Changed
+- Documented the dependency-provider architecture: sbk-analytics consumes
+  verified releases or ready-to-run shared development folders, while SBK and
+  sbk-charts retain build ownership; mandatory Git submodules and runtime SBK
+  builds are intentionally excluded.
 - Decomposed the CLI into a small command dispatcher plus a dedicated workflow
   orchestration module, and split dependency resolution into stable shared
   primitives with separate SBK, sbk-charts, and JDK resolver modules. The

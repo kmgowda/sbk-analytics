@@ -801,6 +801,47 @@ dependency or creating the registry. `deps doctor` additionally reconciles
 verified stale local workloads and starts version/readiness commands. Neither
 command builds SBK or installs into a shared folder.
 
+### Why SBK and sbk-charts are not Git submodules
+
+sbk-analytics is deliberately an **orchestrator and consumer of versioned,
+ready-to-run dependency providers**. It is not the build owner for SBK or
+sbk-charts. The supported dependency boundary is:
+
+| Use case | SBK provider | sbk-charts provider | Build owner |
+| --- | --- | --- | --- |
+| Normal and release workflows | Checksum-verified, prebuilt GitHub release distribution | Checksum-verified, pinned GitHub release archive installed into an isolated environment | The SBK and sbk-charts projects |
+| Repeated or offline workflows | Previously validated managed cache | Previously validated isolated managed cache | No build during the run |
+| Development fixes | Externally built, ready-to-run shared folder | Ready-to-run shared checkout, environment, or launcher | The dependency's own development workflow |
+
+```mermaid
+flowchart LR
+    SBKProject["SBK project<br/>build and release"] --> SBKRelease["Versioned SBK distribution"]
+    ChartsProject["sbk-charts project<br/>package and release"] --> ChartsRelease["Pinned sbk-charts release"]
+    SBKDev["Developer-built SBK folder"] --> Providers
+    ChartsDev["Developer-ready charts folder"] --> Providers
+    SBKRelease --> Providers["Validated dependency providers"]
+    ChartsRelease --> Providers
+    Providers --> Analytics["sbk-analytics<br/>validate · orchestrate · monitor · report"]
+```
+
+Making these repositories mandatory Git submodules and building them inside
+sbk-analytics would be the wrong ownership boundary. It would couple every
+clone and bootstrap to Git submodule state, SBK's Gradle/toolchain requirements,
+and the independent release cycles of three projects. It would also make a
+benchmark harder to reproduce: a source commit, dirty submodule, or local build
+could replace the exact released artifact recorded in diagnostics.
+
+The current provider model gives normal users small clones, checksum and
+version provenance, stable managed caches, and repeatable offline reuse.
+Developers still test unreleased changes through `sbk.local.folder`,
+`sbk-charts.local.folder`, or `sbk-charts.local.executable`. Those selections
+are authoritative and read-only; SBK must already have been built by the SBK
+project, and a charts source launcher must manage its own runtime.
+
+Cross-repository CI may explicitly check out selected dependency revisions for
+integration testing, but that is test orchestration—not a runtime submodule or
+a reason for sbk-analytics to own dependency builds.
+
 You don't need to pass `-p` / `--properties` — `sbk-analytics` automatically
 uses the bundled file. Pass `-p <path>` only if you want to override it
 (e.g. to benchmark a fork of SBK):
