@@ -10,6 +10,7 @@ from analytics.policy import RUNTIME_POLICY
 from analytics.workflow import (
     _collect_extra_csvs,
     _complete_dependency_check,
+    _resolve_dependencies,
     _validate_usable_inputs,
 )
 
@@ -44,10 +45,43 @@ class WorkflowPhaseTests(unittest.TestCase):
 
         self.assertEqual(result, RUNTIME_POLICY.exit_codes.success)
         self.assertTrue(services.ensure_sbk_charts.call_args.kwargs["preflight"])
+        self.assertIs(
+            services.ensure_sbk_charts.call_args.kwargs["ssl_verify"], False
+        )
         services._print_charts_resolution.assert_called_once_with(
             charts, versions.sbk_charts
         )
         services._emit_json.assert_called_once()
+
+    def test_disabled_tls_policy_reaches_sbk_and_jdk_resolvers(self):
+        sbk = object()
+        jdk = SimpleNamespace(home=Path("/managed/jdk"))
+        services = SimpleNamespace(
+            ensure_sbk=mock.Mock(return_value=sbk),
+            ensure_jdk=mock.Mock(return_value=jdk),
+            _print_sbk_resolution=mock.Mock(),
+        )
+        versions = SimpleNamespace(
+            sbk="10.7",
+            sbk_repo="owner/repository",
+            downloads_folder=Path("/managed/downloads"),
+            sbk_local_folder=None,
+            sbk_version_policy="warn",
+            sbk_jdk="25",
+            jdk_folder=Path("/managed/jdk"),
+        )
+
+        with contextlib.redirect_stdout(io.StringIO()):
+            result = _resolve_dependencies(
+                SimpleNamespace(uses_gem=True),
+                versions,
+                False,
+                services,
+            )
+
+        self.assertEqual(result, (sbk, jdk))
+        self.assertIs(services.ensure_sbk.call_args.kwargs["ssl_verify"], False)
+        self.assertIs(services.ensure_jdk.call_args.kwargs["ssl_verify"], False)
 
     def test_collect_extra_csvs_accepts_relative_nonempty_files(self):
         with tempfile.TemporaryDirectory() as directory:

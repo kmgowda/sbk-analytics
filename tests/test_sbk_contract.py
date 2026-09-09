@@ -100,27 +100,19 @@ class SbkContractConfigurationTests(unittest.TestCase):
         )
         self.assertEqual(config.instances[0].params["sbmsleepms"], 0)
 
-    def test_minio_endpoints_is_migrated_to_url(self):
-        config = self._load(
-            "benchmarks:\n"
-            "  - class: minio\n"
-            "    endpoints: http://node-a:9020,http://node-b:9020\n"
-        )
-        params = config.instances[0].params
-        self.assertNotIn("endpoints", params)
-        self.assertEqual(
-            params["url"],
-            "http://node-a:9020,http://node-b:9020",
-        )
-
-    def test_minio_url_and_removed_endpoints_cannot_be_combined(self):
-        with self.assertRaisesRegex(ValueError, "cannot be combined"):
-            self._load(
-                "benchmarks:\n"
-                "  - class: minio\n"
-                "    url: http://node-a:9020\n"
-                "    endpoints: http://node-b:9020\n"
-            )
+    def test_minio_removed_endpoint_options_are_rejected(self):
+        for removed_option in ("endpoint", "endpoints"):
+            for include_url in (False, True):
+                url = "    url: http://node-a:9020\n" if include_url else ""
+                with self.subTest(
+                    option=removed_option, include_url=include_url
+                ), self.assertRaisesRegex(ValueError, "replace it with 'url'"):
+                    self._load(
+                        "benchmarks:\n"
+                        "  - class: minio\n"
+                        f"{url}"
+                        f"    {removed_option}: http://node-b:9020\n"
+                    )
 
     def test_minio_10_7_enums_and_booleans_are_validated(self):
         config = self._load(

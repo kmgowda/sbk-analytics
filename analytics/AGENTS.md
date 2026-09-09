@@ -704,9 +704,9 @@ These parameters can be specified in the `sbk:` block or per-instance:
   retry-max-attempts: 1
 ```
 
-Use only `url` for both one endpoint and a comma-separated endpoint pool.
-SBK 10.7 removed `endpoints`; analytics migrates it only when `url` is absent
-and rejects a document containing both. Inject `SBK_S3_ACCESS_KEY` and
+Use only `url` for both one URL and a comma-separated URL pool. SBK 10.7 does
+not accept the former standalone `endpoint` or `endpoints` keys; analytics
+rejects either spelling with replacement guidance. Inject `SBK_S3_ACCESS_KEY` and
 `SBK_S3_SECRET_KEY` through the process environment. For ECS/ObjectScale use
 the S3 data plane, a dedicated namespace/bucket/prefix, and the committed
 workflows under `examples/benchmarks/minio/`.

@@ -47,11 +47,10 @@ ECS-specific `x-emc-namespace` header.
 
 ## SBK 10.7 workflow contract
 
-SBK 10.7 removes the separate `endpoints` option. `url` now accepts either one
-S3 URL or a comma-separated pool distributed round-robin across workers.
-Persistent workflows should use only `url`. For compatibility, sbk-analytics
-migrates an old `endpoints` value when `url` is absent and rejects both keys
-together as ambiguous.
+SBK 10.7 uses only `url` for S3 target selection. It accepts either one S3 URL
+or a comma-separated pool distributed round-robin across workers. The former
+standalone `endpoint` and `endpoints` keys are not supported; sbk-analytics
+rejects both spellings with guidance to replace them with `url`.
 
 The committed workflows enable `endpoint-preflight: all` and
 `endpoint-metrics: true`. Preflight checks every configured URL before timing;

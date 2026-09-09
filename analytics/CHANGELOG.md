@@ -8,10 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- Added SBK 10.7 MinIO contract validation and compatibility migration for the
-  removed `endpoints` option, plus current endpoint-pool, preflight, endpoint
-  metrics, range, LIST, retry, warm-up, and workload-shape guidance for
-  persistent ECS/ObjectScale workflows.
+- Added SBK 10.7 MinIO contract validation that rejects the removed standalone
+  `endpoint` and `endpoints` options in favor of `url`, plus current URL-pool,
+  preflight, endpoint metrics, range, LIST, retry, warm-up, and workload-shape
+  guidance for persistent ECS/ObjectScale workflows.
+- Verified that disabled TLS certificate checking remains the shipped default
+  and is propagated through bootstrap, SBK, sbk-charts, JDK, pip, Git, managed
+  Python, and locked application-package download paths.
 - Added credential-free MinIO/ECS/ObjectScale qualification, multi-endpoint,
   and GEM examples with a validated lab runbook and sample results.
 - Added canonical top-level YAML `benchmarks` terminology. The former

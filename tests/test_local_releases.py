@@ -38,6 +38,16 @@ def _sbk_home(root: Path) -> Path:
 
 
 class LocalSbkResolutionTests(unittest.TestCase):
+    def test_release_lookup_disables_tls_verification_by_default(self):
+        found = mock.Mock(status_code=200)
+        found.json.return_value = {"tag_name": "v11.0", "assets": []}
+        with mock.patch(
+            "analytics.releases._shared.requests.get", return_value=found
+        ) as request:
+            _gh_release("owner/repository", "v11.0")
+
+        self.assertIs(request.call_args.kwargs["verify"], False)
+
     def test_release_lookup_accepts_v_prefixed_github_tag(self):
         missing = mock.Mock(status_code=404)
         found = mock.Mock(status_code=200)

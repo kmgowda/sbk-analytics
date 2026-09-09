@@ -372,7 +372,7 @@ class PolicyTests(unittest.TestCase):
             *RUNTIME_POLICY.sbk_contract.gem_only_options,
             RUNTIME_POLICY.minio_contract.driver_name,
             RUNTIME_POLICY.minio_contract.endpoint_option,
-            RUNTIME_POLICY.minio_contract.removed_endpoint_option,
+            *RUNTIME_POLICY.minio_contract.removed_endpoint_options,
             *RUNTIME_POLICY.minio_contract.boolean_options,
             *(
                 option

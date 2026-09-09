@@ -996,10 +996,10 @@ validated before a Java process starts.
 
 #### SBK 10.7 MinIO contract
 
-The shipped SBK 10.7 baseline consolidates MinIO endpoint selection into
-`url`. Supply either one URL or a comma-separated endpoint pool. The removed
-`endpoints` spelling is migrated to `url` only when `url` is absent; declaring
-both is rejected because analytics cannot safely guess which pool was intended.
+The shipped SBK 10.7 baseline consolidates MinIO target selection into `url`.
+Supply either one URL or a comma-separated URL pool. The former standalone
+`endpoint` and `endpoints` keys are rejected; replace either key with `url` in
+every persistent workflow.
 
 SBK 10.7 adds strict startup validation and persistent-workflow controls for
 ECS, ObjectScale, MinIO, and other S3-compatible services. Important additions

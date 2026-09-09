@@ -15,7 +15,7 @@ sbk:
   totalrecords: 80
   time: ms
   idletimeoutseconds: 180
-  # One SBK 10.7 `url` value owns the endpoint pool; `endpoints` was removed.
+  # One SBK 10.7 `url` value owns the complete S3 URL pool.
   url: http://10.236.66.181:9020,http://10.236.66.182:9020,http://10.236.66.183:9020,http://10.236.66.184:9020
   bucket: sbk-analytics-ecs-obs
   extra-headers: x-emc-namespace=sbk-ns

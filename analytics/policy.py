@@ -323,9 +323,9 @@ class MinioContractPolicy:
 
     driver_name: str = "minio"
     endpoint_option: str = "url"
-    removed_endpoint_option: str = "endpoints"
+    removed_endpoint_options: tuple[str, ...] = ("endpoint", "endpoints")
     endpoint_migration_guidance: str = (
-        "use 'url' with one endpoint or a comma-separated endpoint pool"
+        "replace it with 'url', using one URL or a comma-separated URL pool"
     )
     boolean_options: tuple[str, ...] = (
         "recreate", "insecure", "async", "fs-access", "list-fetch-owner",

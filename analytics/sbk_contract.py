@@ -82,24 +82,12 @@ def _normalize_minio_params(
     """Validate and migrate the current baseline MinIO driver contract."""
     normalized = dict(params)
     keys = _key_map(normalized)
-    old_endpoint = MINIO_CONTRACT_POLICY.removed_endpoint_option
-    endpoint = MINIO_CONTRACT_POLICY.endpoint_option
-    if old_endpoint in keys:
-        old_key = keys[old_endpoint]
-        if endpoint in keys:
+    for removed_option in MINIO_CONTRACT_POLICY.removed_endpoint_options:
+        if removed_option in keys:
             raise ValueError(
-                f"{context}: SBK MinIO options '{endpoint}' and "
-                f"'{old_endpoint}' cannot be combined; "
+                f"{context}: SBK MinIO option '{removed_option}' was removed; "
                 f"{MINIO_CONTRACT_POLICY.endpoint_migration_guidance}"
             )
-        normalized[endpoint] = normalized.pop(old_key)
-        log.warning(
-            "%s: migrated removed SBK MinIO option '%s' to '%s'",
-            context,
-            old_endpoint,
-            endpoint,
-        )
-        keys = _key_map(normalized)
 
     for option in MINIO_CONTRACT_POLICY.boolean_options:
         if option in keys:

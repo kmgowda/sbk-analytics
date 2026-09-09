@@ -129,6 +129,7 @@ class StorageClassExampleTests(unittest.TestCase):
                     self.assertEqual(instance.params["retry-max-attempts"], 1)
                     self.assertTrue(instance.params["endpoint-metrics"])
                     self.assertEqual(instance.params["endpoint-preflight"], "all")
+                    self.assertNotIn("endpoint", instance.params)
                     self.assertNotIn("endpoints", instance.params)
                 self.assertNotIn("ChangeMe", workflow.read_text())
 
