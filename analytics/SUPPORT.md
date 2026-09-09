@@ -84,6 +84,15 @@ If you're new to sbk-analytics, start with:
 - Use verbose logging: `sbk-analytics -c config.yml -v`
 - Check SBK logs in workdir/logs/ (parallel mode)
 
+**Problem**: an SBK 10.7 MinIO workflow rejects `endpoints`
+- Use `url` for both a single S3 URL and a comma-separated endpoint pool
+- An `endpoints` value without `url` is migrated with a warning for saved
+  workflows; defining both is rejected as ambiguous
+- Use `endpoint-preflight: all` to validate every URL before measurement and
+  `endpoint-metrics: true` to retain per-URL completion/retry/failure evidence
+- Generate the selected SBK distribution's MinIO help when adopting additional
+  options; SBK owns numeric, catalog, credential, and operation prerequisites
+
 **Problem**: the YAML reports that top-level `classes` is deprecated
 - Rename only the top-level `classes:` key to `benchmarks:`
 - Keep each nested `class:` value unchanged; it selects the SBK driver

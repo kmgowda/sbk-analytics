@@ -639,7 +639,8 @@ What this does, step by step:
 3. **Generate per-instance YAMLs.** One YAML per `benchmarks:` entry under
    `<work-dir>/yml/`, each forced to write CSV to a unique
    `<work-dir>/csv/sbk-<instance>.csv`. Local jobs use `CSVLogger`;
-   distributed GEM jobs use SBK 10.6's CSV-capable `GemPrometheusLogger`.
+   distributed GEM jobs use the SBK 10.7 CSV-capable
+   `GemPrometheusLogger`.
 4. **Run SBK.** Invokes `sbk-yal` for local instances and `sbk-gem-yal` for
    instances with a non-empty `nodes:` value. In `serial` mode (default) SBK output is
    shown live; in `parallel` mode each instance writes to its own log file
@@ -698,7 +699,7 @@ carries both the **GitHub URL** and the **release tag** for each project:
 ```ini
 # sbk-config.env  (bundled at the project root)
 sbk.url=https://github.com/kmgowda/SBK
-sbk.version=10.6
+sbk.version=10.7
 # sbk.local.folder=/root/projects/SBK
 downloads.folder=./.sbk
 sbk.jdk.version=25
@@ -853,7 +854,7 @@ sbk-analytics -c my-run.yml -p /path/to/custom-sbk-config.env
 ```ini
 # my-fork-sbk-config.env
 sbk.url=https://github.com/your-org/SBK
-sbk.version=10.6-myfork
+sbk.version=10.7-myfork
 sbk-charts.url=kmgowda/sbk-charts
 sbk-charts.version=3.26.2.1
 ```
@@ -992,6 +993,46 @@ Removed deployment keys (`copyonlydrivers`, `compactruntimecopy`,
 `javacopy`, and `javaversion`) fail early with migration guidance. Aggregate
 record/throughput conflicts and core boolean/integer values are also
 validated before a Java process starts.
+
+#### SBK 10.7 MinIO contract
+
+The shipped SBK 10.7 baseline consolidates MinIO endpoint selection into
+`url`. Supply either one URL or a comma-separated endpoint pool. The removed
+`endpoints` spelling is migrated to `url` only when `url` is absent; declaring
+both is rejected because analytics cannot safely guess which pool was intended.
+
+SBK 10.7 adds strict startup validation and persistent-workflow controls for
+ECS, ObjectScale, MinIO, and other S3-compatible services. Important additions
+include `endpoint-preflight`, `endpoint-metrics`, object/key distributions,
+aligned Range GET selection, paged LIST controls, bounded retry strategies,
+explicit warm-up operations, and credential-free run manifests. Analytics
+validates the finite enum and boolean portions of this contract before Java
+starts; SBK remains authoritative for operation-specific numeric and catalog
+constraints.
+
+```yaml
+sbk:
+  url: http://node-a:9020,http://node-b:9020
+  endpoint-preflight: all
+  endpoint-metrics: true
+  retry-max-attempts: 1
+  warmup-requests: 2
+  warmup-operation: connection
+
+benchmarks:
+  - name: s3-put
+    class: minio
+    bucket: dedicated-benchmark-bucket
+    prefix: qualification
+    writers: 1
+    size: 1048576
+    records: 20
+```
+
+Inject `SBK_S3_ACCESS_KEY` and `SBK_S3_SECRET_KEY` at runtime; never persist
+them in a workflow. See
+[`examples/benchmarks/minio/README.md`](examples/benchmarks/minio/README.md)
+for the staged ECS/ObjectScale qualification and distributed workflow.
 
 Analytics no longer measures a GEM timeout from local process launch. SBK-GEM
 may spend significant time provisioning nodes before its benchmark clock
@@ -1253,7 +1294,7 @@ sbk-analytics/
 ├── README.md
 ├── examples/
 │   ├── config.yml                  # generic multi-class example
-│   ├── local-rocksdb-smoke-test.yml # 2s shared-folder SBK 10.6+ smoke test
+│   ├── local-rocksdb-smoke-test.yml # 2s shared-folder SBK 10.7+ smoke test
 │   └── file-rocksdb-write.yml      # 120s file + rocksdb single-writer example
 └── analytics/
     ├── cli.py                # argument parsing + orchestration

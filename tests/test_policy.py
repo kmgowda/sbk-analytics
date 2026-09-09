@@ -233,6 +233,7 @@ class PolicyTests(unittest.TestCase):
             )
             self.assertRegex(config.sbk_charts_sha256, r"^[0-9a-f]{64}$")
         self.assertEqual(root_config.sbk, bundled_config.sbk)
+        self.assertEqual(root_config.sbk, "10.7")
         self.assertEqual(root_config.sbk_charts, bundled_config.sbk_charts)
         self.assertEqual(
             root_config.sbk_charts_sha256,
@@ -369,6 +370,15 @@ class PolicyTests(unittest.TestCase):
                 in RUNTIME_POLICY.sbk_contract.removed_gem_options
             ),
             *RUNTIME_POLICY.sbk_contract.gem_only_options,
+            RUNTIME_POLICY.minio_contract.driver_name,
+            RUNTIME_POLICY.minio_contract.endpoint_option,
+            RUNTIME_POLICY.minio_contract.removed_endpoint_option,
+            *RUNTIME_POLICY.minio_contract.boolean_options,
+            *(
+                option
+                for option, _allowed
+                in RUNTIME_POLICY.minio_contract.enum_options
+            ),
             *RUNTIME_POLICY.system_info.columns,
             RUNTIME_POLICY.ssh.ssh_command,
             RUNTIME_POLICY.ssh.sshpass_command,

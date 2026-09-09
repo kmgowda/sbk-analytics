@@ -11,6 +11,10 @@ sbk:
   bucket: sbk-analytics-ecs-obs
   extra-headers: x-emc-namespace=sbk-ns
   retry-max-attempts: 1
+  endpoint-preflight: all
+  endpoint-metrics: true
+  warmup-requests: 1
+  warmup-operation: connection
   data-seed: 20260902
   data-compressibility: 0
   data-dedupable: false
@@ -42,6 +46,9 @@ benchmarks:
     read-operation: range-get
     range-offset: 8192
     range-length: 4096
+    range-offset-distribution: fixed
+    range-window-length: 1048576
+    range-alignment: 4096
     verify-read-size: true
 
   - name: ecs-list
@@ -52,6 +59,8 @@ benchmarks:
     read-operation: list
     list-prefixes: qualification-1m
     list-max-keys: 1000
+    list-max-entries: 1000
+    list-api-version: 2
 
   # Validate multipart completion separately from ordinary PUT.
   - name: ecs-multipart-put-15m

@@ -318,6 +318,43 @@ class SbkContractPolicy:
 
 
 @dataclass(frozen=True)
+class MinioContractPolicy:
+    """Current baseline MinIO option vocabulary and compatibility rules."""
+
+    driver_name: str = "minio"
+    endpoint_option: str = "url"
+    removed_endpoint_option: str = "endpoints"
+    endpoint_migration_guidance: str = (
+        "use 'url' with one endpoint or a comma-separated endpoint pool"
+    )
+    boolean_options: tuple[str, ...] = (
+        "recreate", "insecure", "async", "fs-access", "list-fetch-owner",
+        "list-include-user-metadata", "partition-by-prefix",
+        "tagging-enabled", "versioning-enabled", "cleanup-created-buckets",
+        "data-dedupable", "verify-read-size", "retry-jitter",
+        "endpoint-metrics", "sse-enabled",
+    )
+    enum_options: tuple[tuple[str, tuple[str, ...]], ...] = (
+        ("write-operation", (
+            "put", "update", "copy", "delete", "tag-set", "tag-delete",
+            "bucket-create", "bucket-delete", "create", "overwrite",
+        )),
+        ("read-operation", (
+            "get", "range-get", "stat", "tag-get", "list", "bucket-stat",
+            "bucket-list", "head", "range-read",
+        )),
+        ("mixed-read-source", ("catalog",)),
+        ("range-offset-distribution", ("fixed", "sequential", "random")),
+        ("key-distribution", ("sequential", "hashed", "random")),
+        ("retry-strategy", ("fixed", "exponential")),
+        ("warmup-operation", ("connection", "put", "get", "put-get")),
+        ("endpoint-preflight", ("primary", "all")),
+        ("list-api-version", ("1", "2")),
+        ("auth-version", ("4",)),
+    )
+
+
+@dataclass(frozen=True)
 class ChartsInterfacePolicy:
     """Stable sbk-charts command and runtime resource names."""
 
@@ -879,6 +916,7 @@ class RuntimePolicy:
     platform: HostPlatformPolicy = HostPlatformPolicy()
     sbk_interface: SbkInterfacePolicy = SbkInterfacePolicy()
     sbk_contract: SbkContractPolicy = SbkContractPolicy()
+    minio_contract: MinioContractPolicy = MinioContractPolicy()
     charts_interface: ChartsInterfacePolicy = ChartsInterfacePolicy()
     cli: CliPolicy = CliPolicy()
     diagnostics: DiagnosticFieldPolicy = DiagnosticFieldPolicy()

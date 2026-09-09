@@ -17,7 +17,7 @@ settings; record those environmental choices when comparing reports.
 ## SBK distribution compatibility
 
 The workflows themselves are valid for the SBK RocksDB interface. During
-end-to-end verification, the current SBK 10.6 release and the tested 10.7
+end-to-end verification, the previous SBK 10.6 release and a pre-release 10.7
 development distribution both completed all requested records but failed while
 closing RocksDB. Their classpath contains two different native libraries under
 the same `librocksdbjni-linux64.so` resource name; the older shaded copy is

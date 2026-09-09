@@ -7,11 +7,15 @@ cleanup_before_run: true
 sbk:
   time: ms
   idletimeoutseconds: 120
-  url: http://10.236.66.181:9020
-  endpoints: http://10.236.66.181:9020,http://10.236.66.182:9020,http://10.236.66.183:9020,http://10.236.66.184:9020
+  # SBK 10.7 accepts one endpoint or a comma-separated pool through `url`.
+  url: http://10.236.66.181:9020,http://10.236.66.182:9020,http://10.236.66.183:9020,http://10.236.66.184:9020
   bucket: sbk-analytics-ecs-obs
   extra-headers: x-emc-namespace=sbk-ns
   retry-max-attempts: 1
+  endpoint-preflight: all
+  endpoint-metrics: true
+  warmup-requests: 4
+  warmup-operation: connection
   data-seed: 20260902
   data-compressibility: 0
   data-dedupable: false

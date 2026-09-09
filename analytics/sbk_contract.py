@@ -19,6 +19,7 @@ from .policy import RUNTIME_POLICY
 log = logging.getLogger(__name__)
 SBK_INTERFACE_POLICY = RUNTIME_POLICY.sbk_interface
 SBK_CONTRACT_POLICY = RUNTIME_POLICY.sbk_contract
+MINIO_CONTRACT_POLICY = RUNTIME_POLICY.minio_contract
 
 
 def _key_map(params: dict[str, Any]) -> dict[str, str]:
@@ -75,7 +76,49 @@ def _nonnegative_integer(value: Any, option: str) -> None:
         )
 
 
-def normalize_sbk_params(params: dict[str, Any], *, context: str) -> dict[str, Any]:
+def _normalize_minio_params(
+    params: dict[str, Any], *, context: str
+) -> dict[str, Any]:
+    """Validate and migrate the current baseline MinIO driver contract."""
+    normalized = dict(params)
+    keys = _key_map(normalized)
+    old_endpoint = MINIO_CONTRACT_POLICY.removed_endpoint_option
+    endpoint = MINIO_CONTRACT_POLICY.endpoint_option
+    if old_endpoint in keys:
+        old_key = keys[old_endpoint]
+        if endpoint in keys:
+            raise ValueError(
+                f"{context}: SBK MinIO options '{endpoint}' and "
+                f"'{old_endpoint}' cannot be combined; "
+                f"{MINIO_CONTRACT_POLICY.endpoint_migration_guidance}"
+            )
+        normalized[endpoint] = normalized.pop(old_key)
+        log.warning(
+            "%s: migrated removed SBK MinIO option '%s' to '%s'",
+            context,
+            old_endpoint,
+            endpoint,
+        )
+        keys = _key_map(normalized)
+
+    for option in MINIO_CONTRACT_POLICY.boolean_options:
+        if option in keys:
+            _parse_bool(normalized[keys[option]], option)
+    for option, allowed in MINIO_CONTRACT_POLICY.enum_options:
+        if option not in keys:
+            continue
+        value = str(normalized[keys[option]]).strip().lower()
+        if value not in allowed:
+            raise ValueError(
+                f"{context}: SBK MinIO option '{option}' must be one of "
+                f"{allowed}, got {normalized[keys[option]]!r}"
+            )
+    return normalized
+
+
+def normalize_sbk_params(
+    params: dict[str, Any], *, context: str, class_name: str | None = None
+) -> dict[str, Any]:
     """Return parameters validated against the supported SBK contract."""
     normalized = dict(params)
     keys = _key_map(normalized)
@@ -154,4 +197,9 @@ def normalize_sbk_params(params: dict[str, Any], *, context: str) -> dict[str, A
                 f"'{SBK_CONTRACT_POLICY.total_throughput_option}' cannot both "
                 f"be used with '{seconds_option}'"
             )
+    if (
+        class_name is not None
+        and class_name.strip().lower() == MINIO_CONTRACT_POLICY.driver_name
+    ):
+        normalized = _normalize_minio_params(normalized, context=context)
     return normalized

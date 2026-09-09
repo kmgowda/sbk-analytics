@@ -37,7 +37,7 @@ class PropertiesHardeningTests(unittest.TestCase):
     def _properties(self, root: Path, *extra: str):
         path = root / "sbk-config.env"
         path.write_text("\n".join((
-            "sbk.version=10.6", "sbk-charts.version=4.26.7.1", *extra,
+            "sbk.version=10.7", "sbk-charts.version=4.26.7.1", *extra,
         )))
         return parse_properties(path)
 
@@ -312,7 +312,7 @@ class CliFlowTests(unittest.TestCase):
             root = Path(directory)
             properties = root / "sbk-config.env"
             properties.write_text(
-                "sbk.version=10.6\nsbk-charts.version=4.26.7.1\n"
+                "sbk.version=10.7\nsbk-charts.version=4.26.7.1\n"
                 "sbk.jdk.folder=./jdk\n"
             )
             config = root / "input.yml"
@@ -343,7 +343,7 @@ class CliFlowTests(unittest.TestCase):
             stale.write_text("old")
             properties = root / "sbk-config.env"
             properties.write_text(
-                "sbk.version=10.6\nsbk-charts.version=4.26.7.1\n"
+                "sbk.version=10.7\nsbk-charts.version=4.26.7.1\n"
                 "sbk.jdk.folder=./jdk\n"
             )
             config = root / "input.yml"
@@ -386,7 +386,7 @@ class CliFlowTests(unittest.TestCase):
         payload = json.loads(stdout.getvalue())
         self.assertIn("sbk", payload)
         self.assertEqual(payload["sbk"]["selection"], "github-release")
-        self.assertEqual(payload["sbk"]["release_tag"], "10.6")
+        self.assertEqual(payload["sbk"]["release_tag"], "10.7")
         self.assertEqual(
             payload["sbk_charts"]["selection"], "github-release"
         )
@@ -406,7 +406,7 @@ class CliFlowTests(unittest.TestCase):
                 executable.chmod(executable.stat().st_mode | stat.S_IXUSR)
             properties = root / "sbk-config.env"
             properties.write_text(
-                "sbk.version=10.6\n"
+                "sbk.version=10.7\n"
                 f"sbk.local.folder={sbk}\n"
                 "sbk-charts.version=4.26.7.1\n"
                 f"sbk-charts.local.folder={charts}\n"
@@ -494,7 +494,7 @@ class CliFlowTests(unittest.TestCase):
             root = Path(directory)
             properties = root / "sbk-config.env"
             properties.write_text(
-                "sbk.version=10.6\nsbk-charts.version=4.26.7.1\n"
+                "sbk.version=10.7\nsbk-charts.version=4.26.7.1\n"
                 "sbk.jdk.folder=./jdk\n"
             )
             config = root / "input.yml"
@@ -531,7 +531,7 @@ class CliFlowTests(unittest.TestCase):
             root = Path(directory)
             properties = root / "sbk-config.env"
             properties.write_text(
-                "sbk.version=10.6\nsbk-charts.version=4.26.7.1\n"
+                "sbk.version=10.7\nsbk-charts.version=4.26.7.1\n"
                 "sbk.jdk.folder=./jdk\n"
             )
             config = root / "input.yml"

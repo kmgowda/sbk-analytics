@@ -45,7 +45,7 @@ def generate_instance_yaml(
     The merged params from the Instance are written under that wrapper, with
     ``class``, a CSV-capable logger, and ``csvfile`` are forced so each
     instance produces its own CSV. SBK-YAL uses ``CSVLogger``; SBK-GEM-YAL
-    uses ``GemPrometheusLogger``, the SBK 10.6 GEM logger that persists CSV.
+    uses ``GemPrometheusLogger``, the baseline GEM logger that persists CSV.
     """
     out_dir.mkdir(parents=True, exist_ok=True)
 
