@@ -437,7 +437,11 @@ def _build_instances(
             raise ValueError(
                 f"benchmarks[{idx}]: expected string or mapping, got {type(entry).__name__}"
             )
-        params = normalize_sbk_params(params, context=f"benchmarks[{idx}]")
+        params = normalize_sbk_params(
+            params,
+            context=f"benchmarks[{idx}]",
+            class_name=class_name,
+        )
         out.append(Instance(name=name, class_name=class_name, params=params))
 
     # check name uniqueness (explicit names could collide)

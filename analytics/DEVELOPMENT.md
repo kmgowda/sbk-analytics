@@ -21,7 +21,7 @@ pip install -e .
 sbk-analytics --version
 sbk-analytics -c examples/file-rocksdb-write-60s.yml
 
-# Fast shared-folder SBK 10.6+ and sbk-charts validation
+# Fast shared-folder SBK 10.7+ and sbk-charts validation
 sbk-analytics --sbk-local /path/to/SBK \
   --sbk-charts-local /path/to/sbk-charts \
   -c examples/local-rocksdb-smoke-test.yml

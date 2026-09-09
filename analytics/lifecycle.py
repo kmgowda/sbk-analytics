@@ -240,6 +240,26 @@ def _group_exists(pgid: int) -> bool:
     return False
 
 
+def _pid_is_active(pid: int) -> bool:
+    """Return whether a known process still owns executable work."""
+    try:
+        process = psutil.Process(pid)
+        return (
+            process.is_running()
+            and process.status() != psutil.STATUS_ZOMBIE
+        )
+    except (psutil.Error, OSError, ValueError):
+        return False
+
+
+def _termination_complete(pgid: int, leader_pid: int | None) -> bool:
+    """Confirm both the group and its known leader have stopped."""
+    return (
+        not _group_exists(pgid)
+        and (leader_pid is None or not _pid_is_active(leader_pid))
+    )
+
+
 def _group_run_identity_matches(pgid: int, run_id: str) -> bool:
     """Confirm every visible member of a leaderless group belongs to one run."""
     matched = False
@@ -291,14 +311,14 @@ def _group_run_identity_matches(pgid: int, run_id: str) -> bool:
     return matched
 
 
-def _terminate_group(pgid: int) -> bool:
+def _terminate_group(pgid: int, *, leader_pid: int | None = None) -> bool:
     try:
         os.killpg(pgid, signal.SIGTERM)
     except ProcessLookupError:
         return True
     deadline = time.monotonic() + PROCESS_POLICY.termination_grace_s
     while time.monotonic() < deadline:
-        if not _group_exists(pgid):
+        if _termination_complete(pgid, leader_pid):
             return True
         time.sleep(LIFECYCLE_POLICY.reconciliation_poll_interval_s)
     try:
@@ -307,10 +327,10 @@ def _terminate_group(pgid: int) -> bool:
         return True
     deadline = time.monotonic() + PROCESS_POLICY.guard_exit_padding_s
     while time.monotonic() < deadline:
-        if not _group_exists(pgid):
+        if _termination_complete(pgid, leader_pid):
             return True
         time.sleep(LIFECYCLE_POLICY.reconciliation_poll_interval_s)
-    return not _group_exists(pgid)
+    return _termination_complete(pgid, leader_pid)
 
 
 def _quarantine(path: Path, reason: str) -> None:
@@ -456,7 +476,7 @@ def reconcile_stale_records() -> dict[str, int]:
                 record.get(LIFECYCLE_POLICY.role_field),
                 record.get(LIFECYCLE_POLICY.run_id_field), pid, pgid,
             )
-            if _terminate_group(pgid):
+            if _terminate_group(pgid, leader_pid=pid):
                 path.unlink(missing_ok=True)
                 summary[LIFECYCLE_POLICY.cleaned_field] += 1
             else:

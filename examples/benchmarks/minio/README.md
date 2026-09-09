@@ -7,7 +7,7 @@ not contain management, SSH, or S3 credentials.
 
 ## Credential and endpoint contract
 
-Export credentials only in the launching shell. SBK 10.6 reads these variables
+Export credentials only in the launching shell. SBK 10.7 reads these variables
 when `key`, `secret`, or `gempass` are absent from the generated SBK YAML:
 
 ```bash
@@ -41,9 +41,39 @@ Use the ECS management UI only for control-plane setup:
    create it on the first PUT when the Object User has permission.
 
 For another MinIO, ECS, or ObjectScale installation, copy a workflow outside
-the repository and replace `url`, `endpoints`, `bucket`, the namespace header,
+the repository and replace the `url` endpoint pool, `bucket`, namespace header,
 and GEM node inventory. A native MinIO deployment normally does not need the
 ECS-specific `x-emc-namespace` header.
+
+## SBK 10.7 workflow contract
+
+SBK 10.7 uses only `url` for S3 target selection. It accepts either one S3 URL
+or a comma-separated pool distributed round-robin across workers. The former
+standalone `endpoint` and `endpoints` keys are not supported; sbk-analytics
+rejects both spellings with guidance to replace them with `url`.
+
+The committed workflows enable `endpoint-preflight: all` and
+`endpoint-metrics: true`. Preflight checks every configured URL before timing;
+endpoint metrics retain per-URL logical operations, bytes, retries, and
+terminal failures. The workflows begin with one-attempt retry policy so
+backend saturation is not hidden by client retries.
+
+SBK 10.7 also supports these persistent workload controls:
+
+| Goal | YAML options |
+| --- | --- |
+| Reproducible object sizes | `object-size-distribution: fixed|uniform:min:max|sweep:min:max|weighted:...` and `data-seed` |
+| Reproducible key layout | `key-distribution: sequential|hashed|random`, optional `partition-by-prefix` |
+| Range GET shape | `range-offset-distribution`, `range-window-length`, `range-alignment` |
+| LIST shape | `list-max-keys`, `list-max-entries`, `list-api-version`, delimiter/start-after/owner/metadata controls |
+| Retry policy | `retry-max-attempts`, `retry-strategy`, `retry-backoff-ms`, `retry-max-backoff-ms`, `retry-jitter` |
+| Untimed connection/data warm-up | `warmup-requests` and `warmup-operation: connection|put|get|put-get` |
+| Audit record | `run-manifest` writes a credential-free effective-workload JSON file |
+
+`mixed-read-source` accepts only `catalog`; the unsafe former `published` mode
+is intentionally rejected. `auth-version` accepts only SigV4 value `4`.
+SBK remains authoritative for numeric bounds, catalog capacity, multipart,
+async-memory, operation-mix, permissions, and backend-state validation.
 
 ```mermaid
 flowchart LR
@@ -96,7 +126,43 @@ For credible performance claims, warm up first and run at least three measured
 repetitions long enough to reach steady state. The short shipped workflows are
 qualification examples, not product performance specifications.
 
-## Validated lab record
+## SBK 10.7 lab validation
+
+The current workflows were validated on 2026-09-09 against ECS endpoints
+`10.236.66.181` through `.184`, using SBK 10.7, Temurin JDK 25.0.2, and the
+managed sbk-charts 4.26.7.1 package. The managed SBK archive was resolved from
+GitHub tag `v10.7` and passed its published SHA-256 check. Credentials came
+from a dedicated Object User in `sbk-ns`; no credential was written to the
+repository, workflow, report, or test log.
+
+The fixed-count qualification passed all five instances (PUT, GET, Range GET,
+LIST, and multipart PUT), produced five CSV files, and generated
+`ecs-obs-qualification.xlsx`. The four-endpoint workflow passed both 30-second
+instances, reported operations on every configured endpoint with zero retries
+and zero terminal failures, produced two CSV files, and generated
+`ecs-obs-throughput.xlsx`.
+
+| Workflow / operation | Load | Records | MB/s | Records/s | Average | p95 | p99 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Qualification PUT | 1 writer, 1 MiB, fixed | 20 | 1.46 | 1.5 | 686.4 ms | 2097 ms | 2097 ms |
+| Qualification GET | 1 reader, 1 MiB, fixed | 20 | 2.75 | 2.8 | 363.3 ms | 1921 ms | 1921 ms |
+| Qualification Range GET | 1 reader, 4 KiB range, fixed | 20 | 0.01 | 3.5 | 281.8 ms | 285 ms | 285 ms |
+| Qualification LIST | 1 reader, fixed | 5 | n/a¹ | 3.1 | 317.0 ms | 382 ms | 382 ms |
+| Qualification multipart PUT | 1 writer, 15 MiB object / 5 MiB parts | 2 | 5.07 | 0.3 | 2942.5 ms | 4003 ms | 4003 ms |
+| Four-endpoint PUT | 4 writers, 1 MiB, 30 s | 193 | 5.96 | 6.0 | 661.0 ms | 2097 ms | 2322 ms |
+| Four-endpoint GET | 4 readers, 1 MiB, 30 s | 326 | 10.85 | 10.9 | 366.7 ms | 679 ms | 2066 ms |
+
+¹ LIST byte rate is not response-wire throughput; use operations/sec and
+latency for comparisons.
+
+These are single-run integration results, not capacity claims. The controller
+could reach all four S3 endpoints, but TCP port 22 remained unreachable on all
+eight supplied load generators (`10.236.65.98` through `.105`). The documented
+GEM precondition therefore failed and the distributed workflow was not
+started. Restore controller-to-client SSH routing, validate the ordinary
+workload independently from every client, and then run `ecs-obs-gem.yml`.
+
+## Historical SBK 10.6 lab record
 
 On 2026-09-02 all four supplied endpoints (`10.236.66.181` through `.184`) on
 port `9020` returned HTTP 403 with `application/xml`, confirming reachable S3
@@ -106,7 +172,7 @@ reported the existing `sbk-ns` namespace.
 The controller could not route to SSH port 22 on any supplied load generator
 (`10.236.65.98` through `.105`), so distributed SBK-GEM performance results
 must not be claimed from that attempt. After correcting analytics to select
-SBK 10.6's `GemPrometheusLogger`, GEM reached its SSH connection phase, reported
+the GEM `GemPrometheusLogger`, GEM reached its SSH connection phase, reported
 `No route to host` for the nodes, exited non-zero, skipped charts because no CSV
 was produced, and left no locally running SBK/GEM process.
 
@@ -151,13 +217,12 @@ duration/count, at least three repetitions, throughput, average/p50/p95/p99
 latency, endpoint retries/failures, exact SBK/JDK/charts provenance, client
 topology, network path, and ECS health state.
 
-### SBK 10.6 endpoint-metrics limitation
+### Endpoint-metrics history
 
-The SBK 10.6 release help text advertises `endpoint-metrics`, but its packaged
-MinIO argument parser rejects the option. These baseline-compatible workflows
-therefore omit it. On a later SBK distribution where a direct smoke test proves
-the flag works, enable it to add per-endpoint operation/retry/failure evidence;
-do not infer those counters from aggregate CSV data.
+The SBK 10.6 release help advertised `endpoint-metrics`, but its packaged
+MinIO argument parser rejected it. SBK 10.7 implements and validates the
+option, and the current workflows require it. Do not infer per-endpoint
+counters from aggregate CSV data when reviewing an older result.
 
 ## Troubleshooting checklist
 
@@ -167,8 +232,8 @@ do not infer those counters from aggregate CSV data.
   bucket through approved ECS administration.
 - `No route to host` during GEM: fix controller-to-load-generator routing and
   port 22 access before changing SBK parameters.
-- GEM logger class failure: use this version of sbk-analytics; SBK 10.6 GEM
-  requires `GemPrometheusLogger`, which analytics now selects automatically.
+- GEM logger class failure: use this version of sbk-analytics; current SBK GEM
+  workflows require `GemPrometheusLogger`, which analytics selects automatically.
 - Empty/missing CSV: treat the instance as failed and inspect its exit code and
   generated YAML. sbk-charts is intentionally skipped if every workload fails.
 - Unexpected capacity numbers: confirm steady state, repetitions, client CPU

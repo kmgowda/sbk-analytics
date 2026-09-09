@@ -23,6 +23,12 @@ cache/lifecycle/diagnostic schemas, native command interfaces, units, status
 vocabulary, and timeouts. `sbk-config.env` remains the operator-controlled
 source for release version pins and local dependency selections.
 
+The SBK 10.7 contract includes a dedicated MinIO policy boundary. It accepts
+only the canonical pooled `url` key and rejects the removed standalone
+`endpoint` and `endpoints` keys. It validates finite MinIO enums and booleans before
+generating `sbkArgs` or `sbkGemArgs`. Backend-dependent numeric, catalog, and
+permission validation remains owned by SBK itself.
+
 Lifecycle schemas intentionally fail closed. Records from unsupported schema
 versions are quarantined instead of migrated automatically, because an older
 record may lack the process identity evidence required for safe termination.

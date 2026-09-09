@@ -100,6 +100,57 @@ class SbkContractConfigurationTests(unittest.TestCase):
         )
         self.assertEqual(config.instances[0].params["sbmsleepms"], 0)
 
+    def test_minio_removed_endpoint_options_are_rejected(self):
+        for removed_option in ("endpoint", "endpoints"):
+            for include_url in (False, True):
+                url = "    url: http://node-a:9020\n" if include_url else ""
+                with self.subTest(
+                    option=removed_option, include_url=include_url
+                ), self.assertRaisesRegex(ValueError, "replace it with 'url'"):
+                    self._load(
+                        "benchmarks:\n"
+                        "  - class: minio\n"
+                        f"{url}"
+                        f"    {removed_option}: http://node-b:9020\n"
+                    )
+
+    def test_minio_10_7_enums_and_booleans_are_validated(self):
+        config = self._load(
+            "benchmarks:\n"
+            "  - class: MinIO\n"
+            "    url: http://node-a:9020,http://node-b:9020\n"
+            "    endpoint-preflight: all\n"
+            "    endpoint-metrics: true\n"
+            "    range-offset-distribution: sequential\n"
+            "    retry-strategy: exponential\n"
+            "    retry-jitter: true\n"
+            "    warmup-operation: put-get\n"
+            "    mixed-read-source: catalog\n"
+            "    auth-version: 4\n"
+        )
+        params = config.instances[0].params
+        self.assertEqual(params["endpoint-preflight"], "all")
+        self.assertIs(params["endpoint-metrics"], True)
+
+        invalid = (
+            ("endpoint-preflight", "every"),
+            ("mixed-read-source", "published"),
+            ("auth-version", 2),
+            ("list-api-version", 3),
+            ("retry-strategy", "linear"),
+            ("endpoint-metrics", "enabled"),
+        )
+        for option, value in invalid:
+            rendered = str(value).lower() if isinstance(value, bool) else value
+            with self.subTest(option=option), self.assertRaisesRegex(
+                ValueError, f"option '{option}'"
+            ):
+                self._load(
+                    "benchmarks:\n"
+                    "  - class: minio\n"
+                    f"    {option}: {rendered}\n"
+                )
+
 
 class SbkContractResolutionTests(unittest.TestCase):
     def test_managed_cache_reports_configured_version(self):

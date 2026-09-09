@@ -1,4 +1,4 @@
-# Fast end-to-end validation for local SBK 10.6+ and sbk-charts folders.
+# Fast end-to-end validation for local SBK 10.7+ and sbk-charts folders.
 mode: serial
 workdir: /tmp/sbk-analytics-rocksdb-smoke
 cleanup: never

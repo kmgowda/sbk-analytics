@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Added SBK 10.7 MinIO contract validation that rejects the removed standalone
+  `endpoint` and `endpoints` options in favor of `url`, plus current URL-pool,
+  preflight, endpoint metrics, range, LIST, retry, warm-up, and workload-shape
+  guidance for persistent ECS/ObjectScale workflows.
+- Verified that disabled TLS certificate checking remains the shipped default
+  and is propagated through bootstrap, SBK, sbk-charts, JDK, pip, Git, managed
+  Python, and locked application-package download paths.
 - Added credential-free MinIO/ECS/ObjectScale qualification, multi-endpoint,
   and GEM examples with a validated lab runbook and sample results.
 - Added canonical top-level YAML `benchmarks` terminology. The former
@@ -17,7 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and RocksDB write/read benchmarking workflows and continuous render tests.
 - Added top-level YAML `cleanup_before_run` (default `false`) to empty a safely
   validated workdir immediately before SBK/SBK-GEM benchmarking.
-- SBK 10.6+ option compatibility, including validation for its GEM/SBM
+- SBK 10.7+ option compatibility, including validation for its GEM/SBM
   aggregate, cleanup, provisioning, host-key, port, and idle-timeout options.
 - Read-only dependency provenance diagnostics for shared development folders
   and managed GitHub releases, including layouts, resolved commands, Git state,
@@ -42,7 +49,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Renamed the persistent workflow catalog from `examples/classes/` to
   `examples/benchmarks/` so the directory matches the canonical top-level
   `benchmarks:` workflow key.
-- Generate SBK 10.6 GEM workflows with `GemPrometheusLogger` instead of the
+- Generate SBK 10.7 GEM workflows with `GemPrometheusLogger` instead of the
   local-only `CSVLogger`, retaining per-instance CSV output for sbk-charts.
 - Extended immutable runtime policy coverage to dependency layouts and source
   vocabulary, executable/environment names, SBK and charts interfaces, pip
@@ -52,12 +59,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Java output options, and generated workflow paths.
 - Kept shared-folder Git inspection lightweight by excluding untracked files,
   added debug logging for Git failures, and unified status/runtime layout order.
-- Established SBK 10.6 as the configured baseline contract without embedding
+- Established SBK 10.7 as the configured baseline contract without embedding
   version checks or version-specific branches in runtime source.
 - Replaced text-rendered architecture and lifecycle flows with GitHub-rendered
   Mermaid diagrams in the user, architecture, and agent documentation.
 - Delegated benchmark timing, fixed-record idle detection, GEM readiness,
-  remote lifecycle, and failure status to SBK 10.6+. Removed unsafe broad
+  remote lifecycle, and failure status to SBK 10.7+. Removed unsafe broad
   remote process-name killing; interrupted SBK-GEM receives native cleanup
   grace before analytics force-stops only its owned local process group.
 - Made workload guard/registry establishment fail-closed and propagated a
@@ -69,15 +76,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Require both exit code zero and a non-empty CSV before charting an SBK run.
 
 ### Fixed
+- Confirm a stale workload's known leader has stopped before lifecycle
+  reconciliation reports success, avoiding a macOS process-enumeration race.
 - Ignore inaccessible unrelated system processes while inspecting an owned
   process group, preventing macOS stale-run reconciliation from timing out
   after the verified workload has already terminated.
 - Relocate absolute virtual-environment paths when publishing a staged managed
   sbk-charts installation, validate the final console command, and repair cache
   entries whose shebang still points to a removed staging directory.
-- Resolve configured plain release versions such as `10.6` against upstream
-  GitHub tags that use the conventional `v` prefix, such as `v10.6`.
-- Prevented analytics from killing SBK-GEM while 10.6 is still provisioning
+- Resolve configured plain release versions such as `10.7` against upstream
+  GitHub tags that use the conventional `v` prefix, such as `v10.7`.
+- Prevented analytics from killing SBK-GEM while SBK is still provisioning
   nodes before the benchmark timer starts.
 
 ### Removed

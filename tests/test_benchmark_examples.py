@@ -127,8 +127,16 @@ class StorageClassExampleTests(unittest.TestCase):
                     self.assertTrue(forbidden.isdisjoint(instance.params))
                     self.assertEqual(instance.params["bucket"], "sbk-analytics-ecs-obs")
                     self.assertEqual(instance.params["retry-max-attempts"], 1)
-                    self.assertNotIn("endpoint-metrics", instance.params)
+                    self.assertTrue(instance.params["endpoint-metrics"])
+                    self.assertEqual(instance.params["endpoint-preflight"], "all")
+                    self.assertNotIn("endpoint", instance.params)
+                    self.assertNotIn("endpoints", instance.params)
                 self.assertNotIn("ChangeMe", workflow.read_text())
+
+        throughput = load_config(minio / "ecs-obs-throughput.yml")
+        endpoint_pool = throughput.instances[0].params["url"].split(",")
+        self.assertEqual(len(endpoint_pool), 4)
+        self.assertTrue(all(item.startswith("http://") for item in endpoint_pool))
 
         qualification = load_config(minio / "ecs-obs-qualification.yml")
         operations = {instance.name for instance in qualification.instances}

@@ -43,7 +43,7 @@ sbk-analytics/
 ├── examples/                     # Example configuration files
 │   ├── file-rocksdb-write-60s.yml
 │   ├── file-rocksdb-write.yml
-│   ├── local-rocksdb-smoke-test.yml # Fast SBK 10.6+ RocksDB validation
+│   ├── local-rocksdb-smoke-test.yml # Fast SBK 10.7+ RocksDB validation
 │   ├── config.yml
 │   └── local-smoke-test.yml      # Fast local end-to-end validation
 ├── sbk-config.env              # SBK configuration (versions, URLs, folders)
@@ -260,7 +260,7 @@ sbk-analytics invocation
 **Key Settings**:
 ```
 sbk.url=https://github.com/kmgowda/SBK
-sbk.version=10.6
+sbk.version=10.7
 # sbk.local.folder=/root/projects/SBK
 downloads.folder=./.sbk
 sbk.jdk.version=25
@@ -301,13 +301,13 @@ sbk-charts.version=4.26.7.1
 ```yaml
 mode: serial  # or parallel
 sbk:
-  url: https://github.com/kmgowda/SBK
-  version: 10.0
+  seconds: 60
+  time: ms
 benchmarks:
-  - name: class_name
-    params:
-      # SBK-specific parameters
-    class: driver_class
+  - name: file-write
+    class: file
+    file: /tmp/sbk-analytics/file.dat
+    writers: 1
 ```
 
 ## Installation and Setup
@@ -597,6 +597,11 @@ sbk-charts:                         # sbk-charts options
   use_files: []                     # Optional pre-existing CSV files
 ```
 
+Dependency versions and repositories do not belong in the workflow YAML.
+They are selected by `sbk-config.env` (or `-p`), which currently pins SBK
+10.7. The `sbk:` YAML mapping contains only arguments forwarded to SBK-YAL or
+SBK-GEM-YAL.
+
 ### Parameter Resolution Order
 
 Parameters are resolved in the following order (lowest to highest precedence):
@@ -618,13 +623,11 @@ These parameters can be specified in the `sbk:` block or per-instance:
 
 - `seconds: <int>` - Benchmark duration in seconds
 - `size: <int>` - Record size in bytes
-- `time: ns|ms|us|s` - Time unit for operations
+- `time: ns|mcs|ms` - Latency-reporting unit
 - `writers: <int>` - Number of writer threads
 - `readers: <int>` - Number of reader threads
 - `nodes: <list|string>` - Cluster nodes (triggers sbk-gem-yal mode)
-- `recordcount: <int>` - Total number of records
-- `operations: <int>` - Total number of operations
-- `warmup: <int>` - Warmup duration in seconds
+- `records: <int>` - Fixed total when `seconds` is absent; rate target when timed
 
 #### Storage Driver Classes
 
@@ -686,6 +689,42 @@ These parameters can be specified in the `sbk:` block or per-instance:
   writers: 1
   readers: 1
 ```
+
+**MinIO / S3 Driver (`minio`, SBK 10.7)**
+```yaml
+- class: minio
+  url: http://node-a:9020,http://node-b:9020
+  bucket: dedicated-benchmark-bucket
+  prefix: qualification
+  writers: 1
+  size: 1048576
+  records: 20
+  endpoint-preflight: all
+  endpoint-metrics: true
+  retry-max-attempts: 1
+```
+
+Use only `url` for both one URL and a comma-separated URL pool. SBK 10.7 does
+not accept the former standalone `endpoint` or `endpoints` keys; analytics
+rejects either spelling with replacement guidance. Inject `SBK_S3_ACCESS_KEY` and
+`SBK_S3_SECRET_KEY` through the process environment. For ECS/ObjectScale use
+the S3 data plane, a dedicated namespace/bucket/prefix, and the committed
+workflows under `examples/benchmarks/minio/`.
+
+The current finite MinIO values are:
+
+- `endpoint-preflight`: `primary` or `all`
+- `endpoint-metrics`: strict boolean
+- `warmup-operation`: `connection`, `put`, `get`, or `put-get`
+- `retry-strategy`: `fixed` or `exponential`
+- `mixed-read-source`: `catalog` only; `published` is intentionally rejected
+- `range-offset-distribution`: `fixed`, `sequential`, or `random`
+- `key-distribution`: `sequential`, `hashed`, or `random`
+- `list-api-version`: `1` or `2`; `auth-version`: `4` only
+
+Do not invent options. SBK 10.7 itself remains authoritative for numeric,
+catalog, operation-mix, multipart, async-memory, permission, and backend-state
+constraints.
 
 ### YAML Declaration Styles
 
@@ -925,7 +964,7 @@ AI agents should validate YAML configurations against these rules:
 5. **Class-Specific Parameters**: Each storage class must have its required parameters
 6. **File Path Safety**: File paths should be absolute or relative to workdir
 7. **Numeric Parameters**: Numeric parameters should be positive integers
-8. **Time Units**: `time` parameter should be one of `ns`, `ms`, `us`, `s`
+8. **Time Units**: `time` parameter should be one of `ns`, `mcs`, `ms`
 
 ### AI Agent YAML Generation Workflow
 

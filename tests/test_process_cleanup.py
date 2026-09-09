@@ -19,6 +19,7 @@ from analytics.lifecycle import (
     _group_exists,
     _group_run_identity_matches,
     _identity_matches,
+    _termination_complete,
     current_run_id,
     inspect_records,
     reconcile_stale_records,
@@ -182,6 +183,15 @@ class ForcedParentExitTests(unittest.TestCase):
 
 
 class ManagedProcessTests(unittest.TestCase):
+    def test_termination_requires_known_leader_and_group_to_stop(self):
+        with mock.patch(
+            "analytics.lifecycle._group_exists", return_value=False
+        ), mock.patch(
+            "analytics.lifecycle._pid_is_active", return_value=True
+        ):
+            self.assertFalse(_termination_complete(9876, 9876))
+            self.assertTrue(_termination_complete(9876, None))
+
     def test_group_scan_ignores_denied_unrelated_process(self):
         unrelated = mock.Mock()
         unrelated.pid = 1234

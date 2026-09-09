@@ -15,11 +15,15 @@ sbk:
   totalrecords: 80
   time: ms
   idletimeoutseconds: 180
-  url: http://10.236.66.181:9020
-  endpoints: http://10.236.66.181:9020,http://10.236.66.182:9020,http://10.236.66.183:9020,http://10.236.66.184:9020
+  # One SBK 10.7 `url` value owns the complete S3 URL pool.
+  url: http://10.236.66.181:9020,http://10.236.66.182:9020,http://10.236.66.183:9020,http://10.236.66.184:9020
   bucket: sbk-analytics-ecs-obs
   extra-headers: x-emc-namespace=sbk-ns
   retry-max-attempts: 1
+  endpoint-preflight: all
+  endpoint-metrics: true
+  warmup-requests: 1
+  warmup-operation: connection
   data-seed: 20260902
   data-compressibility: 0
   data-dedupable: false
