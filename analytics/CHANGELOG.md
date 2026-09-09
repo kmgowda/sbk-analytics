@@ -73,6 +73,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Require both exit code zero and a non-empty CSV before charting an SBK run.
 
 ### Fixed
+- Confirm a stale workload's known leader has stopped before lifecycle
+  reconciliation reports success, avoiding a macOS process-enumeration race.
 - Ignore inaccessible unrelated system processes while inspecting an owned
   process group, preventing macOS stale-run reconciliation from timing out
   after the verified workload has already terminated.
