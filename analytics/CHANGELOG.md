@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.26.9.1] - 2026-09-10
+
 ### Fixed
 - Create and seed the managed sbk-charts environment with the launcher's
   pinned, checksum-verified uv executable. This avoids a macOS nested-venv
