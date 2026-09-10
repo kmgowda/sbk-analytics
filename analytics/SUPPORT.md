@@ -46,6 +46,15 @@ If you're new to sbk-analytics, start with:
 - Verify `sbk-charts.sha256` matches the configured version's tag archive
 - Try with `ssl.verify=false` in sbk-config.env
 
+**Problem**: macOS reports that sbk-charts `ensurepip` died with `SIGABRT`
+- Update to a version containing the managed-uv charts-environment fix and run
+  `./sbk-analytics` again. The launcher now passes its pinned, verified uv to
+  sbk-analytics so creation does not depend on nested stdlib `ensurepip`.
+- No manual deletion is normally required: the incomplete `.install-*` staging
+  directory is replaced automatically under the dependency cache lock.
+- Run `./sbk-analytics deps doctor -vv` to verify the repaired environment
+  before starting a benchmark workflow.
+
 **Problem**: a configured local SBK or sbk-charts folder is rejected
 - Confirm the local package is already built and runnable
 - SBK must contain `bin/sbk-yal`, either directly or under

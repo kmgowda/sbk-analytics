@@ -270,6 +270,45 @@ class LocalSbkResolutionTests(unittest.TestCase):
 
 
 class LocalChartsResolutionTests(unittest.TestCase):
+    def test_managed_uv_avoids_nested_stdlib_ensurepip(self):
+        with tempfile.TemporaryDirectory() as directory:
+            downloads = Path(directory)
+            uv = _executable(downloads / "tools" / "uv")
+            installer_calls = []
+
+            def fake_installer(command, environment):
+                installer_calls.append((command, environment))
+                if command[0] == str(uv):
+                    stage_venv = Path(command[-1])
+                    _executable(stage_venv / "bin" / "python")
+                    _executable(stage_venv / "bin" / "sbk-charts")
+
+            with mock.patch.dict(
+                os.environ,
+                {"SBK_ANALYTICS_UV_EXECUTABLE": str(uv)},
+                clear=True,
+            ), mock.patch(
+                "analytics.releases.charts.venv.EnvBuilder"
+            ) as stdlib_builder, mock.patch(
+                "analytics.releases.charts._run_pip",
+                side_effect=fake_installer,
+            ), mock.patch(
+                "analytics.releases._shared.subprocess.run",
+                return_value=mock.Mock(returncode=0, stdout="", stderr=""),
+            ):
+                install = ensure_sbk_charts(
+                    "4.26.7.1", downloads_folder=downloads,
+                    ssl_verify=False,
+                )
+
+            stdlib_builder.assert_not_called()
+            create_command, create_environment = installer_calls[0]
+            self.assertEqual(create_command[0], str(uv))
+            self.assertEqual(create_command[1], "venv")
+            self.assertIn("--seed", create_command)
+            self.assertTrue(create_environment["UV_INSECURE_HOST"])
+            self.assertTrue(install.cli.is_file())
+
     def test_source_checkout_layout_is_used_without_mutation(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- Create and seed the managed sbk-charts environment with the launcher's
+  pinned, checksum-verified uv executable. This avoids a macOS nested-venv
+  failure where stdlib `ensurepip` aborted with `SIGABRT`; direct/manual Python
+  invocations without managed uv retain the existing stdlib fallback.
 - Treat both zombie and dead process states as terminated during durable
   lifecycle reconciliation. This prevents macOS from quarantining a stale-run
   record after its workload was successfully stopped but not yet reaped.

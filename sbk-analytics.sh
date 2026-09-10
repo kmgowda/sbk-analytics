@@ -299,12 +299,16 @@ download_file() {
     fi
 }
 
-uv_is_ready() {
+uv_files_are_verified() {
     local expected actual
     [[ -x "$UV_BINARY" && -r "$UV_BINARY_MARKER" ]] || return 1
     expected="$(sed -n '1p' "$UV_BINARY_MARKER")"
     actual="$(sha256_file "$UV_BINARY")"
-    [[ "$expected" == "$actual" ]] || return 1
+    [[ "$expected" == "$actual" ]]
+}
+
+uv_is_ready() {
+    uv_files_are_verified || return 1
     "$UV_BINARY" --version >/dev/null 2>&1
 }
 
@@ -428,6 +432,13 @@ APP_ENV="$APP_ROOT/$FINGERPRINT"
 if ! app_is_ready "$APP_ENV" "$FINGERPRINT"; then
     UV="$(ensure_uv)" || fail "could not prepare the stage-zero runtime"
     bootstrap_application "$FINGERPRINT" "$APP_ENV" "$UV"
+fi
+
+# Make the same pinned, checksum-verified uv executable available to the
+# application for isolated dependency environments. In particular, this avoids
+# nested stdlib ensurepip failures seen with managed Python on macOS.
+if [[ -z "${SBK_ANALYTICS_UV_EXECUTABLE:-}" ]] && uv_files_are_verified; then
+    export SBK_ANALYTICS_UV_EXECUTABLE="$UV_BINARY"
 fi
 
 PYTHON="$(app_python "$APP_ENV")"

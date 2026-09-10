@@ -239,6 +239,9 @@ class EnvironmentPolicy:
     sbk_local_folder: str = "SBK_LOCAL_FOLDER"
     charts_local_folder: str = "SBK_CHARTS_LOCAL_FOLDER"
     charts_local_executable: str = "SBK_CHARTS_LOCAL_EXECUTABLE"
+    uv_executable: str = "SBK_ANALYTICS_UV_EXECUTABLE"
+    uv_insecure_host: str = "UV_INSECURE_HOST"
+    ssl_cert_file: str = "SSL_CERT_FILE"
     java_tool_option_separator: str = " "
     java_unbuffered_options: tuple[str, ...] = (
         "-Djava.stdout.buffered=false",
@@ -436,6 +439,9 @@ class NetworkPolicy:
     pip_trusted_host_option: str = "--trusted-host"
     pip_quiet_option: str = "--quiet"
     pip_upgrade_option: str = "--upgrade"
+    uv_venv_subcommand: str = "venv"
+    uv_python_option: str = "--python"
+    uv_seed_option: str = "--seed"
 
 
 @dataclass(frozen=True)

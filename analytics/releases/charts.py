@@ -35,6 +35,42 @@ from ..policy import SBK_CHARTS_ARTIFACT
 log = logging.getLogger(__name__)
 
 
+def _create_charts_environment(
+    stage_venv: Path, *, ssl_verify: bool | str,
+) -> None:
+    """Create an isolated charts environment using managed uv when available."""
+    uv_executable = os.environ.get(ENVIRONMENT_POLICY.uv_executable)
+    if uv_executable:
+        uv_path = Path(uv_executable).expanduser()
+        _require_executable(uv_path, "managed uv")
+        installer_env = os.environ.copy()
+        if not ssl_verify:
+            installer_env[ENVIRONMENT_POLICY.uv_insecure_host] = " ".join(
+                NETWORK_POLICY.pip_trusted_hosts
+            )
+        elif isinstance(ssl_verify, str):
+            installer_env[ENVIRONMENT_POLICY.ssl_cert_file] = ssl_verify
+        base_python = getattr(sys, "_base_executable", sys.executable)
+        log.info("creating sbk-charts environment with managed uv")
+        _run_pip(
+            [
+                str(uv_path),
+                NETWORK_POLICY.uv_venv_subcommand,
+                NETWORK_POLICY.uv_python_option,
+                base_python,
+                NETWORK_POLICY.uv_seed_option,
+                str(stage_venv),
+            ],
+            installer_env,
+        )
+        return
+
+    # Direct/manual Python invocations may not have been started by the
+    # self-bootstrap launcher and therefore retain the stdlib fallback.
+    builder = venv.EnvBuilder(with_pip=True, clear=True)
+    builder.create(stage_venv)
+
+
 def ensure_sbk_charts(
     version: str,
     repo_url: str = SBK_CHARTS_ARTIFACT.repository_url,
@@ -133,8 +169,7 @@ def _ensure_sbk_charts_locked(
         venv_dir=stage_venv, source=DependencySource.DOWNLOADED
     )
     log.info("creating venv for sbk-charts %s at %s", version, stage_venv)
-    builder = venv.EnvBuilder(with_pip=True, clear=True)
-    builder.create(stage_venv)
+    _create_charts_environment(stage_venv, ssl_verify=ssl_verify)
 
     # Prefer the immutable, checksum-verified GitHub source archive. Custom
     # configurations without a digest retain the legacy git-tag fallback.
