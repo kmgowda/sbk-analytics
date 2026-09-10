@@ -13,7 +13,7 @@ override them for that instance.
 | --- | --- | --- |
 | [file](file/README.md) | Fixed-size filesystem write and read | `/tmp/sbk-analytics/benchmarks/file` |
 | [rocksdb](rocksdb/README.md) | Fixed-size RocksDB write and read | `/tmp/sbk-analytics/benchmarks/rocksdb` |
-| [minio / ECS / ObjectScale](minio/README.md) | S3 qualification, multi-endpoint throughput, and distributed GEM | `/tmp/sbk-analytics/benchmarks/minio` |
+| [minio / ECS / ObjectScale](minio/README.md) | S3 qualification, object layouts, sync/async concurrency, API operations, range/LIST metadata, data profiles, mixed workloads, multi-endpoint throughput, and distributed GEM | `/tmp/sbk-analytics/benchmarks/minio` |
 
 Run each class's write workflow before its read workflow. The write workflow
 uses `cleanup_before_run: true` to start with fresh class data. The corresponding

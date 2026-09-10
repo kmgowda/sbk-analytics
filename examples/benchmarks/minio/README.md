@@ -85,18 +85,38 @@ flowchart LR
     M["ECS management UI :4443"] -. "provision namespace,<br/>Object User, bucket policy" .-> E
 ```
 
-## Workflow order
+## Workflow catalog and order
 
-1. Run `ecs-obs-qualification.yml`. Its fixed counts qualify PUT, GET, Range
-   GET, LIST, multipart drain, CSV production, and sbk-charts in one serial
-   workflow.
-2. Run `ecs-obs-throughput.yml` only after qualification. It sends a short
-   30-second PUT and GET load across all four data endpoints.
-3. Run `ecs-obs-gem.yml` only after the exact ordinary workload succeeds from
-   every listed load generator and controller-to-node SSH works.
+Every file is one persistent sbk-analytics workflow containing multiple named
+SBK instances and exactly one final sbk-charts invocation. Options common to
+all instances remain under `sbk:`; the operation-specific options are nested
+under each named `minio:` instance.
+
+| Workflow | Purpose | Instances | Prerequisite |
+| --- | --- | ---: | --- |
+| `ecs-obs-qualification.yml` | Small PUT, GET, Range GET, LIST, and multipart correctness gate | 5 | Existing dedicated bucket |
+| `ecs-obs-object-shapes.yml` | Uniform, short byte-sweep, weighted sizes, sequential/hashed/random keys, and filesystem-style keys | 4 | Existing dedicated bucket |
+| `ecs-obs-async-concurrency.yml` | Fixed-count synchronous versus bounded-asynchronous PUT and GET | 4 | Existing dedicated bucket; PUT instances seed both read prefixes |
+| `ecs-obs-api-operations.yml` | PUT, HEAD/stat, tag get/set/delete, overwrite, server-side copy, and LIST | 8 | Existing dedicated bucket; preserve the declared serial order |
+| `ecs-obs-range-list-metadata.yml` | Sequential/random aligned Range GET, HEAD/stat, LIST v1 delimiter, and LIST v2 owner/user metadata | 6 | Existing dedicated bucket; first instance seeds the prefix |
+| `ecs-obs-data-profiles.yml` | Compressibility/dedup payload shapes and sequential/concurrent multipart parts | 5 | Existing dedicated bucket |
+| `ecs-obs-mixed-operations.yml` | Deterministic weighted read/write mixes and simultaneous readers/writers | 4 | Existing dedicated bucket; first instance seeds the catalog |
+| `ecs-obs-throughput.yml` | Short duration-based four-endpoint PUT/GET load | 2 | Qualification passed; understand duration-boundary behavior |
+| `ecs-obs-gem.yml` | Distributed SBK-GEM PUT/GET | 2 | Ordinary workflow passes from every client; controller SSH works |
+
+Run qualification first, then select the focused workflow that represents the
+application behavior being studied. Do not merge all examples into one large
+capacity run: changing object size, concurrency, operation type, and payload
+shape simultaneously makes attribution difficult.
 
 ```bash
 ./sbk-analytics -c examples/benchmarks/minio/ecs-obs-qualification.yml
+./sbk-analytics -c examples/benchmarks/minio/ecs-obs-object-shapes.yml
+./sbk-analytics -c examples/benchmarks/minio/ecs-obs-async-concurrency.yml
+./sbk-analytics -c examples/benchmarks/minio/ecs-obs-api-operations.yml
+./sbk-analytics -c examples/benchmarks/minio/ecs-obs-range-list-metadata.yml
+./sbk-analytics -c examples/benchmarks/minio/ecs-obs-data-profiles.yml
+./sbk-analytics -c examples/benchmarks/minio/ecs-obs-mixed-operations.yml
 ./sbk-analytics -c examples/benchmarks/minio/ecs-obs-throughput.yml
 ./sbk-analytics -c examples/benchmarks/minio/ecs-obs-gem.yml
 ```
@@ -106,6 +126,36 @@ not remove ECS objects or buckets. Each benchmark uses an explicit prefix so
 test data remains attributable. Do not add `recreate`, delete, or bucket-delete
 to a persistent workflow unless the exact disposable target is independently
 approved.
+
+The focused examples intentionally use fixed record counts. This makes exact
+completion auditable and avoids classifying cancellation of an in-flight S3
+request at a duration boundary as a backend failure. Use the duration-based
+throughput workflow only after fixed-count correctness passes.
+
+### What the focused options mean
+
+- Object-size `sweep` advances one byte per logical operation. The short
+  example therefore uses `sweep:4096:4105`; use a much larger record count if
+  benchmarking a wide sweep. Weighted values are literal deterministic cycle
+  weights, so the example uses a short `2:1:1` cycle that is visible in forty
+  records.
+- Endpoint assignment is worker based. Four workers exercise all four URLs;
+  two multipart writers use two URLs even when each object has four concurrent
+  parts. Per-part concurrency does not change endpoint assignment.
+- Metadata operations (`stat`, tags, and LIST) correctly report zero payload
+  MB. Compare records/sec and latency, not MB/sec.
+- COPY reports logical source-object bytes, but the payload stays inside ECS.
+  It measures server-side copy completion rather than controller network
+  throughput.
+- Async depth is bounded per worker and again at process scope. Increase
+  `async-depth`, `async-max-inflight`, and `async-max-memory-mb` together only
+  after confirming client memory and ECS tail latency remain acceptable.
+- Mixed operation weights are deterministic cycles, not random percentages.
+  `mixed-read-source: catalog` uses the bounded startup snapshot populated by
+  the preceding seed instance.
+- Payload compressibility and deduplication options describe generated bytes;
+  they do not prove that ECS compressed or deduplicated them internally. Pair
+  client results with ECS telemetry for storage-efficiency conclusions.
 
 ## Reading results
 
@@ -125,6 +175,63 @@ not response-wire bandwidth; compare LIST operations/sec and latency instead.
 For credible performance claims, warm up first and run at least three measured
 repetitions long enough to reach steady state. The short shipped workflows are
 qualification examples, not product performance specifications.
+
+## Expanded SBK 10.7 option-suite validation (2026-09-10)
+
+All 31 instances in the six focused workflows were executed from one
+controller against ECS `10.236.66.181` through `.184`. Every instance returned
+zero, produced its exact fixed record count, reported zero retries and terminal
+S3 failures, and contributed a CSV to its workflow's single sbk-charts
+workbook. The test used SBK 10.7, JDK 25.0.2, sbk-charts 4.26.7.1, and a
+temporary Object User/bucket in `sbk-ns`; all 1,008 test objects, the
+credential, bucket, and Object User were removed after validation.
+
+The values below are one-run integration evidence, not ECS capacity claims.
+Metadata and LIST operations transfer no object payload, so their MB/s is
+shown as `n/a`.
+
+| Workflow / instance | Records | MB/s | Records/s | Average | p99 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Object shapes / uniform sequential PUT | 40 | 0.21 | 6.5 | 584.8 ms | 883 ms |
+| Object shapes / 4 KiB byte-sweep hashed PUT | 40 | 0.05 | 12.9 | 288.2 ms | 327 ms |
+| Object shapes / weighted random PUT | 40 | 1.84 | 6.9 | 536.2 ms | 1993 ms |
+| Object shapes / filesystem-layout PUT | 40 | 0.11 | 6.8 | 545.2 ms | 604 ms |
+| Concurrency / synchronous PUT 64 KiB | 80 | 0.40 | 6.4 | 595.9 ms | 934 ms |
+| Concurrency / bounded-async PUT 64 KiB | 80 | 1.38 | 22.1 | 660.3 ms | 1223 ms |
+| Concurrency / synchronous GET 64 KiB | 80 | 0.53 | 8.5 | 361.6 ms | 2916 ms |
+| Concurrency / bounded-async GET 64 KiB | 80 | 1.84 | 29.4 | 482.7 ms | 1305 ms |
+| API operations / tagged PUT seed | 40 | 0.37 | 5.9 | 642.9 ms | 948 ms |
+| API operations / HEAD-stat | 40 | n/a | 13.3 | 282.4 ms | 304 ms |
+| API operations / tag GET | 40 | n/a | 13.9 | 279.9 ms | 313 ms |
+| API operations / overwrite | 40 | 0.40 | 6.5 | 577.3 ms | 931 ms |
+| API operations / server-side copy | 40 | 0.82¹ | 13.1 | 293.0 ms | 321 ms |
+| API operations / tag set | 40 | n/a | 13.3 | 289.1 ms | 365 ms |
+| API operations / tag delete | 40 | n/a | 13.5 | 276.5 ms | 351 ms |
+| API operations / copied-prefix LIST | 5 | n/a | 1.8 | 553.4 ms | 621 ms |
+| Range/LIST / 1 MiB PUT seed | 80 | 3.89 | 3.9 | 729.1 ms | 5120 ms |
+| Range/LIST / sequential aligned Range GET | 80 | 0.05 | 13.1 | 286.7 ms | 372 ms |
+| Range/LIST / random aligned Range GET | 80 | 0.05 | 13.4 | 280.0 ms | 303 ms |
+| Range/LIST / HEAD-stat | 80 | n/a | 13.8 | 284.8 ms | 304 ms |
+| Range/LIST / recursive LIST v2 + metadata | 5 | n/a | 0.7 | 1336.4 ms | 1522 ms |
+| Range/LIST / delimiter LIST v1 | 5 | n/a | 2.8 | 351.0 ms | 419 ms |
+| Data profiles / incompressible anti-dedup PUT | 40 | 1.35 | 5.4 | 665.6 ms | 1568 ms |
+| Data profiles / 50% compressible anti-dedup PUT | 40 | 1.42 | 5.7 | 681.8 ms | 1492 ms |
+| Data profiles / compressible dedup-friendly PUT | 40 | 1.45 | 5.8 | 669.1 ms | 1499 ms |
+| Data profiles / sequential multipart parts | 4 | 9.96 | 0.3 | 6106.5 ms | 7602 ms |
+| Data profiles / four concurrent multipart parts | 4 | 11.64 | 0.4 | 4197.3 ms | 7053 ms |
+| Mixed operations / tagged PUT seed | 80 | 0.41 | 6.5 | 566.1 ms | 878 ms |
+| Mixed operations / GET-stat-tag read mix | 80 | 0.47¹ | 7.5 | 406.9 ms | 977 ms |
+| Mixed operations / PUT-update-copy write mix | 80 | 0.32¹ | 5.1 | 753.8 ms | 1070 ms |
+| Mixed operations / simultaneous readers/writers | 80 | 0.47¹ | 7.5 | 263.6 ms | 742 ms |
+
+¹ Mixed and server-side operations report logical object bytes; do not treat
+this as controller wire throughput.
+
+These short comparisons demonstrate feature operation, not statistical
+superiority. For example, bounded async improved records/sec in this run but
+also changed latency distribution. Repeat each selected workload at least
+three times under controlled cluster health and client conditions before
+drawing performance conclusions.
 
 ## SBK 10.7 lab validation
 

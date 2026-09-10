@@ -713,7 +713,12 @@ not accept the former standalone `endpoint` or `endpoints` keys; SBK
 rejects either spelling with replacement guidance. Inject `SBK_S3_ACCESS_KEY` and
 `SBK_S3_SECRET_KEY` through the process environment. For ECS/ObjectScale use
 the S3 data plane, a dedicated namespace/bucket/prefix, and the committed
-workflows under `examples/benchmarks/minio/`.
+workflows under `examples/benchmarks/minio/`. Prefer the focused persistent
+workflow matching the question being measured: object/key distributions,
+sync/async concurrency, object/tag/copy APIs, Range GET/LIST metadata, payload
+profiles/multipart, or deterministic mixed operations. Preserve each file's
+serial seed-before-read/mutate ordering and its one final sbk-charts section.
+Do not combine unrelated option families into one capacity claim.
 
 The current finite MinIO values are:
 

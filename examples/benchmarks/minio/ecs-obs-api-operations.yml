@@ -1,0 +1,97 @@
+# Exercise object metadata and mutation APIs after seeding a known prefix.
+# Operations are deliberately ordered because later instances reuse prior data.
+mode: serial
+workdir: /tmp/sbk-analytics/benchmarks/minio/ecs-obs-api-operations
+cleanup_before_run: true
+
+sbk:
+  time: ms
+  idletimeoutseconds: 120
+  url: http://10.236.66.181:9020,http://10.236.66.182:9020,http://10.236.66.183:9020,http://10.236.66.184:9020
+  bucket: sbk-analytics-ecs-obs
+  extra-headers: x-emc-namespace=sbk-ns
+  retry-max-attempts: 1
+  endpoint-preflight: all
+  endpoint-metrics: true
+  warmup-requests: 4
+  warmup-operation: connection
+  data-seed: 20260910
+  data-compressibility: 0
+  data-dedupable: false
+
+benchmarks:
+  seed-tagged-objects:
+    minio:
+      prefix: api-operations/source
+      writers: 4
+      records: 40
+      size: 65536
+      write-operation: put
+      tagging-enabled: true
+      tagging-tags: suite=sbk-analytics,stage=seed
+
+  stat-objects:
+    minio:
+      prefix: api-operations/source
+      readers: 4
+      records: 40
+      size: 1
+      read-operation: stat
+
+  get-object-tags:
+    minio:
+      prefix: api-operations/source
+      readers: 4
+      records: 40
+      size: 1
+      read-operation: tag-get
+
+  update-objects:
+    minio:
+      prefix: api-operations/source
+      writers: 4
+      records: 40
+      size: 65536
+      write-operation: update
+
+  copy-objects:
+    minio:
+      prefix: api-operations/source
+      copy-prefix: api-operations/copied
+      writers: 4
+      records: 40
+      size: 1
+      write-operation: copy
+
+  set-object-tags:
+    minio:
+      prefix: api-operations/source
+      writers: 4
+      records: 40
+      size: 1
+      write-operation: tag-set
+      tagging-tags: suite=sbk-analytics,stage=updated
+
+  delete-object-tags:
+    minio:
+      prefix: api-operations/source
+      writers: 4
+      records: 40
+      size: 1
+      write-operation: tag-delete
+
+  list-copied-objects:
+    minio:
+      readers: 1
+      records: 5
+      size: 1
+      read-operation: list
+      list-prefixes: api-operations/copied
+      list-max-keys: 20
+      list-max-entries: 100
+      list-api-version: 2
+
+sbk-charts:
+  output: ecs-obs-api-operations.xlsx
+  ai_model: noai
+  chat: false

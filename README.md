@@ -1043,7 +1043,9 @@ benchmarks:
 Inject `SBK_S3_ACCESS_KEY` and `SBK_S3_SECRET_KEY` at runtime; never persist
 them in a workflow. See
 [`examples/benchmarks/minio/README.md`](examples/benchmarks/minio/README.md)
-for the staged ECS/ObjectScale qualification and distributed workflow.
+for staged ECS/ObjectScale qualification, object-layout, concurrency,
+API-operation, Range GET/LIST, data-profile, mixed-operation, throughput, and
+distributed workflows.
 
 Analytics no longer measures a GEM timeout from local process launch. SBK-GEM
 may spend significant time provisioning nodes before its benchmark clock
