@@ -23,6 +23,16 @@ class ShippedExampleTests(unittest.TestCase):
                 document = yaml.safe_load(workflow.read_text())
                 self.assertIn(configuration.benchmarks_keys[0], document)
                 self.assertNotIn(configuration.legacy_classes_keys[0], document)
+                benchmarks = document[configuration.benchmarks_keys[0]]
+                self.assertIsInstance(benchmarks, dict)
+                self.assertTrue(benchmarks)
+                for instance_name, class_group in benchmarks.items():
+                    self.assertIsInstance(instance_name, str)
+                    self.assertIsInstance(class_group, dict)
+                    self.assertEqual(len(class_group), 1)
+                    class_name, params = next(iter(class_group.items()))
+                    self.assertIsInstance(class_name, str)
+                    self.assertIsInstance(params, dict)
                 self.assertTrue(load_config(workflow).instances)
 
 

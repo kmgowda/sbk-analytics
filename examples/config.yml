@@ -4,7 +4,7 @@
 #   1. mode             - serial | parallel  (default: serial)
 #   2. sbk              - shared SBK / SBK-GEM-YAL defaults
 #                          (presence of 'nodes' switches to sbk-gem-yal)
-#   3. benchmarks       - list of benchmark instances
+#   3. benchmarks       - named instance -> SBK class -> parameters
 #   4. class_params     - (optional) per-class default overrides
 #   5. sbk-charts       - sbk-charts options:
 #                          output, ai_model, ai_params, chat
@@ -33,19 +33,22 @@ sbk:
   # totalthroughput. SBK-GEM embeds SBM; analytics does not launch sbm directly.
 
 benchmarks:
-  - class: file
-    writers: 1
-    size: 100
-    file: /tmp/sbk-analytics/file-write
-  - class: file
-    readers: 1
-    size: 100
-    file: /tmp/sbk-analytics/file-read
-  - class: hdfs
-    writers: 1
-    size: 100
-    uri: hdfs://localhost:9000
-    fname: /tmp/sbk-analytics/hdfs
+  file-write:
+    file:
+      writers: 1
+      size: 100
+      file: /tmp/sbk-analytics/file-write
+  file-read:
+    file:
+      readers: 1
+      size: 100
+      file: /tmp/sbk-analytics/file-read
+  hdfs-write:
+    hdfs:
+      writers: 1
+      size: 100
+      uri: hdfs://localhost:9000
+      fname: /tmp/sbk-analytics/hdfs
 
 sbk-charts:
   output: sbk-analytics.xlsx

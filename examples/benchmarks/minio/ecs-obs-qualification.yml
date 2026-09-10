@@ -21,56 +21,56 @@ sbk:
 
 benchmarks:
   # Populate twenty reusable 1 MiB objects.
-  - name: ecs-put-1m
-    class: minio
-    prefix: qualification-1m
-    writers: 1
-    size: 1048576
-    records: 20
+  ecs-put-1m:
+    minio:
+      prefix: qualification-1m
+      writers: 1
+      size: 1048576
+      records: 20
 
-  - name: ecs-get-1m
-    class: minio
-    prefix: qualification-1m
-    readers: 1
-    size: 1048576
-    records: 20
-    read-operation: get
-    verify-read-size: true
+  ecs-get-1m:
+    minio:
+      prefix: qualification-1m
+      readers: 1
+      size: 1048576
+      records: 20
+      read-operation: get
+      verify-read-size: true
 
-  - name: ecs-range-get-4k
-    class: minio
-    prefix: qualification-1m
-    readers: 1
-    size: 4096
-    records: 20
-    read-operation: range-get
-    range-offset: 8192
-    range-length: 4096
-    range-offset-distribution: fixed
-    range-window-length: 1048576
-    range-alignment: 4096
-    verify-read-size: true
+  ecs-range-get-4k:
+    minio:
+      prefix: qualification-1m
+      readers: 1
+      size: 4096
+      records: 20
+      read-operation: range-get
+      range-offset: 8192
+      range-length: 4096
+      range-offset-distribution: fixed
+      range-window-length: 1048576
+      range-alignment: 4096
+      verify-read-size: true
 
-  - name: ecs-list
-    class: minio
-    readers: 1
-    size: 1
-    records: 5
-    read-operation: list
-    list-prefixes: qualification-1m
-    list-max-keys: 1000
-    list-max-entries: 1000
-    list-api-version: 2
+  ecs-list:
+    minio:
+      readers: 1
+      size: 1
+      records: 5
+      read-operation: list
+      list-prefixes: qualification-1m
+      list-max-keys: 1000
+      list-max-entries: 1000
+      list-api-version: 2
 
   # Validate multipart completion separately from ordinary PUT.
-  - name: ecs-multipart-put-15m
-    class: minio
-    prefix: qualification-multipart-15m
-    writers: 1
-    size: 15728640
-    records: 2
-    part-size: 5242880
-    mpu-concurrent-parts: 3
+  ecs-multipart-put-15m:
+    minio:
+      prefix: qualification-multipart-15m
+      writers: 1
+      size: 15728640
+      records: 2
+      part-size: 5242880
+      mpu-concurrent-parts: 3
 
 sbk-charts:
   output: ecs-obs-qualification.xlsx

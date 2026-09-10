@@ -9,8 +9,9 @@ sbk:
   writers: 1
 
 benchmarks:
-  - class: file
-    file: /tmp/sbk-analytics-smoke/file-smoke.dat
+  file-smoke:
+    file:
+      file: /tmp/sbk-analytics-smoke/file-smoke.dat
 
 sbk-charts:
   output: local-smoke-test.xlsx

@@ -30,6 +30,12 @@ unchanged into generated `sbkArgs` or `sbkGemArgs`; AI backend parameters are
 passed to sbk-charts unchanged. The independently released applications own
 their option catalogs and report unsupported values themselves.
 
+Each canonical benchmark uses `instance name -> SBK class -> parameters`.
+Analytics owns the instance name and translates the single class-group key to
+SBK's `class` option. Shared `sbk:` values are applied first; the nested class
+parameters override them for that instance. This creates many independently
+named SBK invocations and one final sbk-charts invocation.
+
 Lifecycle schemas intentionally fail closed. Records from unsupported schema
 versions are quarantined instead of migrated automatically, because an older
 record may lack the process identity evidence required for safe termination.
@@ -115,7 +121,10 @@ flowchart LR
 ```mermaid
 flowchart LR
     YAML["Benchmark YAML"] --> CLI["cli.py"] --> Config["config.py"]
-    Config --> Model["OrchestratorConfig<br/>SBK/charts params unchanged"]
+    Config --> Names["benchmarks.<br/>instance name"]
+    Names --> Class["single SBK class group"]
+    Class --> Merge["shared sbk defaults<br/>then instance overrides"]
+    Merge --> Model["OrchestratorConfig<br/>SBK/charts params unchanged"]
     Env["sbk-config.env"] --> Properties["properties.py"] --> Versions["Versions"]
 ```
 

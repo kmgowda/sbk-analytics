@@ -260,6 +260,9 @@ For AI agents needing to generate YAML workload configurations, see the **YAML C
 - All storage driver classes and their parameters
 - Canonical `benchmarks:` workflow parsing, the deprecated `classes:` alias,
   and rejection when both keys are present
+- Named benchmark hierarchy (`instance name -> SBK class -> parameters`),
+  strict single-class grouping, unique filename-safe instance names, and
+  shared-then-instance parameter precedence
 - Common workload patterns with examples
 - Best practices for YAML generation
 - Validation rules and troubleshooting

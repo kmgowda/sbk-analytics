@@ -104,10 +104,17 @@ If you're new to sbk-analytics, start with:
   sbk-charts executable validates them
 
 **Problem**: the YAML reports that top-level `classes` is deprecated
-- Rename only the top-level `classes:` key to `benchmarks:`
-- Keep each nested `class:` value unchanged; it selects the SBK driver
+- Replace the old list with `benchmarks.<instance-name>.<class>` mappings
+- Move each old entry's parameters below its class key; the instance mapping
+  key replaces the old `name:` field and the class mapping key replaces
+  `class:`
 - Do not keep both top-level keys in one file because the configuration is
   rejected as ambiguous
+
+**Problem**: a benchmark reports `expected exactly one SBK class mapping`
+- Each `benchmarks.<instance-name>` section must contain one class group only
+- Put all SBK and driver parameters under that class group
+- Create another named instance when another class or parameter set is needed
 
 **Problem**: a workload appears to remain after sbk-analytics is stopped
 - Current releases terminate the complete local process tree for `sbk-yal`,

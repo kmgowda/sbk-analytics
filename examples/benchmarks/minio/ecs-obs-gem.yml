@@ -29,19 +29,19 @@ sbk:
   data-dedupable: false
 
 benchmarks:
-  - name: ecs-gem-put-1m
-    class: minio
-    prefix: gem-qualification-1m
-    writers: 1
-    size: 1048576
+  ecs-gem-put-1m:
+    minio:
+      prefix: gem-qualification-1m
+      writers: 1
+      size: 1048576
 
-  - name: ecs-gem-get-1m
-    class: minio
-    prefix: gem-qualification-1m
-    readers: 1
-    size: 1048576
-    read-operation: get
-    verify-read-size: true
+  ecs-gem-get-1m:
+    minio:
+      prefix: gem-qualification-1m
+      readers: 1
+      size: 1048576
+      read-operation: get
+      verify-read-size: true
 
 sbk-charts:
   output: ecs-obs-gem.xlsx

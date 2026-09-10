@@ -9,10 +9,11 @@ sbk:
   writers: 1
 
 benchmarks:
-  - class: rocksdb
-    # Keep the database directly below an existing parent so this remains
-    # valid when --work-dir overrides the YAML workdir.
-    rfile: /tmp/sbk-analytics-rocksdb-smoke.db
+  rocksdb-smoke:
+    rocksdb:
+      # Keep the database directly below an existing parent so this remains
+      # valid when --work-dir overrides the YAML workdir.
+      rfile: /tmp/sbk-analytics-rocksdb-smoke.db
 
 sbk-charts:
   output: local-rocksdb-smoke-test.xlsx

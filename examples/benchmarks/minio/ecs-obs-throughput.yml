@@ -22,19 +22,19 @@ sbk:
   seconds: 30
 
 benchmarks:
-  - name: ecs-four-endpoint-put-1m
-    class: minio
-    prefix: throughput-1m
-    writers: 4
-    size: 1048576
+  ecs-four-endpoint-put-1m:
+    minio:
+      prefix: throughput-1m
+      writers: 4
+      size: 1048576
 
-  - name: ecs-four-endpoint-get-1m
-    class: minio
-    prefix: throughput-1m
-    readers: 4
-    size: 1048576
-    read-operation: get
-    verify-read-size: true
+  ecs-four-endpoint-get-1m:
+    minio:
+      prefix: throughput-1m
+      readers: 4
+      size: 1048576
+      read-operation: get
+      verify-read-size: true
 
 sbk-charts:
   output: ecs-obs-throughput.xlsx

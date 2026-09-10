@@ -10,19 +10,19 @@ sbk:
   idletimeoutseconds: 120
 
 benchmarks:
-  - name: file-read-4k
-    class: file
-    readers: 1
-    size: 4096
-    records: 65536
-    file: /tmp/sbk-analytics/benchmarks/file/file-4k.dat
+  file-read-4k:
+    file:
+      readers: 1
+      size: 4096
+      records: 65536
+      file: /tmp/sbk-analytics/benchmarks/file/file-4k.dat
 
-  - name: file-read-64k
-    class: file
-    readers: 1
-    size: 65536
-    records: 4096
-    file: /tmp/sbk-analytics/benchmarks/file/file-64k.dat
+  file-read-64k:
+    file:
+      readers: 1
+      size: 65536
+      records: 4096
+      file: /tmp/sbk-analytics/benchmarks/file/file-64k.dat
 
 sbk-charts:
   output: file-read.xlsx

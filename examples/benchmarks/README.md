@@ -3,6 +3,12 @@
 This catalog keeps persistent sbk-analytics workflows grouped by SBK storage
 class. Each class directory documents its preparation and measurement order.
 
+Every workflow uses the canonical hierarchy
+`benchmarks -> instance name -> SBK class -> parameters`. The instance name is
+used for generated YAML, CSV, and log filenames; each instance contains exactly
+one class group. Shared `sbk:` parameters are applied first and nested values
+override them for that instance.
+
 | Class | Workflows | Data location |
 | --- | --- | --- |
 | [file](file/README.md) | Fixed-size filesystem write and read | `/tmp/sbk-analytics/benchmarks/file` |

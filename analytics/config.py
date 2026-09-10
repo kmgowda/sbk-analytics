@@ -13,7 +13,7 @@ The YML contains the following groups (see README):
 
     mode:             serial | parallel
     sbk:              shared SBK / SBK-GEM-YAL defaults
-    benchmarks:       list of benchmark instance entries
+    benchmarks:       named instance -> SBK class -> parameter mappings
     class_params:     (optional) per-class defaults
     cleanup:          never | on-success; only File-driver file/fname paths
                       contained by workdir are eligible for removal
@@ -30,16 +30,26 @@ The legacy top-level keys ``classes``, ``output``, ``ai_model``, ``ai_params``
 and ``chat`` are still accepted for backwards compatibility but emit a
 deprecation warning.
 
-Two styles are supported for declaring the benchmark instances:
+The canonical format identifies both the analytics instance and SBK class by
+their mapping keys::
 
-Style A - one instance per class (legacy)::
+    benchmarks:
+      file_write:
+        file:
+          writers: 1
+          fname: /tmp/a
+      rocksdb_write:
+        rocksdb:
+          writers: 1
+          rfile: /tmp/rdb
 
-    benchmarks: [file, hdfs]
-    class_params:
-      file: {fname: /tmp/sbk-test, writers: 1}
-      hdfs: {uri: hdfs://localhost:9000, writers: 1}
+The first mapping key is the analytics-owned instance name. Its single child
+key is translated into the SBK ``class`` parameter. Values nested under that
+class are passed to SBK without downstream option validation. Shared ``sbk:``
+values are merged first and nested instance values override them.
 
-Style B - multiple instances allowed per class, each with its own params::
+The former sequence format remains readable for compatibility but emits a
+deprecation warning::
 
     benchmarks:
       - class: file
@@ -56,12 +66,7 @@ Style B - multiple instances allowed per class, each with its own params::
         writers: 1
         rfile: /tmp/rdb
 
-Each list entry becomes one SBK invocation with its own intermediate YAML and
-CSV. Entry-level params are merged on top of the shared ``sbk:`` block.
-
-Optionally each entry may set ``name:`` to override the auto-generated label
-(used for the YAML/CSV filenames and the summary table); otherwise the name is
-``<class>`` for the first occurrence and ``<class>-<n>`` for subsequent ones.
+Legacy sequence entries may set ``name:`` to override their generated label.
 """
 from __future__ import annotations
 
@@ -71,6 +76,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+from yaml.nodes import MappingNode
 
 from .policy import RUNTIME_POLICY
 
@@ -78,6 +84,26 @@ from .policy import RUNTIME_POLICY
 CONFIGURATION_POLICY = RUNTIME_POLICY.configuration
 SBK_INTERFACE_POLICY = RUNTIME_POLICY.sbk_interface
 log = logging.getLogger(__name__)
+
+
+class _UniqueKeySafeLoader(yaml.SafeLoader):
+    """Safe YAML loader that rejects keys which would otherwise be replaced."""
+
+    def construct_mapping(self, node: MappingNode, deep: bool = False) -> dict:
+        self.flatten_mapping(node)
+        mapping: dict[Any, Any] = {}
+        for key_node, value_node in node.value:
+            key = self.construct_object(key_node, deep=deep)
+            try:
+                duplicate = key in mapping
+            except TypeError as error:
+                raise ValueError(
+                    f"YAML mapping key must be hashable, got {key!r}"
+                ) from error
+            if duplicate:
+                raise ValueError(f"duplicate YAML key {key!r}")
+            mapping[key] = self.construct_object(value_node, deep=deep)
+        return mapping
 
 
 @dataclass
@@ -179,7 +205,7 @@ def _validate_orchestrator_keys(raw: dict[Any, Any], path: Path) -> None:
 
 def load_config(path: str | Path) -> OrchestratorConfig:
     p = Path(path)
-    raw = yaml.safe_load(p.read_text()) or {}
+    raw = yaml.load(p.read_text(), Loader=_UniqueKeySafeLoader) or {}
     if not isinstance(raw, dict):
         raise ValueError(f"{p}: expected top-level mapping, got {type(raw).__name__}")
     _validate_orchestrator_keys(raw, p)
@@ -257,6 +283,11 @@ def load_config(path: str | Path) -> OrchestratorConfig:
         ]
     if not benchmark_entries:
         raise ValueError("'benchmarks' must list at least one benchmark")
+    if not isinstance(benchmark_entries, dict):
+        log.warning(
+            "the benchmark sequence format is deprecated; use "
+            "'benchmarks: <instance>: <class>: <parameters>'"
+        )
 
     class_params = (
         _first(raw, *CONFIGURATION_POLICY.class_params_keys, default={}) or {}
@@ -389,15 +420,15 @@ def _sanitise_name(name: str) -> str:
 
 
 def _build_instances(
-    benchmarks: list,
+    benchmarks: list | dict[Any, Any],
     class_params: dict[str, dict[str, Any]],
     sbk_params: dict[str, Any],
 ) -> list[Instance]:
     """Normalise the two declaration styles into a list of Instance objects.
 
-    Entries in `benchmarks` may be:
-      - a string (class name): merged with class_params[class] if present
-      - a mapping with at least 'class:' (or 'name:') and arbitrary SBK params
+    Canonical entries have the hierarchy ``instance -> class -> parameters``.
+    Legacy list entries may be a class string or a mapping containing
+    ``class`` and optional ``name`` keys.
     """
     counters: dict[str, int] = {}
 
@@ -406,7 +437,51 @@ def _build_instances(
         counters[label] = n + 1
         return label if n == 0 else f"{label}-{n + 1}"
 
-    out: list[Instance] = []
+    if isinstance(benchmarks, dict):
+        out: list[Instance] = []
+        for instance_name, class_group in benchmarks.items():
+            context = f"benchmarks[{instance_name!r}]"
+            if (
+                not isinstance(instance_name, str)
+                or not instance_name.strip()
+                or not any(character.isalnum() for character in instance_name)
+            ):
+                raise ValueError(
+                    "benchmark instance names must be non-empty strings "
+                    "containing a letter or number"
+                )
+            if not isinstance(class_group, dict) or len(class_group) != 1:
+                raise ValueError(
+                    f"{context}: expected exactly one SBK class mapping"
+                )
+            class_name, instance_params = next(iter(class_group.items()))
+            if not isinstance(class_name, str) or not class_name.strip():
+                raise ValueError(
+                    f"{context}: class name must be a non-empty string"
+                )
+            if not isinstance(instance_params, dict):
+                raise ValueError(
+                    f"{context}.{class_name}: class parameters must be a mapping"
+                )
+            class_name = class_name.strip()
+            params = dict(sbk_params)
+            params.update(class_params.get(class_name, {}) or {})
+            params.update(instance_params)
+            out.append(
+                Instance(
+                    name=_sanitise_name(instance_name.strip()),
+                    class_name=class_name,
+                    params=params,
+                )
+            )
+        return _validate_unique_instance_names(out)
+
+    if not isinstance(benchmarks, list):
+        raise ValueError(
+            "'benchmarks' must be a mapping of named benchmark instances"
+        )
+
+    out = []
     for idx, entry in enumerate(benchmarks):
         if isinstance(entry, str):
             class_name = entry.strip()
@@ -453,12 +528,21 @@ def _build_instances(
             )
         out.append(Instance(name=name, class_name=class_name, params=params))
 
-    # check name uniqueness (explicit names could collide)
+    return _validate_unique_instance_names(out)
+
+
+def _validate_unique_instance_names(instances: list[Instance]) -> list[Instance]:
+    """Reject names that collide after filename-safe normalization."""
     seen: set[str] = set()
-    for inst in out:
+    for inst in instances:
+        if not inst.name:
+            raise ValueError(
+                "benchmark instance names must contain a letter or number"
+            )
         if inst.name in seen:
             raise ValueError(
-                f"duplicate instance name {inst.name!r}; set unique 'name:' values"
+                f"duplicate instance name {inst.name!r}; use unique benchmark "
+                "section names"
             )
         seen.add(inst.name)
-    return out
+    return instances
