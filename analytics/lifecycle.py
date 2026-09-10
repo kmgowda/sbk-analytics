@@ -320,7 +320,7 @@ def _terminate_group(pgid: int, *, leader_pid: int | None = None) -> bool:
     try:
         os.killpg(pgid, signal.SIGTERM)
     except ProcessLookupError:
-        return True
+        return _termination_complete(pgid, leader_pid)
     deadline = time.monotonic() + PROCESS_POLICY.termination_grace_s
     while time.monotonic() < deadline:
         if _termination_complete(pgid, leader_pid):
@@ -329,7 +329,7 @@ def _terminate_group(pgid: int, *, leader_pid: int | None = None) -> bool:
     try:
         os.killpg(pgid, signal.SIGKILL)
     except ProcessLookupError:
-        return True
+        return _termination_complete(pgid, leader_pid)
     deadline = time.monotonic() + PROCESS_POLICY.guard_exit_padding_s
     while time.monotonic() < deadline:
         if _termination_complete(pgid, leader_pid):

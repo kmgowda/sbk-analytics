@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Require the recorded workload leader to be inactive when a process-group
+  signal reports that the group is missing, preventing lifecycle
+  reconciliation from declaring success while a verified leader is still
+  alive. The macOS reconciliation test now waits for workload readiness and
+  always removes its subprocess on assertion failure.
+
 ## [1.26.9.1] - 2026-09-10
 
 ### Fixed

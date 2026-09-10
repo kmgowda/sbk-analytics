@@ -20,6 +20,7 @@ from analytics.lifecycle import (
     _group_run_identity_matches,
     _identity_matches,
     _process_status_is_active,
+    _terminate_group,
     _termination_complete,
     current_run_id,
     inspect_records,
@@ -198,6 +199,14 @@ class ManagedProcessTests(unittest.TestCase):
         ):
             self.assertFalse(_termination_complete(9876, 9876))
             self.assertTrue(_termination_complete(9876, None))
+
+    def test_missing_group_signal_does_not_hide_active_leader(self):
+        with mock.patch(
+            "analytics.lifecycle.os.killpg", side_effect=ProcessLookupError
+        ), mock.patch(
+            "analytics.lifecycle._termination_complete", return_value=False
+        ):
+            self.assertFalse(_terminate_group(9876, leader_pid=9876))
 
     def test_group_scan_ignores_denied_unrelated_process(self):
         unrelated = mock.Mock()
@@ -388,22 +397,39 @@ class ManagedProcessTests(unittest.TestCase):
     def test_next_invocation_reconciles_verified_stale_group(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
+            ready = root / "ready"
             process = subprocess.Popen(
-                [sys.executable, "-c", "import time; time.sleep(60)"],
+                [
+                    sys.executable,
+                    "-c",
+                    "import pathlib,time;"
+                    f"pathlib.Path({str(ready)!r}).write_text('ready');"
+                    "time.sleep(60)",
+                ],
                 start_new_session=True,
             )
-            record = root / "runs" / "prior.json"
-            self._stale_record(
-                record, process, created=psutil.Process(process.pid).create_time()
-            )
-            with mock.patch.dict(
-                os.environ,
-                {RUNTIME_POLICY.environment.lifecycle_folder: str(root / "runs")},
-            ):
-                summary = reconcile_stale_records()
-            process.wait(timeout=5)
-            self.assertEqual(summary["cleaned"], 1)
-            self.assertFalse(record.exists())
+            try:
+                _wait_for_file(ready)
+                record = root / "runs" / "prior.json"
+                self._stale_record(
+                    record,
+                    process,
+                    created=psutil.Process(process.pid).create_time(),
+                )
+                with mock.patch.dict(
+                    os.environ,
+                    {
+                        RUNTIME_POLICY.environment.lifecycle_folder:
+                            str(root / "runs")
+                    },
+                ):
+                    summary = reconcile_stale_records()
+                self.assertEqual(summary["cleaned"], 1)
+                self.assertFalse(record.exists())
+                process.wait(timeout=5)
+            finally:
+                if process.poll() is None:
+                    terminate_process(process, grace_s=0.1)
 
     def test_reconciliation_cleans_verified_leaderless_group(self):
         with tempfile.TemporaryDirectory() as directory:
