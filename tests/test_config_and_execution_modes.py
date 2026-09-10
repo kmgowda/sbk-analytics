@@ -1,3 +1,5 @@
+import contextlib
+import io
 import stat
 import tempfile
 import unittest
@@ -6,6 +8,7 @@ from pathlib import Path
 import yaml
 
 from analytics.config import load_config
+from analytics.cli import main
 from analytics.policy import RUNTIME_POLICY
 from analytics.runner import run_jobs
 from analytics.yaml_gen import generate_instance_yaml
@@ -41,6 +44,52 @@ class BenchmarkKeyTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "'benchmarks'"):
             self._load("benchmarks: []\n")
 
+    def test_unknown_orchestrator_key_is_rejected(self):
+        with self.assertRaisesRegex(
+            ValueError,
+            "unknown sbk-analytics top-level key: 'cleaup_before_run'",
+        ):
+            self._load(
+                "benchmarks: [file]\n"
+                "cleaup_before_run: true\n"
+            )
+
+    def test_multiple_unknown_orchestrator_keys_are_reported(self):
+        with self.assertRaisesRegex(
+            ValueError,
+            "unknown sbk-analytics top-level keys",
+        ) as captured:
+            self._load(
+                "benchmarks: [file]\n"
+                "workflow_name: smoke\n"
+                "retry_failed_runs: true\n"
+            )
+
+        self.assertIn("'workflow_name'", str(captured.exception))
+        self.assertIn("'retry_failed_runs'", str(captured.exception))
+
+    def test_non_string_top_level_key_is_rejected(self):
+        with self.assertRaisesRegex(
+            ValueError,
+            "unknown sbk-analytics top-level key: 42",
+        ):
+            self._load("benchmarks: [file]\n42: value\n")
+
+    def test_cli_exits_with_handled_error_for_unknown_orchestrator_key(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            config_path = Path(tmp) / "config.yml"
+            config_path.write_text(
+                "benchmarks: [file]\n"
+                "cleaup_before_run: true\n",
+                encoding="utf-8",
+            )
+            stderr = io.StringIO()
+            with contextlib.redirect_stderr(stderr):
+                return_code = main(["-c", str(config_path)])
+
+        self.assertEqual(return_code, RUNTIME_POLICY.exit_codes.handled_error)
+        self.assertIn("unknown sbk-analytics top-level key", stderr.getvalue())
+
 
 class ConfigBooleanTests(unittest.TestCase):
     def _load_chat(self, value: str) -> bool:
@@ -66,6 +115,45 @@ class ConfigBooleanTests(unittest.TestCase):
     def test_invalid_boolean_is_rejected(self):
         with self.assertRaisesRegex(ValueError, "sbk-charts.chat"):
             self._load_chat('"sometimes"')
+
+
+class DownstreamConfigurationBoundaryTests(unittest.TestCase):
+    def _load(self, content: str):
+        with tempfile.TemporaryDirectory() as tmp:
+            config_path = Path(tmp) / "config.yml"
+            config_path.write_text(content, encoding="utf-8")
+            return load_config(config_path)
+
+    def test_sbk_parameters_are_forwarded_without_contract_validation(self):
+        config = self._load(
+            "sbk:\n"
+            "  future-sbk-option: enabled\n"
+            "  runtimecleanup: legacy-value\n"
+            "benchmarks:\n"
+            "  - class: future-driver\n"
+            "    future-driver-option: 17\n"
+        )
+
+        params = config.instances[0].params
+        self.assertEqual(params["future-sbk-option"], "enabled")
+        self.assertEqual(params["runtimecleanup"], "legacy-value")
+        self.assertEqual(params["future-driver-option"], 17)
+        self.assertNotIn("packagescleanup", params)
+
+    def test_sbk_charts_model_and_plugin_params_are_not_catalog_validated(self):
+        config = self._load(
+            "benchmarks: [file]\n"
+            "sbk-charts:\n"
+            "  ai_model: future-backend\n"
+            "  ai_params:\n"
+            "    future-plugin-option: value\n"
+        )
+
+        self.assertEqual(config.ai_model, "future-backend")
+        self.assertEqual(
+            config.ai_params,
+            {"future-plugin-option": "value"},
+        )
 
 
 class ExecutionModeTests(unittest.TestCase):

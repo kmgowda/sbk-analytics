@@ -85,7 +85,8 @@ sbk-analytics/
 **Usage**: Entry point for `sbk-analytics` command
 
 ### 2. Config Module (`config.py`)
-**Purpose**: Parse and validate YAML configuration files
+**Purpose**: Validate the sbk-analytics-owned YAML structure while preserving
+SBK and sbk-charts parameters for their owning applications
 
 **Key Classes**:
 - `OrchestratorConfig`: Main configuration class with attributes:
@@ -170,8 +171,7 @@ artifact identities plus operational defaults shared by multiple subsystems.
 - application, SBK, sbk-charts, and JDK metadata
 - dependency source/layout vocabulary, executable paths, environment variable
   names, command options, cache filenames, cache namespaces, and metadata keys
-- CLI/JSON/lifecycle schemas, YAML and properties aliases, and the supported
-  SBK option/migration contract
+- CLI/JSON/lifecycle schemas plus YAML and properties aliases
 - GitHub, download, retry, pip trust, and dependency probe behavior
 - shared display geometry, units, diagnostic limits, and signal exit convention
 - host-platform identities, generated workflow paths, and Java output options
@@ -488,7 +488,7 @@ sbk-analytics -c examples/config.yml
 flowchart TB
     Input["Benchmark YAML + sbk-config.env"] --> CLI["CLI dispatch<br/>cli.py"]
     CLI --> Workflow["Execution pipeline<br/>workflow.py"]
-    CLI --> Config["Parse and validate configuration<br/>config.py + sbk_contract.py"]
+    CLI --> Config["Validate analytics keys; preserve downstream params<br/>config.py"]
     CLI --> Properties["Parse dependency selection<br/>properties.py"]
     Properties --> Resolver["Resolve SBK and JDK<br/>releases package"]
     Config --> Generator["Generate per-instance YAML<br/>yaml_gen.py"]
@@ -705,7 +705,7 @@ These parameters can be specified in the `sbk:` block or per-instance:
 ```
 
 Use only `url` for both one URL and a comma-separated URL pool. SBK 10.7 does
-not accept the former standalone `endpoint` or `endpoints` keys; analytics
+not accept the former standalone `endpoint` or `endpoints` keys; SBK
 rejects either spelling with replacement guidance. Inject `SBK_S3_ACCESS_KEY` and
 `SBK_S3_SECRET_KEY` through the process environment. For ECS/ObjectScale use
 the S3 data plane, a dedicated namespace/bucket/prefix, and the committed
@@ -953,18 +953,20 @@ Ensure required parameters are present for each class:
 
 ### Validation Rules
 
-AI agents should validate YAML configurations against these rules:
+AI agents should generate YAML configurations using these rules. Only the
+outer workflow rules are enforced by sbk-analytics; SBK and sbk-charts validate
+their own current parameter catalogs at execution time:
 
 1. **Required Top-Level Keys**: `benchmarks` must be present and non-empty.
    Legacy `classes` is accepted with a deprecation warning but must never be
    combined with `benchmarks` in the same file.
 2. **Valid Mode**: `mode` must be `serial` or `parallel`
-3. **Valid AI Model**: `ai_model` must be one of `huggingface`, `ollama`, `lmstudio`, `noai`
+3. **AI Model**: select a backend supported by the configured sbk-charts release
 4. **Unique Instance Names**: All instance names must be unique
-5. **Class-Specific Parameters**: Each storage class must have its required parameters
+5. **Class-Specific Parameters**: Follow the selected SBK release's driver help
 6. **File Path Safety**: File paths should be absolute or relative to workdir
-7. **Numeric Parameters**: Numeric parameters should be positive integers
-8. **Time Units**: `time` parameter should be one of `ns`, `mcs`, `ms`
+7. **Numeric Parameters**: Follow the selected SBK release's option constraints
+8. **Time Units**: Use a unit accepted by the selected SBK release
 
 ### AI Agent YAML Generation Workflow
 

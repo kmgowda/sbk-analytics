@@ -8,10 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- Added SBK 10.7 MinIO contract validation that rejects the removed standalone
-  `endpoint` and `endpoints` options in favor of `url`, plus current URL-pool,
+- Added fail-fast validation for unknown top-level sbk-analytics workflow keys,
+  while deliberately leaving SBK, SBK-GEM, SBM, driver, and sbk-charts backend
+  parameters to their independently released executables.
+- Added SBK 10.7 MinIO guidance that replaces the removed standalone
+  `endpoint` and `endpoints` options with `url`, plus current URL-pool,
   preflight, endpoint metrics, range, LIST, retry, warm-up, and workload-shape
-  guidance for persistent ECS/ObjectScale workflows.
+  examples for persistent ECS/ObjectScale workflows.
 - Verified that disabled TLS certificate checking remains the shipped default
   and is propagated through bootstrap, SBK, sbk-charts, JDK, pip, Git, managed
   Python, and locked application-package download paths.
@@ -24,8 +27,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and RocksDB write/read benchmarking workflows and continuous render tests.
 - Added top-level YAML `cleanup_before_run` (default `false`) to empty a safely
   validated workdir immediately before SBK/SBK-GEM benchmarking.
-- SBK 10.7+ option compatibility, including validation for its GEM/SBM
-  aggregate, cleanup, provisioning, host-key, port, and idle-timeout options.
+- Documented SBK 10.7+ GEM/SBM aggregate, cleanup, provisioning, host-key,
+  port, and idle-timeout options.
 - Read-only dependency provenance diagnostics for shared development folders
   and managed GitHub releases, including layouts, resolved commands, Git state,
   release assets, checksums, and machine-readable status details.
@@ -35,6 +38,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and real sbk-charts command health checks before cache publication.
 
 ### Changed
+- Removed the duplicated SBK/MinIO option catalog, migrations, and sbk-charts
+  AI-backend allowlist. Downstream parameters are preserved unchanged so newer
+  releases can evolve without requiring an sbk-analytics parser update.
 - Documented the dependency-provider architecture: sbk-analytics consumes
   verified releases or ready-to-run shared development folders, while SBK and
   sbk-charts retain build ownership; mandatory Git submodules and runtime SBK
@@ -59,8 +65,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Java output options, and generated workflow paths.
 - Kept shared-folder Git inspection lightweight by excluding untracked files,
   added debug logging for Git failures, and unified status/runtime layout order.
-- Established SBK 10.7 as the configured baseline contract without embedding
-  version checks or version-specific branches in runtime source.
+- Established SBK 10.7 as the configured baseline without embedding version
+  checks or version-specific downstream option branches in runtime source.
 - Replaced text-rendered architecture and lifecycle flows with GitHub-rendered
   Mermaid diagrams in the user, architecture, and agent documentation.
 - Delegated benchmark timing, fixed-record idle detection, GEM readiness,

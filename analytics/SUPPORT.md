@@ -80,17 +80,28 @@ If you're new to sbk-analytics, start with:
 **Problem**: SBK instances fail
 - Confirm the selected SBK implements the shipped baseline command contract
 - Check YAML configuration syntax
+- Read the SBK error output for unsupported driver, GEM, or SBM parameters;
+  sbk-analytics deliberately forwards those parameters without validating or
+  rewriting the independently released SBK interface
 - Verify file paths exist
 - Use verbose logging: `sbk-analytics -c config.yml -v`
 - Check SBK logs in workdir/logs/ (parallel mode)
 
-**Problem**: an SBK 10.7 MinIO workflow rejects `endpoint` or `endpoints`
+**Problem**: SBK 10.7 rejects a MinIO workflow using `endpoint` or `endpoints`
 - Replace either removed key with `url`
 - Use `url` for both a single S3 URL and a comma-separated URL pool
 - Use `endpoint-preflight: all` to validate every URL before measurement and
   `endpoint-metrics: true` to retain per-URL completion/retry/failure evidence
 - Generate the selected SBK distribution's MinIO help when adopting additional
-  options; SBK owns numeric, catalog, credential, and operation prerequisites
+  options; SBK owns all driver option validation
+
+**Problem**: `unknown sbk-analytics top-level key` is reported
+- Correct the named outer workflow key; common causes are misspelled
+  `benchmarks`, `workdir`, `cleanup`, or `cleanup_before_run`
+- Do not move SBK parameters out of `sbk:`, `class_params:`, or a benchmark
+  entry; keys in those downstream-owned mappings are not checked by analytics
+- Keep sbk-charts backend flags under `sbk-charts.ai_params`; the selected
+  sbk-charts executable validates them
 
 **Problem**: the YAML reports that top-level `classes` is deprecated
 - Rename only the top-level `classes:` key to `benchmarks:`

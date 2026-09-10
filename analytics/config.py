@@ -73,7 +73,6 @@ from typing import Any
 import yaml
 
 from .policy import RUNTIME_POLICY
-from .sbk_contract import normalize_sbk_params
 
 
 CONFIGURATION_POLICY = RUNTIME_POLICY.configuration
@@ -158,11 +157,32 @@ def _first(d: dict, *names: str, default=None):
     return default
 
 
+def _validate_orchestrator_keys(raw: dict[Any, Any], path: Path) -> None:
+    """Reject keys outside the top-level schema owned by sbk-analytics.
+
+    Values inside ``sbk:``, ``class_params:``, benchmark entries, and
+    ``sbk-charts.ai_params`` belong to the independently released downstream
+    applications and deliberately are not validated here.
+    """
+    allowed = set(CONFIGURATION_POLICY.orchestrator_top_level_keys)
+    unknown = [
+        key for key in raw
+        if not isinstance(key, str) or key not in allowed
+    ]
+    if unknown:
+        rendered = ", ".join(repr(key) for key in unknown)
+        noun = "key" if len(unknown) == 1 else "keys"
+        raise ValueError(
+            f"{path}: unknown sbk-analytics top-level {noun}: {rendered}"
+        )
+
+
 def load_config(path: str | Path) -> OrchestratorConfig:
     p = Path(path)
     raw = yaml.safe_load(p.read_text()) or {}
     if not isinstance(raw, dict):
         raise ValueError(f"{p}: expected top-level mapping, got {type(raw).__name__}")
+    _validate_orchestrator_keys(raw, p)
 
     mode = str(
         _first(
@@ -328,12 +348,6 @@ def _parse_sbk_charts_group(
             default=CONFIGURATION_POLICY.default_ai_model,
         )
     ).strip().lower()
-    if ai_model not in CONFIGURATION_POLICY.valid_ai_models:
-        raise ValueError(
-            "sbk-charts.ai_model must be one of "
-            f"{CONFIGURATION_POLICY.valid_ai_models}, got {ai_model!r}"
-        )
-
     ai_params = _first(
         group, *CONFIGURATION_POLICY.charts_ai_params_keys, default={}
     ) or {}
@@ -437,11 +451,6 @@ def _build_instances(
             raise ValueError(
                 f"benchmarks[{idx}]: expected string or mapping, got {type(entry).__name__}"
             )
-        params = normalize_sbk_params(
-            params,
-            context=f"benchmarks[{idx}]",
-            class_name=class_name,
-        )
         out.append(Instance(name=name, class_name=class_name, params=params))
 
     # check name uniqueness (explicit names could collide)
