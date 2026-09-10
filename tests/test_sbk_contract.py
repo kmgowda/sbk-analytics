@@ -22,7 +22,8 @@ class SbkPassThroughConfigurationTests(unittest.TestCase):
 
     def test_runtimecleanup_is_left_for_sbk_to_validate(self):
         config = self._load(
-            "benchmarks: [file]\nsbk:\n  nodes: [node1]\n  runtimecleanup: true\n"
+            "benchmarks:\n  file-run:\n    file: {}\n"
+            "sbk:\n  nodes: [node1]\n  runtimecleanup: true\n"
         )
         params = config.instances[0].params
         self.assertIs(params["runtimecleanup"], True)
@@ -36,13 +37,15 @@ class SbkPassThroughConfigurationTests(unittest.TestCase):
         ):
             with self.subTest(option=option):
                 config = self._load(
-                    f"benchmarks: [file]\nsbk:\n  nodes: [node1]\n  {option}: true\n"
+                    "benchmarks:\n  file-run:\n    file: {}\n"
+                    f"sbk:\n  nodes: [node1]\n  {option}: true\n"
                 )
                 self.assertIs(config.instances[0].params[option], True)
 
     def test_new_gem_options_and_wrapper_are_preserved(self):
         config = self._load(
-            "benchmarks: [file]\nsbk:\n"
+            "benchmarks:\n  file-run:\n    file: {}\n"
+            "sbk:\n"
             "  nodes: [node1, node2]\n"
             "  packagescleanup: true\n"
             "  fullcopy: false\n"
@@ -66,13 +69,15 @@ class SbkPassThroughConfigurationTests(unittest.TestCase):
 
     def test_sbk_decides_whether_an_option_requires_gem(self):
         config = self._load(
-            "benchmarks: [file]\nsbk:\n  packagescleanup: true\n"
+            "benchmarks:\n  file-run:\n    file: {}\n"
+            "sbk:\n  packagescleanup: true\n"
         )
         self.assertIs(config.instances[0].params["packagescleanup"], True)
 
     def test_sbk_decides_option_conflicts(self):
         config = self._load(
-            "benchmarks: [file]\nsbk:\n  nodes: node1\n"
+            "benchmarks:\n  file-run:\n    file: {}\n"
+            "sbk:\n  nodes: node1\n"
             "  totalrecords: 100\n  records: 10\n"
         )
         self.assertEqual(config.instances[0].params["totalrecords"], 100)
@@ -80,14 +85,16 @@ class SbkPassThroughConfigurationTests(unittest.TestCase):
 
     def test_blank_nodes_only_controls_orchestrator_executable_selection(self):
         config = self._load(
-            "benchmarks: [file]\nsbk:\n  nodes: '   '\n  fullcopy: false\n"
+            "benchmarks:\n  file-run:\n    file: {}\n"
+            "sbk:\n  nodes: '   '\n  fullcopy: false\n"
         )
         self.assertFalse(config.instances[0].uses_gem)
         self.assertIs(config.instances[0].params["fullcopy"], False)
 
     def test_sbk_numeric_values_are_not_validated_by_analytics(self):
         config = self._load(
-            "benchmarks: [file]\nsbk:\n"
+            "benchmarks:\n  file-run:\n    file: {}\n"
+            "sbk:\n"
             "  idletimeoutseconds: invalid\n"
             "  totalrecords: -1\n"
         )
@@ -99,13 +106,14 @@ class SbkPassThroughConfigurationTests(unittest.TestCase):
     def test_minio_options_are_left_for_sbk_to_validate(self):
         for removed_option in ("endpoint", "endpoints"):
             for include_url in (False, True):
-                url = "    url: http://node-a:9020\n" if include_url else ""
+                url = "      url: http://node-a:9020\n" if include_url else ""
                 with self.subTest(option=removed_option, include_url=include_url):
                     config = self._load(
                         "benchmarks:\n"
-                        "  - class: minio\n"
+                        "  minio-run:\n"
+                        "    minio:\n"
                         f"{url}"
-                        f"    {removed_option}: http://node-b:9020\n"
+                        f"      {removed_option}: http://node-b:9020\n"
                     )
                     self.assertEqual(
                         config.instances[0].params[removed_option],
@@ -115,16 +123,17 @@ class SbkPassThroughConfigurationTests(unittest.TestCase):
     def test_minio_10_7_values_are_preserved(self):
         config = self._load(
             "benchmarks:\n"
-            "  - class: MinIO\n"
-            "    url: http://node-a:9020,http://node-b:9020\n"
-            "    endpoint-preflight: all\n"
-            "    endpoint-metrics: true\n"
-            "    range-offset-distribution: sequential\n"
-            "    retry-strategy: exponential\n"
-            "    retry-jitter: true\n"
-            "    warmup-operation: put-get\n"
-            "    mixed-read-source: catalog\n"
-            "    auth-version: 4\n"
+            "  minio-run:\n"
+            "    MinIO:\n"
+            "      url: http://node-a:9020,http://node-b:9020\n"
+            "      endpoint-preflight: all\n"
+            "      endpoint-metrics: true\n"
+            "      range-offset-distribution: sequential\n"
+            "      retry-strategy: exponential\n"
+            "      retry-jitter: true\n"
+            "      warmup-operation: put-get\n"
+            "      mixed-read-source: catalog\n"
+            "      auth-version: 4\n"
         )
         params = config.instances[0].params
         self.assertEqual(params["endpoint-preflight"], "all")
@@ -132,9 +141,10 @@ class SbkPassThroughConfigurationTests(unittest.TestCase):
 
         future = self._load(
             "benchmarks:\n"
-            "  - class: minio\n"
-            "    endpoint-preflight: future-mode\n"
-            "    future-minio-option: enabled\n"
+            "  minio-run:\n"
+            "    minio:\n"
+            "      endpoint-preflight: future-mode\n"
+            "      future-minio-option: enabled\n"
         )
         self.assertEqual(
             future.instances[0].params["endpoint-preflight"], "future-mode"

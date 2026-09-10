@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Added the canonical named benchmark hierarchy:
+  `benchmarks.<instance-name>.<class>.<parameter>`. Instance names now come
+  from mapping keys, each instance has exactly one class group, and nested
+  parameters override shared `sbk:` values. Shipped examples use this uniform
+  format; legacy benchmark sequences remain readable with a warning.
+- Added duplicate YAML-key and filename-normalized instance-name rejection so
+  persistent workflows cannot silently replace or collide benchmark sections.
 - Added fail-fast validation for unknown top-level sbk-analytics workflow keys,
   while deliberately leaving SBK, SBK-GEM, SBM, driver, and sbk-charts backend
   parameters to their independently released executables.

@@ -22,10 +22,20 @@ class BenchmarkKeyTests(unittest.TestCase):
             return load_config(config_path)
 
     def test_benchmarks_is_the_canonical_key(self):
-        config = self._load("benchmarks: [file, rocksdb]\n")
+        config = self._load(
+            "benchmarks:\n"
+            "  file-write:\n"
+            "    file: {}\n"
+            "  rocksdb-write:\n"
+            "    rocksdb: {}\n"
+        )
         self.assertEqual(
             [instance.class_name for instance in config.instances],
             ["file", "rocksdb"],
+        )
+        self.assertEqual(
+            [instance.name for instance in config.instances],
+            ["file-write", "rocksdb-write"],
         )
 
     def test_legacy_classes_key_is_accepted_with_warning(self):
@@ -36,13 +46,72 @@ class BenchmarkKeyTests(unittest.TestCase):
         self.assertIn("deprecated", "\n".join(captured.output))
         self.assertIn("benchmarks", "\n".join(captured.output))
 
+    def test_legacy_benchmark_sequence_is_accepted_with_warning(self):
+        with self.assertLogs("analytics.config", level="WARNING") as captured:
+            config = self._load("benchmarks: [file]\n")
+
+        self.assertEqual(config.instances[0].class_name, "file")
+        self.assertIn("sequence format is deprecated", "\n".join(captured.output))
+
     def test_benchmarks_and_legacy_classes_cannot_be_combined(self):
         with self.assertRaisesRegex(ValueError, "cannot be combined"):
             self._load("benchmarks: [file]\nclasses: [rocksdb]\n")
 
     def test_empty_benchmarks_is_rejected_using_canonical_name(self):
         with self.assertRaisesRegex(ValueError, "'benchmarks'"):
-            self._load("benchmarks: []\n")
+            self._load("benchmarks: {}\n")
+
+    def test_canonical_instance_requires_exactly_one_class_group(self):
+        invalid_documents = (
+            "benchmarks:\n  run: {}\n",
+            "benchmarks:\n  run:\n    file: {}\n    rocksdb: {}\n",
+        )
+        for document in invalid_documents:
+            with self.subTest(document=document), self.assertRaisesRegex(
+                ValueError, "exactly one SBK class mapping"
+            ):
+                self._load(document)
+
+    def test_canonical_class_parameters_must_be_a_mapping(self):
+        with self.assertRaisesRegex(
+            ValueError, "class parameters must be a mapping"
+        ):
+            self._load("benchmarks:\n  run:\n    file: invalid\n")
+
+    def test_instance_parameters_override_shared_sbk_values(self):
+        config = self._load(
+            "sbk:\n"
+            "  time: ms\n"
+            "  size: 4096\n"
+            "  writers: 1\n"
+            "benchmarks:\n"
+            "  large-write:\n"
+            "    file:\n"
+            "      size: 65536\n"
+            "      file: /tmp/data\n"
+        )
+        instance = config.instances[0]
+        self.assertEqual(instance.name, "large-write")
+        self.assertEqual(instance.class_name, "file")
+        self.assertEqual(instance.params["time"], "ms")
+        self.assertEqual(instance.params["writers"], 1)
+        self.assertEqual(instance.params["size"], 65536)
+
+    def test_duplicate_instance_section_is_rejected_before_yaml_overwrite(self):
+        with self.assertRaisesRegex(ValueError, "duplicate YAML key 'same-run'"):
+            self._load(
+                "benchmarks:\n"
+                "  same-run:\n    file: {}\n"
+                "  same-run:\n    rocksdb: {}\n"
+            )
+
+    def test_filename_normalized_instance_names_must_be_unique(self):
+        with self.assertRaisesRegex(ValueError, "duplicate instance name"):
+            self._load(
+                "benchmarks:\n"
+                "  run one:\n    file: {}\n"
+                "  run_one:\n    rocksdb: {}\n"
+            )
 
     def test_unknown_orchestrator_key_is_rejected(self):
         with self.assertRaisesRegex(
@@ -50,7 +119,7 @@ class BenchmarkKeyTests(unittest.TestCase):
             "unknown sbk-analytics top-level key: 'cleaup_before_run'",
         ):
             self._load(
-                "benchmarks: [file]\n"
+                "benchmarks:\n  run:\n    file: {}\n"
                 "cleaup_before_run: true\n"
             )
 
@@ -60,7 +129,7 @@ class BenchmarkKeyTests(unittest.TestCase):
             "unknown sbk-analytics top-level keys",
         ) as captured:
             self._load(
-                "benchmarks: [file]\n"
+                "benchmarks:\n  run:\n    file: {}\n"
                 "workflow_name: smoke\n"
                 "retry_failed_runs: true\n"
             )
@@ -73,13 +142,13 @@ class BenchmarkKeyTests(unittest.TestCase):
             ValueError,
             "unknown sbk-analytics top-level key: 42",
         ):
-            self._load("benchmarks: [file]\n42: value\n")
+            self._load("benchmarks:\n  run:\n    file: {}\n42: value\n")
 
     def test_cli_exits_with_handled_error_for_unknown_orchestrator_key(self):
         with tempfile.TemporaryDirectory() as tmp:
             config_path = Path(tmp) / "config.yml"
             config_path.write_text(
-                "benchmarks: [file]\n"
+                "benchmarks:\n  run:\n    file: {}\n"
                 "cleaup_before_run: true\n",
                 encoding="utf-8",
             )
@@ -96,7 +165,8 @@ class ConfigBooleanTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             config_path = Path(tmp) / "config.yml"
             config_path.write_text(
-                f"benchmarks: [file]\nsbk-charts:\n  chat: {value}\n",
+                "benchmarks:\n  run:\n    file: {}\n"
+                f"sbk-charts:\n  chat: {value}\n",
                 encoding="utf-8",
             )
             return load_config(config_path).chat
@@ -130,8 +200,9 @@ class DownstreamConfigurationBoundaryTests(unittest.TestCase):
             "  future-sbk-option: enabled\n"
             "  runtimecleanup: legacy-value\n"
             "benchmarks:\n"
-            "  - class: future-driver\n"
-            "    future-driver-option: 17\n"
+            "  future-run:\n"
+            "    future-driver:\n"
+            "      future-driver-option: 17\n"
         )
 
         params = config.instances[0].params
@@ -142,7 +213,7 @@ class DownstreamConfigurationBoundaryTests(unittest.TestCase):
 
     def test_sbk_charts_model_and_plugin_params_are_not_catalog_validated(self):
         config = self._load(
-            "benchmarks: [file]\n"
+            "benchmarks:\n  run:\n    file: {}\n"
             "sbk-charts:\n"
             "  ai_model: future-backend\n"
             "  ai_params:\n"
@@ -162,7 +233,8 @@ class ExecutionModeTests(unittest.TestCase):
             root = Path(tmp)
             config_path = root / "config.yml"
             config_path.write_text(
-                "benchmarks: [file]\nsbk:\n  nodes: []\n",
+                "benchmarks:\n  local:\n    file: {}\n"
+                "sbk:\n  nodes: []\n",
                 encoding="utf-8",
             )
             config = load_config(config_path)
@@ -181,11 +253,11 @@ class ExecutionModeTests(unittest.TestCase):
             config_path = root / "config.yml"
             config_path.write_text(
                 "benchmarks:\n"
-                "  - class: file\n"
-                "    name: local\n"
-                "  - class: file\n"
-                "    name: remote\n"
-                "    nodes: [node1]\n",
+                "  local:\n"
+                "    file: {}\n"
+                "  remote:\n"
+                "    file:\n"
+                "      nodes: [node1]\n",
                 encoding="utf-8",
             )
             config = load_config(config_path)

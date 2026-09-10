@@ -39,6 +39,12 @@ Rejects unknown top-level sbk-analytics keys and validates the outer workflow
 structure. Defines `OrchestratorConfig` while preserving SBK and sbk-charts
 backend parameters for validation by those applications.
 
+The canonical `benchmarks:` value is a mapping with the hierarchy
+`instance name -> SBK class -> parameters`. The instance key supplies the
+stable YAML/CSV/log name, the single class key is translated to SBK's `class`
+parameter, and its nested values override shared `sbk:` defaults. Legacy
+sequence workflows remain readable with a deprecation warning.
+
 ### properties.py
 Parses .env-style configuration files (like sbk-config.env). Handles case-insensitive key matching.
 

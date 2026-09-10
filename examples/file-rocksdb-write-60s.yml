@@ -12,10 +12,12 @@ sbk:
   writers: 1
 
 benchmarks:
-  - class: file
-    file: /tmp/sbk-analytics/file-60s.dat
-  - class: rocksdb
-    rfile: /tmp/sbk-analytics/rocksdb-60s
+  file-write:
+    file:
+      file: /tmp/sbk-analytics/file-60s.dat
+  rocksdb-write:
+    rocksdb:
+      rfile: /tmp/sbk-analytics/rocksdb-60s
 
 sbk-charts:
   output: file-rocksdb-write-60s.xlsx

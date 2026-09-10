@@ -14,9 +14,9 @@ orchestrator.
 
 From those it:
 
-- Generates one YAML config per storage class for `sbk-yal` (or `sbk-gem-yal`
+- Generates one YAML config per named benchmark instance for `sbk-yal` (or `sbk-gem-yal`
   if the `sbk.nodes` parameter is present).
-- Runs an SBK instance per class, in serial or parallel mode, each emitting a
+- Runs each SBK instance in serial or parallel mode, each emitting a
   CSV via `CSVLogger`.
 - Invokes `sbk-charts` **once** at the end with all successful CSVs to produce
   a single Excel file with comparison charts (and optional AI-generated
@@ -208,10 +208,12 @@ When configuring storage drivers that require file paths (like `file`, `rocksdb`
 workdir: /tmp/sbk-analytics
 
 benchmarks:
-  - class: file
-    file: /tmp/sbk-analytics/file-60s.dat  # Uses workdir
-  - class: rocksdb
-    rfile: /tmp/sbk-analytics/rocksdb-60s   # Uses workdir
+  file-write:
+    file:
+      file: /tmp/sbk-analytics/file-60s.dat  # Uses workdir
+  rocksdb-write:
+    rocksdb:
+      rfile: /tmp/sbk-analytics/rocksdb-60s # Uses workdir
 ```
 
 #### Option 2: Create Custom Directories
@@ -219,10 +221,12 @@ benchmarks:
 workdir: /tmp/sbk-analytics
 
 benchmarks:
-  - class: file
-    file: /custom/path/file-60s.dat  # Ensure /custom/path exists
-  - class: rocksdb
-    rfile: /custom/path/rocksdb-60s   # Ensure /custom/path exists
+  file-write:
+    file:
+      file: /custom/path/file-60s.dat       # Ensure parent exists
+  rocksdb-write:
+    rocksdb:
+      rfile: /custom/path/rocksdb-60s      # Ensure parent exists
 ```
 
 ### Important Notes
@@ -881,19 +885,22 @@ sbk:                    # 2. SBK-YAL / SBK-GEM-YAL defaults shared by every
   seconds: 60           #    instance (presence of 'nodes' switches to sbk-gem-yal)
   time: ms
 
-benchmarks:             # 3. one entry per benchmark instance
-  - class: file
-    writers: 1
-    size: 100
-    file: /tmp/sbk-bench-file
-  - class: file         #    same class can appear multiple times with
-    readers: 1          #    different params (e.g. read vs write, sizes, ...)
-    size: 100
-    file: /tmp/sbk-bench-file
-  - class: hdfs
-    writers: 1
-    uri: hdfs://localhost:9000
-    fname: /tmp/sbk-bench-hdfs
+benchmarks:             # 3. named SBK instances
+  file-write:           #    analytics instance name (YAML/CSV/log stem)
+    file:               #    SBK class translated to class: file
+      writers: 1
+      size: 100
+      file: /tmp/sbk-bench-file
+  file-read:            #    the same class may have many named instances
+    file:
+      readers: 1
+      size: 100
+      file: /tmp/sbk-bench-file
+  hdfs-write:
+    hdfs:
+      writers: 1
+      uri: hdfs://localhost:9000
+      fname: /tmp/sbk-bench-hdfs
 
 # class_params is optional and can be omitted entirely. If you don't need
 # class-level defaults, leave it out -- every instance lists exactly the
@@ -924,35 +931,39 @@ runs with whatever CSVs are available.
 
 #### `benchmarks` — multiple instances per class
 
-Each entry under `benchmarks:` becomes its own SBK invocation, producing its own
-intermediate YAML and CSV. You can list the **same class multiple times** with
-different parameters — e.g. one writer-only instance, one reader-only
-instance, and a third writer instance with a larger record size:
+Each mapping entry under `benchmarks:` becomes one SBK invocation and produces
+one intermediate YAML and CSV. The outer key is the unique, descriptive
+instance name. Its only child key is the SBK class, and the mapping below the
+class contains parameters passed through to SBK. This structure makes repeated
+uses of the same class unambiguous without separate `name:` or `class:` fields.
 
 `benchmarks` is the canonical workflow key. The former `classes` key remains a
 backward-compatible alias and emits a deprecation warning so existing saved
 workflows continue to run. Do not define both keys in one file; migrate by
-renaming only the top-level `classes:` key to `benchmarks:`. The nested
-per-benchmark `class:` key is unchanged because it identifies the SBK driver.
+renaming the top-level `classes:` key and converting its entries to the named
+mapping hierarchy below.
 
 ```yaml
 benchmarks:
-  - class: file
-    writers: 1
-    size: 100
-  - class: file
-    readers: 1
-    size: 100
-  - class: file
-    writers: 1
-    size: 1000
-    name: file_big_writes    # optional explicit label for the CSV/YAML name
+  file-write-small:          # instance name
+    file:                    # SBK class
+      writers: 1
+      size: 100
+  file-read-small:
+    file:
+      readers: 1
+      size: 100
+  file-write-large:
+    file:
+      writers: 1
+      size: 1000
 ```
 
-Without an explicit `name:`, instances are auto-labelled `<class>`,
-`<class>-2`, `<class>-3`, ... so they always get unique YAML/CSV filenames.
+Instance names must be unique. They are normalized for safe YAML, CSV, and log
+filenames; two names that normalize to the same value are rejected.
 
-Style A (legacy short form) is still supported and may be mixed with Style B:
+The former sequence form remains readable for saved workflows but is
+deprecated and emits a warning:
 
 ```yaml
 benchmarks: [file, hdfs]
@@ -961,15 +972,15 @@ class_params:
   hdfs: {uri: hdfs://localhost:9000, writers: 1}
 ```
 
-Parameter precedence for the generated per-instance YAML (lowest to highest):
+Parameter precedence for each generated SBK YAML (lowest to highest):
 
 1. shared `sbk:` block (defaults for every instance)
 2. `class_params[<class>]` (per-class defaults, if any)
-3. the entry's own keys (only for Style B mapping entries)
+3. parameters nested under `benchmarks.<instance>.<class>`
 4. the orchestrator's own overrides: `class`, `csvfile`, and the matching
    CSV-capable logger (`CSVLogger` locally or `GemPrometheusLogger` for GEM)
 
-Each instance can mix freely between **SBK parameters** (`writers`, `readers`,
+Each class mapping can mix freely between **SBK parameters** (`writers`, `readers`,
 `size`, `seconds`, `time`, ...) and **class-specific parameters** (`file`
 for the File driver, `rfile` for RocksDB, `uri` for HDFS, brokers for Kafka,
 etc.). Any SBK parameter the instance does **not** specify is inherited from
@@ -1020,13 +1031,13 @@ sbk:
   warmup-operation: connection
 
 benchmarks:
-  - name: s3-put
-    class: minio
-    bucket: dedicated-benchmark-bucket
-    prefix: qualification
-    writers: 1
-    size: 1048576
-    records: 20
+  s3-put:
+    minio:
+      bucket: dedicated-benchmark-bucket
+      prefix: qualification
+      writers: 1
+      size: 1048576
+      records: 20
 ```
 
 Inject `SBK_S3_ACCESS_KEY` and `SBK_S3_SECRET_KEY` at runtime; never persist

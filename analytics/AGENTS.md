@@ -304,10 +304,10 @@ sbk:
   seconds: 60
   time: ms
 benchmarks:
-  - name: file-write
-    class: file
-    file: /tmp/sbk-analytics/file.dat
-    writers: 1
+  file-write:
+    file:
+      file: /tmp/sbk-analytics/file.dat
+      writers: 1
 ```
 
 ## Installation and Setup
@@ -579,11 +579,13 @@ sbk:                                # Shared SBK parameters (defaults for all in
   time: ms
   writers: 1
 
-benchmarks:                          # List of benchmark instances
-  - class: file
-    file: /tmp/benchmark.dat
-  - class: rocksdb
-    rfile: /tmp/benchmark
+benchmarks:                         # Named benchmark instances
+  file-write:                       # Analytics-owned instance name
+    file:                           # SBK class
+      file: /tmp/benchmark.dat
+  rocksdb-write:
+    rocksdb:
+      rfile: /tmp/benchmark
 
 class_params:                       # Optional per-class defaults
   file: {writers: 1}
@@ -608,7 +610,8 @@ Parameters are resolved in the following order (lowest to highest precedence):
 
 1. **Shared `sbk:` block** - Defaults for ALL instances
 2. **`class_params[<class>]`** - Per-class defaults (if specified)
-3. **Instance's own keys** - Per-instance overrides in `benchmarks:` list
+3. **Nested class parameters** - Per-instance overrides under
+   `benchmarks.<instance>.<class>`
 4. **Orchestrator-managed** - `class`, `csvfile=<unique-path>`, and the
    SBK-mode-specific CSV logger (`CSVLogger` for YAL,
    `GemPrometheusLogger` for GEM-YAL)
@@ -633,75 +636,76 @@ These parameters can be specified in the `sbk:` block or per-instance:
 
 **File Driver (`file`)**
 ```yaml
-- class: file
-  file: /path/to/file.dat        # Required: file path
-  # Optional: inherits from sbk: block
-  writers: 1
-  readers: 1
+file-write:
+  file:
+    file: /path/to/file.dat      # Required: file path
+    writers: 1                   # Optional: inherits from sbk: block
+    readers: 1
 ```
 
 **RocksDB Driver (`rocksdb`)**
 ```yaml
-- class: rocksdb
-  rfile: /path/to/db             # Required: RocksDB directory
-  # Optional: inherits from sbk: block
-  writers: 1
-  readers: 1
+rocksdb-write:
+  rocksdb:
+    rfile: /path/to/db           # Required: RocksDB directory
+    writers: 1
+    readers: 1
 ```
 
 **HDFS Driver (`hdfs`)**
 ```yaml
-- class: hdfs
-  uri: hdfs://namenode:9000      # Required: HDFS URI
-  fname: /path/in/hdfs           # Required: HDFS file path
-  # Optional: inherits from sbk: block
-  writers: 1
+hdfs-write:
+  hdfs:
+    uri: hdfs://namenode:9000    # Required: HDFS URI
+    fname: /path/in/hdfs         # Required: HDFS file path
+    writers: 1
 ```
 
 **Kafka Driver (`kafka`)**
 ```yaml
-- class: kafka
-  brokers: localhost:9092       # Required: Kafka brokers
-  topic: benchmark-topic        # Required: Kafka topic
-  # Optional: inherits from sbk: block
-  writers: 1
-  readers: 1
+kafka-mixed:
+  kafka:
+    brokers: localhost:9092     # Required: Kafka brokers
+    topic: benchmark-topic      # Required: Kafka topic
+    writers: 1
+    readers: 1
 ```
 
 **Pulsar Driver (`pulsar`)**
 ```yaml
-- class: pulsar
-  service_url: pulsar://localhost:6650  # Required: Pulsar service URL
-  topic: persistent://public/default/benchmark  # Required: Pulsar topic
-  # Optional: inherits from sbk: block
-  writers: 1
-  readers: 1
+pulsar-mixed:
+  pulsar:
+    service_url: pulsar://localhost:6650
+    topic: persistent://public/default/benchmark
+    writers: 1
+    readers: 1
 ```
 
 **Cassandra Driver (`cassandra`)**
 ```yaml
-- class: cassandra
-  host: localhost               # Required: Cassandra host
-  port: 9042                    # Required: Cassandra port
-  keyspace: benchmark_ks        # Required: Keyspace name
-  table: benchmark_table        # Required: Table name
-  # Optional: inherits from sbk: block
-  writers: 1
-  readers: 1
+cassandra-mixed:
+  cassandra:
+    host: localhost             # Required: Cassandra host
+    port: 9042                  # Required: Cassandra port
+    keyspace: benchmark_ks      # Required: Keyspace name
+    table: benchmark_table      # Required: Table name
+    writers: 1
+    readers: 1
 ```
 
 **MinIO / S3 Driver (`minio`, SBK 10.7)**
 ```yaml
-- class: minio
-  url: http://node-a:9020,http://node-b:9020
-  bucket: dedicated-benchmark-bucket
-  prefix: qualification
-  writers: 1
-  size: 1048576
-  records: 20
-  endpoint-preflight: all
-  endpoint-metrics: true
-  retry-max-attempts: 1
+minio-put:
+  minio:
+    url: http://node-a:9020,http://node-b:9020
+    bucket: dedicated-benchmark-bucket
+    prefix: qualification
+    writers: 1
+    size: 1048576
+    records: 20
+    endpoint-preflight: all
+    endpoint-metrics: true
+    retry-max-attempts: 1
 ```
 
 Use only `url` for both one URL and a comma-separated URL pool. SBK 10.7 does
@@ -726,47 +730,29 @@ Do not invent options. SBK 10.7 itself remains authoritative for numeric,
 catalog, operation-mix, multipart, async-memory, permission, and backend-state
 constraints.
 
-### YAML Declaration Styles
+### YAML Declaration Format
 
-#### Style A: Simple Class List (Legacy)
-```yaml
-benchmarks: [file, rocksdb, hdfs]
-class_params:
-  file: {file: /tmp/file.dat, writers: 1}
-  rocksdb: {rfile: /tmp/rocksdb, writers: 1}
-  hdfs: {uri: hdfs://localhost:9000, fname: /tmp/hdfs, writers: 1}
-```
+Use one uniform hierarchy: `benchmarks -> instance name -> class -> params`.
+An instance section must contain exactly one class mapping. Do not add `name:`
+or `class:` fields; their mapping keys carry those meanings.
 
-#### Style B: Detailed Instance List (Recommended)
 ```yaml
 benchmarks:
-  - class: file
-    file: /tmp/file.dat
-    writers: 1
-  - class: rocksdb
-    rfile: /tmp/rocksdb
-    writers: 1
-  - class: hdfs
-    uri: hdfs://localhost:9000
-    fname: /tmp/hdfs
-    writers: 1
+  file-write-heavy:
+    file:
+      file: /tmp/file.dat
+      writers: 4
+  file-read-light:
+    file:
+      file: /tmp/file.dat
+      readers: 2
+  rocksdb-standard:
+    rocksdb:
+      rfile: /tmp/rocksdb
 ```
 
-#### Style C: Mixed with Custom Names
-```yaml
-benchmarks:
-  - class: file
-    name: file-write-heavy
-    file: /tmp/file.dat
-    writers: 4
-  - class: file
-    name: file-read-light
-    file: /tmp/file.dat
-    readers: 2
-  - class: rocksdb
-    name: rocksdb-standard
-    rfile: /tmp/rocksdb
-```
+The old sequence and short-list forms remain readable for persisted workflows,
+but emit a deprecation warning and must not be generated for new workflows.
 
 ### Common Workload Patterns
 
@@ -779,13 +765,16 @@ sbk:
   size: 1000
   writers: 1
 benchmarks:
-  - class: file
-    file: /tmp/benchmark/file.dat
-  - class: rocksdb
-    rfile: /tmp/benchmark/rocksdb
-  - class: hdfs
-    uri: hdfs://localhost:9000
-    fname: /tmp/benchmark/hdfs
+  file-write:
+    file:
+      file: /tmp/benchmark/file.dat
+  rocksdb-write:
+    rocksdb:
+      rfile: /tmp/benchmark/rocksdb
+  hdfs-write:
+    hdfs:
+      uri: hdfs://localhost:9000
+      fname: /tmp/benchmark/hdfs
 ```
 
 #### Pattern 2: Read-Write Mix
@@ -796,22 +785,22 @@ sbk:
   seconds: 60
   size: 100
 benchmarks:
-  - class: file
-    name: file-write
-    file: /tmp/benchmark/file.dat
-    writers: 1
-  - class: file
-    name: file-read
-    file: /tmp/benchmark/file.dat
-    readers: 1
-  - class: rocksdb
-    name: rocksdb-write
-    rfile: /tmp/benchmark/rocksdb
-    writers: 1
-  - class: rocksdb
-    name: rocksdb-read
-    rfile: /tmp/benchmark/rocksdb
-    readers: 1
+  file-write:
+    file:
+      file: /tmp/benchmark/file.dat
+      writers: 1
+  file-read:
+    file:
+      file: /tmp/benchmark/file.dat
+      readers: 1
+  rocksdb-write:
+    rocksdb:
+      rfile: /tmp/benchmark/rocksdb
+      writers: 1
+  rocksdb-read:
+    rocksdb:
+      rfile: /tmp/benchmark/rocksdb
+      readers: 1
 ```
 
 #### Pattern 3: Scalability Test
@@ -822,22 +811,14 @@ sbk:
   seconds: 60
   size: 100
 benchmarks:
-  - class: file
-    name: file-1-writer
-    file: /tmp/benchmark/file-1.dat
-    writers: 1
-  - class: file
-    name: file-2-writers
-    file: /tmp/benchmark/file-2.dat
-    writers: 2
-  - class: file
-    name: file-4-writers
-    file: /tmp/benchmark/file-4.dat
-    writers: 4
-  - class: file
-    name: file-8-writers
-    file: /tmp/benchmark/file-8.dat
-    writers: 8
+  file-1-writer:
+    file: {file: /tmp/benchmark/file-1.dat, writers: 1}
+  file-2-writers:
+    file: {file: /tmp/benchmark/file-2.dat, writers: 2}
+  file-4-writers:
+    file: {file: /tmp/benchmark/file-4.dat, writers: 4}
+  file-8-writers:
+    file: {file: /tmp/benchmark/file-8.dat, writers: 8}
 ```
 
 #### Pattern 4: Record Size Variation
@@ -848,22 +829,14 @@ sbk:
   seconds: 60
   writers: 1
 benchmarks:
-  - class: file
-    name: file-100b
-    file: /tmp/benchmark/file-100b.dat
-    size: 100
-  - class: file
-    name: file-1kb
-    file: /tmp/benchmark/file-1kb.dat
-    size: 1024
-  - class: file
-    name: file-10kb
-    file: /tmp/benchmark/file-10kb.dat
-    size: 10240
-  - class: file
-    name: file-100kb
-    file: /tmp/benchmark/file-100kb.dat
-    size: 102400
+  file-100b:
+    file: {file: /tmp/benchmark/file-100b.dat, size: 100}
+  file-1kb:
+    file: {file: /tmp/benchmark/file-1kb.dat, size: 1024}
+  file-10kb:
+    file: {file: /tmp/benchmark/file-10kb.dat, size: 10240}
+  file-100kb:
+    file: {file: /tmp/benchmark/file-100kb.dat, size: 102400}
 ```
 
 #### Pattern 5: Cluster/Distributed Benchmark
@@ -876,10 +849,12 @@ sbk:
   writers: 1
   nodes: ["node1:8080", "node2:8080", "node3:8080"]  # Triggers sbk-gem-yal
 benchmarks:
-  - class: file
-    file: /tmp/benchmark/file.dat
-  - class: rocksdb
-    rfile: /tmp/benchmark/rocksdb
+  file-cluster:
+    file:
+      file: /tmp/benchmark/file.dat
+  rocksdb-cluster:
+    rocksdb:
+      rfile: /tmp/benchmark/rocksdb
 ```
 
 ### YAML Generation Best Practices
@@ -893,37 +868,35 @@ sbk:
   size: 100
   writers: 1
 benchmarks:
-  - class: file
-    file: /tmp/file.dat
-  - class: rocksdb
-    rfile: /tmp/rocksdb
+  file-write:
+    file: {file: /tmp/file.dat}
+  rocksdb-write:
+    rocksdb: {rfile: /tmp/rocksdb}
 
 # Avoid repetition
 benchmarks:
-  - class: file
-    seconds: 60
-    size: 100
-    writers: 1
-    file: /tmp/file.dat
-  - class: rocksdb
-    seconds: 60
-    size: 100
-    writers: 1
-    rfile: /tmp/rocksdb
+  file-write:
+    file:
+      seconds: 60
+      size: 100
+      writers: 1
+      file: /tmp/file.dat
+  rocksdb-write:
+    rocksdb:
+      seconds: 60
+      size: 100
+      writers: 1
+      rfile: /tmp/rocksdb
 ```
 
 #### 2. Use Descriptive Instance Names
-When using Style B, provide meaningful names:
+Use meaningful instance mapping keys:
 ```yaml
 benchmarks:
-  - class: file
-    name: file-write-4k-records
-    file: /tmp/file.dat
-    size: 4096
-  - class: rocksdb
-    name: rocksdb-read-1k-records
-    rfile: /tmp/rocksdb
-    size: 1024
+  file-write-4k-records:
+    file: {file: /tmp/file.dat, size: 4096}
+  rocksdb-read-1k-records:
+    rocksdb: {rfile: /tmp/rocksdb, size: 1024}
 ```
 
 #### 3. Ensure File Path Existence
@@ -932,10 +905,10 @@ Make sure parent directories exist for file paths:
 # Use workdir for consistent file locations
 workdir: /tmp/sbk-analytics
 benchmarks:
-  - class: file
-    file: /tmp/sbk-analytics/file.dat    # Parent will be created
-  - class: rocksdb
-    rfile: /tmp/sbk-analytics/rocksdb   # Parent will be created
+  file-write:
+    file: {file: /tmp/sbk-analytics/file.dat}
+  rocksdb-write:
+    rocksdb: {rfile: /tmp/sbk-analytics/rocksdb}
 ```
 
 #### 4. Choose Appropriate Execution Mode
@@ -962,7 +935,8 @@ their own current parameter catalogs at execution time:
    combined with `benchmarks` in the same file.
 2. **Valid Mode**: `mode` must be `serial` or `parallel`
 3. **AI Model**: select a backend supported by the configured sbk-charts release
-4. **Unique Instance Names**: All instance names must be unique
+4. **Unique Instance Names**: Mapping keys must be unique and remain unique
+   after filename-safe normalization
 5. **Class-Specific Parameters**: Follow the selected SBK release's driver help
 6. **File Path Safety**: File paths should be absolute or relative to workdir
 7. **Numeric Parameters**: Follow the selected SBK release's option constraints
@@ -986,8 +960,8 @@ When generating YAML configurations, AI agents should follow this workflow:
    - Include duration, record size, and default thread counts
 
 4. **Define Benchmark Instances**
-   - Use Style B (detailed instance list) for clarity
-   - Provide descriptive names for each instance
+   - Use the named `instance -> class -> params` hierarchy
+   - Use a descriptive mapping key for each instance
    - Specify only parameters that differ from defaults
 
 5. **Configure sbk-charts**
@@ -1018,32 +992,20 @@ sbk:
 
 benchmarks:
   # File driver with varying writers
-  - class: file
-    name: file-1-writer
-    file: /tmp/sbk-analytics/file-1w.dat
-    writers: 1
-  - class: file
-    name: file-2-writers
-    file: /tmp/sbk-analytics/file-2w.dat
-    writers: 2
-  - class: file
-    name: file-4-writers
-    file: /tmp/sbk-analytics/file-4w.dat
-    writers: 4
+  file-1-writer:
+    file: {file: /tmp/sbk-analytics/file-1w.dat, writers: 1}
+  file-2-writers:
+    file: {file: /tmp/sbk-analytics/file-2w.dat, writers: 2}
+  file-4-writers:
+    file: {file: /tmp/sbk-analytics/file-4w.dat, writers: 4}
   
   # RocksDB driver with varying writers
-  - class: rocksdb
-    name: rocksdb-1-writer
-    rfile: /tmp/sbk-analytics/rocksdb-1w
-    writers: 1
-  - class: rocksdb
-    name: rocksdb-2-writers
-    rfile: /tmp/sbk-analytics/rocksdb-2w
-    writers: 2
-  - class: rocksdb
-    name: rocksdb-4-writers
-    rfile: /tmp/sbk-analytics/rocksdb-4w
-    writers: 4
+  rocksdb-1-writer:
+    rocksdb: {rfile: /tmp/sbk-analytics/rocksdb-1w, writers: 1}
+  rocksdb-2-writers:
+    rocksdb: {rfile: /tmp/sbk-analytics/rocksdb-2w, writers: 2}
+  rocksdb-4-writers:
+    rocksdb: {rfile: /tmp/sbk-analytics/rocksdb-4w, writers: 4}
 
 sbk-charts:
   output: file-rocksdb-scalability.xlsx
@@ -1063,10 +1025,12 @@ class_params:
   rocksdb: {writers: 1, readers: 0}
 
 benchmarks:
-  - class: file
-    file: /tmp/file.dat           # Inherits writers: 1, readers: 0
-  - class: rocksdb
-    rfile: /tmp/rocksdb          # Inherits writers: 1, readers: 0
+  file-write:
+    file:
+      file: /tmp/file.dat         # Inherits writers: 1, readers: 0
+  rocksdb-write:
+    rocksdb:
+      rfile: /tmp/rocksdb         # Inherits writers: 1, readers: 0
 ```
 
 #### Combining with Existing CSV Files
@@ -1094,7 +1058,7 @@ sbk-charts:
 **Common Issues and Solutions**:
 
 1. **Missing Required Parameters**: Ensure each storage class has its required parameters
-2. **Duplicate Instance Names**: Use unique `name:` values for each instance
+2. **Duplicate Instance Names**: Use unique `benchmarks` mapping keys
 3. **Invalid File Paths**: Use absolute paths or paths relative to workdir
 4. **Wrong Execution Mode**: Use `parallel` for independent benchmarks, `serial` for dependent ones
 5. **Parameter Override Issues**: Remember parameter resolution order when debugging

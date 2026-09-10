@@ -10,19 +10,19 @@ sbk:
   idletimeoutseconds: 120
 
 benchmarks:
-  - name: rocksdb-read-4k
-    class: rocksdb
-    readers: 1
-    size: 4096
-    records: 65536
-    rfile: /tmp/sbk-analytics/benchmarks/rocksdb/rocksdb-4k
+  rocksdb-read-4k:
+    rocksdb:
+      readers: 1
+      size: 4096
+      records: 65536
+      rfile: /tmp/sbk-analytics/benchmarks/rocksdb/rocksdb-4k
 
-  - name: rocksdb-read-64k
-    class: rocksdb
-    readers: 1
-    size: 65536
-    records: 4096
-    rfile: /tmp/sbk-analytics/benchmarks/rocksdb/rocksdb-64k
+  rocksdb-read-64k:
+    rocksdb:
+      readers: 1
+      size: 65536
+      records: 4096
+      rfile: /tmp/sbk-analytics/benchmarks/rocksdb/rocksdb-64k
 
 sbk-charts:
   output: rocksdb-read.xlsx
