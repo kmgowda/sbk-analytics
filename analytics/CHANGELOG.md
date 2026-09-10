@@ -18,6 +18,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Close the parent-side macOS log-forwarding pipe after each serial workload.
 
 ### Added
+- Added six persistent ECS/OBS MinIO workflow families covering reproducible
+  object/key distributions, bounded async concurrency, object/tag/copy APIs,
+  Range GET and LIST metadata shapes, compressibility/dedup and multipart data
+  profiles, plus deterministic mixed operations. All examples remain
+  credential-free, avoid recursive/bucket deletion, and use one final
+  sbk-charts invocation per workflow.
 - Added the canonical named benchmark hierarchy:
   `benchmarks.<instance-name>.<class>.<parameter>`. Instance names now come
   from mapping keys, each instance has exactly one class group, and nested

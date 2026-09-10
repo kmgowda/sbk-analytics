@@ -1,0 +1,79 @@
+# Compare synchronous and bounded-asynchronous PUT/GET execution.
+# Fixed records avoid treating duration-boundary cancellation as storage I/O.
+mode: serial
+workdir: /tmp/sbk-analytics/benchmarks/minio/ecs-obs-async-concurrency
+cleanup_before_run: true
+
+sbk:
+  time: ms
+  idletimeoutseconds: 120
+  url: http://10.236.66.181:9020,http://10.236.66.182:9020,http://10.236.66.183:9020,http://10.236.66.184:9020
+  bucket: sbk-analytics-ecs-obs
+  extra-headers: x-emc-namespace=sbk-ns
+  retry-max-attempts: 1
+  endpoint-preflight: all
+  endpoint-metrics: true
+  warmup-requests: 4
+  warmup-operation: connection
+  data-seed: 20260910
+  data-compressibility: 0
+  data-dedupable: false
+  connect-timeout-ms: 10000
+  read-timeout-ms: 60000
+  write-timeout-ms: 60000
+
+benchmarks:
+  sync-put-64k:
+    minio:
+      prefix: async-concurrency/sync-64k
+      writers: 4
+      records: 80
+      size: 65536
+      async: false
+
+  async-put-64k:
+    minio:
+      prefix: async-concurrency/async-64k
+      writers: 4
+      records: 80
+      size: 65536
+      async: true
+      async-depth: 4
+      async-max-inflight: 16
+      async-max-memory-mb: 64
+      http-max-requests: 32
+      http-max-requests-per-host: 16
+      http-max-idle-connections: 16
+      http-keepalive-seconds: 60
+
+  sync-get-64k:
+    minio:
+      prefix: async-concurrency/sync-64k
+      readers: 4
+      records: 80
+      size: 65536
+      read-operation: get
+      verify-read-size: true
+      async: false
+
+  async-get-64k:
+    minio:
+      prefix: async-concurrency/async-64k
+      readers: 4
+      records: 80
+      size: 65536
+      read-operation: get
+      verify-read-size: true
+      async: true
+      async-depth: 4
+      async-max-inflight: 16
+      async-max-memory-mb: 64
+      http-max-requests: 32
+      http-max-requests-per-host: 16
+      http-max-idle-connections: 16
+      http-keepalive-seconds: 60
+
+sbk-charts:
+  output: ecs-obs-async-concurrency.xlsx
+  ai_model: noai
+  chat: false

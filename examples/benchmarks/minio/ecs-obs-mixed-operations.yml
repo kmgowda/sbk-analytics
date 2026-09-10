@@ -1,0 +1,68 @@
+# Seed reusable objects, then compare deterministic read and write API mixes.
+mode: serial
+workdir: /tmp/sbk-analytics/benchmarks/minio/ecs-obs-mixed-operations
+cleanup_before_run: true
+
+sbk:
+  time: ms
+  idletimeoutseconds: 120
+  url: http://10.236.66.181:9020,http://10.236.66.182:9020,http://10.236.66.183:9020,http://10.236.66.184:9020
+  bucket: sbk-analytics-ecs-obs
+  extra-headers: x-emc-namespace=sbk-ns
+  retry-max-attempts: 1
+  retry-strategy: exponential
+  retry-backoff-ms: 100
+  retry-max-backoff-ms: 1000
+  retry-jitter: true
+  endpoint-preflight: all
+  endpoint-metrics: true
+  warmup-requests: 4
+  warmup-operation: connection
+  data-seed: 20260910
+  data-compressibility: 0
+  data-dedupable: false
+
+benchmarks:
+  seed-mixed-source:
+    minio:
+      prefix: mixed-operations/source
+      writers: 4
+      records: 80
+      size: 65536
+      tagging-enabled: true
+      tagging-tags: suite=sbk-analytics,stage=mixed
+
+  read-api-mix:
+    minio:
+      prefix: mixed-operations/source
+      readers: 4
+      records: 80
+      size: 65536
+      read-mix: get=70,stat=20,tag-get=10
+      verify-read-size: true
+
+  write-api-mix:
+    minio:
+      prefix: mixed-operations/source
+      copy-prefix: mixed-operations/copied
+      writers: 4
+      records: 80
+      size: 65536
+      write-mix: put=50,update=30,copy=20
+
+  simultaneous-read-write:
+    minio:
+      prefix: mixed-operations/source
+      writers: 2
+      readers: 2
+      records: 80
+      size: 65536
+      write-mix: put=75,update=25
+      read-mix: get=80,stat=20
+      mixed-read-source: catalog
+      verify-read-size: true
+
+sbk-charts:
+  output: ecs-obs-mixed-operations.xlsx
+  ai_model: noai
+  chat: false

@@ -118,7 +118,13 @@ class StorageClassExampleTests(unittest.TestCase):
     def test_minio_ecs_workflows_are_credential_free_and_complete(self):
         minio = BENCHMARK_EXAMPLES / "minio"
         expected = {
+            minio / "ecs-obs-api-operations.yml",
+            minio / "ecs-obs-async-concurrency.yml",
+            minio / "ecs-obs-data-profiles.yml",
             minio / "ecs-obs-qualification.yml",
+            minio / "ecs-obs-mixed-operations.yml",
+            minio / "ecs-obs-object-shapes.yml",
+            minio / "ecs-obs-range-list-metadata.yml",
             minio / "ecs-obs-throughput.yml",
             minio / "ecs-obs-gem.yml",
         }
@@ -159,6 +165,88 @@ class StorageClassExampleTests(unittest.TestCase):
         )
         gem = load_config(minio / "ecs-obs-gem.yml")
         self.assertTrue(all(instance.uses_gem for instance in gem.instances))
+
+    def test_minio_ecs_workflows_cover_driver_option_families(self):
+        minio = BENCHMARK_EXAMPLES / "minio"
+
+        shapes = load_config(minio / "ecs-obs-object-shapes.yml")
+        distributions = {
+            instance.params["object-size-distribution"]
+            for instance in shapes.instances
+        }
+        self.assertTrue(any(value.startswith("uniform:") for value in distributions))
+        self.assertTrue(any(value.startswith("sweep:") for value in distributions))
+        self.assertTrue(any(value.startswith("weighted:") for value in distributions))
+        self.assertEqual(
+            {instance.params["key-distribution"] for instance in shapes.instances},
+            {"sequential", "hashed", "random"},
+        )
+
+        concurrency = load_config(minio / "ecs-obs-async-concurrency.yml")
+        self.assertEqual(
+            {instance.params["async"] for instance in concurrency.instances},
+            {True, False},
+        )
+        self.assertTrue(
+            all(
+                instance.params.get("verify-read-size")
+                for instance in concurrency.instances
+                if instance.params.get("readers")
+            )
+        )
+
+        operations = load_config(minio / "ecs-obs-api-operations.yml")
+        selected_operations = {
+            instance.params.get("write-operation") or instance.params.get("read-operation")
+            for instance in operations.instances
+        }
+        self.assertTrue(
+            {"put", "update", "copy", "tag-set", "tag-delete", "stat", "tag-get", "list"}.issubset(
+                selected_operations
+            )
+        )
+
+        range_list = load_config(minio / "ecs-obs-range-list-metadata.yml")
+        self.assertEqual(
+            {
+                instance.params["range-offset-distribution"]
+                for instance in range_list.instances
+                if instance.params.get("read-operation") == "range-get"
+            },
+            {"sequential", "random"},
+        )
+        self.assertEqual(
+            {
+                instance.params["list-api-version"]
+                for instance in range_list.instances
+                if instance.params.get("read-operation") == "list"
+            },
+            {1, 2},
+        )
+
+        profiles = load_config(minio / "ecs-obs-data-profiles.yml")
+        self.assertEqual(
+            {instance.params["data-compressibility"] for instance in profiles.instances},
+            {0, 50, 100},
+        )
+        self.assertEqual(
+            {
+                instance.params["mpu-concurrent-parts"]
+                for instance in profiles.instances
+                if "mpu-concurrent-parts" in instance.params
+            },
+            {1, 4},
+        )
+
+        mixed = load_config(minio / "ecs-obs-mixed-operations.yml")
+        self.assertTrue(any("read-mix" in instance.params for instance in mixed.instances))
+        self.assertTrue(any("write-mix" in instance.params for instance in mixed.instances))
+        simultaneous = next(
+            instance
+            for instance in mixed.instances
+            if instance.name == "simultaneous-read-write"
+        )
+        self.assertEqual(simultaneous.params["mixed-read-source"], "catalog")
 
 
 if __name__ == "__main__":

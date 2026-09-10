@@ -1,0 +1,72 @@
+# Compare payload compressibility, deduplication shape, and multipart behavior.
+mode: serial
+workdir: /tmp/sbk-analytics/benchmarks/minio/ecs-obs-data-profiles
+cleanup_before_run: true
+
+sbk:
+  time: ms
+  idletimeoutseconds: 180
+  url: http://10.236.66.181:9020,http://10.236.66.182:9020,http://10.236.66.183:9020,http://10.236.66.184:9020
+  bucket: sbk-analytics-ecs-obs
+  extra-headers: x-emc-namespace=sbk-ns
+  retry-max-attempts: 1
+  endpoint-preflight: all
+  endpoint-metrics: true
+  warmup-requests: 4
+  warmup-operation: connection
+  data-seed: 20260910
+
+benchmarks:
+  incompressible-anti-dedup-put:
+    minio:
+      prefix: data-profiles/incompressible
+      writers: 4
+      records: 40
+      size: 262144
+      data-compressibility: 0
+      data-dedupable: false
+
+  half-compressible-anti-dedup-put:
+    minio:
+      prefix: data-profiles/half-compressible
+      writers: 4
+      records: 40
+      size: 262144
+      data-compressibility: 50
+      data-dedupable: false
+
+  compressible-dedup-friendly-put:
+    minio:
+      prefix: data-profiles/compressible-dedup
+      writers: 4
+      records: 40
+      size: 262144
+      data-compressibility: 100
+      data-dedupable: true
+
+  multipart-sequential-parts:
+    minio:
+      prefix: data-profiles/multipart-sequential
+      writers: 2
+      records: 4
+      size: 33554432
+      part-size: 8388608
+      mpu-concurrent-parts: 1
+      data-compressibility: 0
+      data-dedupable: false
+
+  multipart-concurrent-parts:
+    minio:
+      prefix: data-profiles/multipart-concurrent
+      writers: 2
+      records: 4
+      size: 33554432
+      part-size: 8388608
+      mpu-concurrent-parts: 4
+      data-compressibility: 0
+      data-dedupable: false
+
+sbk-charts:
+  output: ecs-obs-data-profiles.xlsx
+  ai_model: noai
+  chat: false

@@ -1,0 +1,94 @@
+# Compare Range GET offset patterns plus S3 LIST/HEAD metadata operations.
+mode: serial
+workdir: /tmp/sbk-analytics/benchmarks/minio/ecs-obs-range-list-metadata
+cleanup_before_run: true
+
+sbk:
+  time: ms
+  idletimeoutseconds: 120
+  url: http://10.236.66.181:9020,http://10.236.66.182:9020,http://10.236.66.183:9020,http://10.236.66.184:9020
+  bucket: sbk-analytics-ecs-obs
+  extra-headers: x-emc-namespace=sbk-ns
+  retry-max-attempts: 1
+  endpoint-preflight: all
+  endpoint-metrics: true
+  warmup-requests: 4
+  warmup-operation: connection
+  data-seed: 20260910
+  data-compressibility: 0
+  data-dedupable: false
+
+benchmarks:
+  seed-hierarchical-objects:
+    minio:
+      prefix: range-list
+      writers: 4
+      records: 80
+      size: 1048576
+      key-distribution: hashed
+
+  sequential-range-get:
+    minio:
+      prefix: range-list
+      readers: 4
+      records: 80
+      size: 4096
+      read-operation: range-get
+      range-offset: 0
+      range-length: 4096
+      range-offset-distribution: sequential
+      range-window-length: 1048576
+      range-alignment: 4096
+      verify-read-size: true
+
+  random-range-get:
+    minio:
+      prefix: range-list
+      readers: 4
+      records: 80
+      size: 4096
+      read-operation: range-get
+      range-offset: 0
+      range-length: 4096
+      range-offset-distribution: random
+      range-window-length: 1048576
+      range-alignment: 4096
+      verify-read-size: true
+
+  stat-metadata:
+    minio:
+      prefix: range-list
+      readers: 4
+      records: 80
+      size: 1
+      read-operation: stat
+
+  recursive-list-v2:
+    minio:
+      readers: 1
+      records: 5
+      size: 1
+      read-operation: list
+      list-prefixes: range-list
+      list-max-keys: 25
+      list-max-entries: 100
+      list-api-version: 2
+      list-fetch-owner: true
+      list-include-user-metadata: true
+
+  delimiter-list-v1:
+    minio:
+      readers: 1
+      records: 5
+      size: 1
+      read-operation: list
+      list-prefixes: range-list
+      list-delimiter: /
+      list-max-keys: 25
+      list-max-entries: 100
+      list-api-version: 1
+
+sbk-charts:
+  output: ecs-obs-range-list-metadata.xlsx
+  ai_model: noai
+  chat: false

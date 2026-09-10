@@ -1,0 +1,65 @@
+# Compare reproducible object-size and key-layout distributions on ECS/OBS.
+# Credentials are supplied through SBK_S3_ACCESS_KEY/SBK_S3_SECRET_KEY.
+mode: serial
+workdir: /tmp/sbk-analytics/benchmarks/minio/ecs-obs-object-shapes
+cleanup_before_run: true
+
+sbk:
+  time: ms
+  idletimeoutseconds: 120
+  url: http://10.236.66.181:9020,http://10.236.66.182:9020,http://10.236.66.183:9020,http://10.236.66.184:9020
+  bucket: sbk-analytics-ecs-obs
+  extra-headers: x-emc-namespace=sbk-ns
+  retry-max-attempts: 1
+  endpoint-preflight: all
+  endpoint-metrics: true
+  warmup-requests: 4
+  warmup-operation: connection
+  data-seed: 20260910
+  data-compressibility: 0
+  data-dedupable: false
+
+benchmarks:
+  uniform-sequential-put:
+    minio:
+      prefix: object-shapes/uniform-sequential
+      writers: 4
+      records: 40
+      size: 65536
+      object-size-distribution: uniform:4096:65536
+      key-distribution: sequential
+
+  sweep-4k-window-hashed-put:
+    minio:
+      prefix: object-shapes/sweep-4k-window-hashed
+      writers: 4
+      records: 40
+      size: 4105
+      # Sweep increments by one byte; this short run cycles over ten sizes.
+      object-size-distribution: sweep:4096:4105
+      key-distribution: hashed
+
+  weighted-random-put:
+    minio:
+      prefix: object-shapes/weighted-random
+      writers: 4
+      records: 40
+      size: 1048576
+      # Literal cycle weights keep all three sizes visible in forty records.
+      object-size-distribution: weighted:4096=2,65536=1,1048576=1
+      key-distribution: random
+
+  filesystem-layout-put:
+    minio:
+      prefix: object-shapes/filesystem
+      writers: 4
+      records: 40
+      size: 16384
+      object-size-distribution: fixed
+      key-distribution: sequential
+      fs-access: true
+
+sbk-charts:
+  output: ecs-obs-object-shapes.xlsx
+  ai_model: noai
+  chat: false
