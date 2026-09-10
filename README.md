@@ -108,8 +108,8 @@ Runtime policy and artifact metadata are centralized in
 `analytics/policy.py`. This is the canonical source for dependency identities,
 repository defaults, dependency source/layout vocabulary, executable and
 environment names, managed-cache filenames, command-line contracts,
-YAML/property aliases, diagnostic and lifecycle record schemas, SBK option
-contracts, native probe commands, network/retry limits, display units, process
+YAML/property aliases, diagnostic and lifecycle record schemas, native probe
+commands, network/retry limits, display units, process
 grace periods, host-platform identities, generated workflow filenames,
 native benchmark lifecycle, SSH behavior, configuration defaults, and
 application exit codes.
@@ -982,33 +982,33 @@ by `sbk-analytics`.
 
 `sbk-analytics` generates the supported `sbkArgs:` / `sbkGemArgs:` wrappers and
 invokes both launchers with `-f <yaml>`. It understands the distributed
-options `packagescleanup`, `fullcopy`, `hostkeycheck`, `knownhosts`, `sbmport`,
-`sbmsleepms`, `totalrecords`, and `totalthroughput`, plus the shared
-`idletimeoutseconds` option used by SBK and the embedded SBM. Standalone `sbm`
-is not launched by analytics; SBK-GEM embeds and configures it.
+mode only from whether `nodes` has a value. Every other key and value in the
+shared `sbk:` mapping, `class_params:`, and each benchmark entry is forwarded
+without an SBK option catalog, type check, migration, or version-specific
+rewrite. SBK therefore remains the authoritative validator and reports invalid
+driver, GEM, SBM, numeric, credential, and lifecycle options itself. Standalone
+`sbm` is not launched by analytics; SBK-GEM embeds and configures it.
 
-The old `runtimecleanup` key is migrated to `packagescleanup` with a warning.
-Removed deployment keys (`copyonlydrivers`, `compactruntimecopy`,
-`compactcopy`, `copy`, `deleteafter`, `delete`, `sbkcommand`, `sbkdir`,
-`javacopy`, and `javaversion`) fail early with migration guidance. Aggregate
-record/throughput conflicts and core boolean/integer values are also
-validated before a Java process starts.
+At the outer boundary, sbk-analytics rejects unknown top-level workflow keys.
+This catches mistakes in analytics-owned controls such as `mode`, `workdir`,
+`cleanup`, `cleanup_before_run`, `benchmarks`, and `class_params` without
+coupling the orchestrator to independently released SBK or sbk-charts option
+catalogs.
 
 #### SBK 10.7 MinIO contract
 
 The shipped SBK 10.7 baseline consolidates MinIO target selection into `url`.
 Supply either one URL or a comma-separated URL pool. The former standalone
-`endpoint` and `endpoints` keys are rejected; replace either key with `url` in
-every persistent workflow.
+`endpoint` and `endpoints` keys are not valid in SBK 10.7; replace either key
+with `url` in every persistent workflow. SBK reports an error if an obsolete
+option reaches it.
 
 SBK 10.7 adds strict startup validation and persistent-workflow controls for
 ECS, ObjectScale, MinIO, and other S3-compatible services. Important additions
 include `endpoint-preflight`, `endpoint-metrics`, object/key distributions,
 aligned Range GET selection, paged LIST controls, bounded retry strategies,
-explicit warm-up operations, and credential-free run manifests. Analytics
-validates the finite enum and boolean portions of this contract before Java
-starts; SBK remains authoritative for operation-specific numeric and catalog
-constraints.
+explicit warm-up operations, and credential-free run manifests. These are SBK
+options and are passed through unchanged; SBK owns their validation.
 
 ```yaml
 sbk:

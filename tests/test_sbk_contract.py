@@ -13,33 +13,32 @@ from analytics.runner import RunResult, _sbk_env, _terminate_sbk_process
 from analytics.yaml_gen import generate_instance_yaml
 
 
-class SbkContractConfigurationTests(unittest.TestCase):
+class SbkPassThroughConfigurationTests(unittest.TestCase):
     def _load(self, content: str):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "input.yml"
             path.write_text(content, encoding="utf-8")
             return load_config(path)
 
-    def test_runtimecleanup_is_migrated_to_packagescleanup(self):
+    def test_runtimecleanup_is_left_for_sbk_to_validate(self):
         config = self._load(
             "benchmarks: [file]\nsbk:\n  nodes: [node1]\n  runtimecleanup: true\n"
         )
         params = config.instances[0].params
-        self.assertNotIn("runtimecleanup", params)
-        self.assertIs(params["packagescleanup"], True)
+        self.assertIs(params["runtimecleanup"], True)
+        self.assertNotIn("packagescleanup", params)
 
-    def test_removed_gem_deployment_options_are_rejected(self):
+    def test_unknown_and_legacy_sbk_options_are_preserved(self):
         for option in (
             "copyonlydrivers", "compactruntimecopy", "compactcopy", "copy",
             "deleteafter", "delete", "sbkcommand", "sbkdir", "javacopy",
             "javaversion",
         ):
-            with self.subTest(option=option), self.assertRaisesRegex(
-                ValueError, "SBK removed option"
-            ):
-                self._load(
+            with self.subTest(option=option):
+                config = self._load(
                     f"benchmarks: [file]\nsbk:\n  nodes: [node1]\n  {option}: true\n"
                 )
+                self.assertIs(config.instances[0].params[option], True)
 
     def test_new_gem_options_and_wrapper_are_preserved(self):
         config = self._load(
@@ -65,56 +64,55 @@ class SbkContractConfigurationTests(unittest.TestCase):
         self.assertEqual(params["sbmport"], 9719)
         self.assertEqual(params["idletimeoutseconds"], 600)
 
-    def test_gem_only_options_require_nodes(self):
-        with self.assertRaisesRegex(ValueError, "require a non-empty 'nodes'"):
-            self._load("benchmarks: [file]\nsbk:\n  packagescleanup: true\n")
-
-    def test_aggregate_option_conflicts_are_rejected(self):
-        with self.assertRaisesRegex(ValueError, "mutually exclusive"):
-            self._load(
-                "benchmarks: [file]\nsbk:\n  nodes: node1\n"
-                "  totalrecords: 100\n  records: 10\n"
-            )
-
-    def test_blank_nodes_does_not_enable_gem_options(self):
-        with self.assertRaisesRegex(ValueError, "require a non-empty 'nodes'"):
-            self._load(
-                "benchmarks: [file]\nsbk:\n  nodes: '   '\n  fullcopy: false\n"
-            )
-
-    def test_contract_numeric_options_are_validated(self):
-        for option in ("idletimeoutseconds", "gemport", "sbmport", "totalrecords"):
-            nodes = "  nodes: node1\n" if option != "idletimeoutseconds" else ""
-            with self.subTest(option=option), self.assertRaisesRegex(
-                ValueError, "positive integer"
-            ):
-                self._load(
-                    f"benchmarks: [file]\nsbk:\n{nodes}  {option}: 0\n"
-                )
-        with self.assertRaisesRegex(ValueError, "positive number"):
-            self._load(
-                "benchmarks: [file]\nsbk:\n  nodes: node1\n  totalthroughput: -1\n"
-            )
+    def test_sbk_decides_whether_an_option_requires_gem(self):
         config = self._load(
-            "benchmarks: [file]\nsbk:\n  nodes: node1\n  sbmsleepms: 0\n"
+            "benchmarks: [file]\nsbk:\n  packagescleanup: true\n"
         )
-        self.assertEqual(config.instances[0].params["sbmsleepms"], 0)
+        self.assertIs(config.instances[0].params["packagescleanup"], True)
 
-    def test_minio_removed_endpoint_options_are_rejected(self):
+    def test_sbk_decides_option_conflicts(self):
+        config = self._load(
+            "benchmarks: [file]\nsbk:\n  nodes: node1\n"
+            "  totalrecords: 100\n  records: 10\n"
+        )
+        self.assertEqual(config.instances[0].params["totalrecords"], 100)
+        self.assertEqual(config.instances[0].params["records"], 10)
+
+    def test_blank_nodes_only_controls_orchestrator_executable_selection(self):
+        config = self._load(
+            "benchmarks: [file]\nsbk:\n  nodes: '   '\n  fullcopy: false\n"
+        )
+        self.assertFalse(config.instances[0].uses_gem)
+        self.assertIs(config.instances[0].params["fullcopy"], False)
+
+    def test_sbk_numeric_values_are_not_validated_by_analytics(self):
+        config = self._load(
+            "benchmarks: [file]\nsbk:\n"
+            "  idletimeoutseconds: invalid\n"
+            "  totalrecords: -1\n"
+        )
+        self.assertEqual(
+            config.instances[0].params["idletimeoutseconds"], "invalid"
+        )
+        self.assertEqual(config.instances[0].params["totalrecords"], -1)
+
+    def test_minio_options_are_left_for_sbk_to_validate(self):
         for removed_option in ("endpoint", "endpoints"):
             for include_url in (False, True):
                 url = "    url: http://node-a:9020\n" if include_url else ""
-                with self.subTest(
-                    option=removed_option, include_url=include_url
-                ), self.assertRaisesRegex(ValueError, "replace it with 'url'"):
-                    self._load(
+                with self.subTest(option=removed_option, include_url=include_url):
+                    config = self._load(
                         "benchmarks:\n"
                         "  - class: minio\n"
                         f"{url}"
                         f"    {removed_option}: http://node-b:9020\n"
                     )
+                    self.assertEqual(
+                        config.instances[0].params[removed_option],
+                        "http://node-b:9020",
+                    )
 
-    def test_minio_10_7_enums_and_booleans_are_validated(self):
+    def test_minio_10_7_values_are_preserved(self):
         config = self._load(
             "benchmarks:\n"
             "  - class: MinIO\n"
@@ -132,24 +130,18 @@ class SbkContractConfigurationTests(unittest.TestCase):
         self.assertEqual(params["endpoint-preflight"], "all")
         self.assertIs(params["endpoint-metrics"], True)
 
-        invalid = (
-            ("endpoint-preflight", "every"),
-            ("mixed-read-source", "published"),
-            ("auth-version", 2),
-            ("list-api-version", 3),
-            ("retry-strategy", "linear"),
-            ("endpoint-metrics", "enabled"),
+        future = self._load(
+            "benchmarks:\n"
+            "  - class: minio\n"
+            "    endpoint-preflight: future-mode\n"
+            "    future-minio-option: enabled\n"
         )
-        for option, value in invalid:
-            rendered = str(value).lower() if isinstance(value, bool) else value
-            with self.subTest(option=option), self.assertRaisesRegex(
-                ValueError, f"option '{option}'"
-            ):
-                self._load(
-                    "benchmarks:\n"
-                    "  - class: minio\n"
-                    f"    {option}: {rendered}\n"
-                )
+        self.assertEqual(
+            future.instances[0].params["endpoint-preflight"], "future-mode"
+        )
+        self.assertEqual(
+            future.instances[0].params["future-minio-option"], "enabled"
+        )
 
 
 class SbkContractResolutionTests(unittest.TestCase):

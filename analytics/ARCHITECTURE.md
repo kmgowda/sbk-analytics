@@ -18,16 +18,17 @@ build rather than accepting a cached wheel. Bash replaces itself with safe-path 
 configuration parser, resolver, runner, process manager, charts adapter, and
 system-info collector. Immutable typed policy groups centralize values that
 cross module boundaries, including dependency layouts/provenance, executable
-and environment names, configuration aliases, SBK option contracts,
+and environment names, configuration aliases,
 cache/lifecycle/diagnostic schemas, native command interfaces, units, status
 vocabulary, and timeouts. `sbk-config.env` remains the operator-controlled
 source for release version pins and local dependency selections.
 
-The SBK 10.7 contract includes a dedicated MinIO policy boundary. It accepts
-only the canonical pooled `url` key and rejects the removed standalone
-`endpoint` and `endpoints` keys. It validates finite MinIO enums and booleans before
-generating `sbkArgs` or `sbkGemArgs`. Backend-dependent numeric, catalog, and
-permission validation remains owned by SBK itself.
+Configuration ownership is intentionally narrow. `config.py` rejects unknown
+top-level sbk-analytics keys and validates only the structure and values needed
+to orchestrate a workflow. SBK defaults and benchmark parameters are copied
+unchanged into generated `sbkArgs` or `sbkGemArgs`; AI backend parameters are
+passed to sbk-charts unchanged. The independently released applications own
+their option catalogs and report unsupported values themselves.
 
 Lifecycle schemas intentionally fail closed. Records from unsupported schema
 versions are quarantined instead of migrated automatically, because an older
@@ -51,7 +52,7 @@ flowchart TB
     subgraph Orchestration["Analytics orchestration"]
         CLI["cli.py<br/>Arguments, logging, dispatch"]
         Workflow["workflow.py<br/>Execution pipeline"]
-        Config["config.py + sbk_contract.py<br/>Parse, normalize, validate"]
+        Config["config.py<br/>Validate analytics keys; preserve downstream params"]
         Properties["properties.py<br/>Release and local-package settings"]
         Resolver["releases package<br/>Shared cache and provenance"]
         ArtifactResolvers["releases/sbk.py + charts.py + jdk.py<br/>Artifact-specific resolution"]
@@ -114,7 +115,7 @@ flowchart LR
 ```mermaid
 flowchart LR
     YAML["Benchmark YAML"] --> CLI["cli.py"] --> Config["config.py"]
-    Config --> Contract["sbk_contract.py"] --> Model["OrchestratorConfig"]
+    Config --> Model["OrchestratorConfig<br/>SBK/charts params unchanged"]
     Env["sbk-config.env"] --> Properties["properties.py"] --> Versions["Versions"]
 ```
 

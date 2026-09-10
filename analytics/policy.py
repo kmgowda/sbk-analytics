@@ -278,83 +278,6 @@ class SbkInterfacePolicy:
 
 
 @dataclass(frozen=True)
-class SbkContractPolicy:
-    """Current SBK option vocabulary, validation groups, and migrations."""
-
-    removed_gem_options: tuple[tuple[str, str], ...] = (
-        ("copyonlydrivers", "use 'fullcopy: false' for compact driver-scoped provisioning"),
-        ("compactruntimecopy", "use 'fullcopy' with the former value inverted"),
-        ("compactcopy", "use 'fullcopy' with the former value inverted"),
-        ("copy", "runtime content is now provisioned automatically"),
-        ("deleteafter", "use 'packagescleanup' to control stale managed packages"),
-        ("delete", "invalid managed runtimes are repaired automatically"),
-        ("sbkcommand", "SBK-GEM now selects the standard launcher itself"),
-        ("sbkdir", "SBK-GEM now receives its application home from its launcher"),
-        ("javacopy", "SBK-GEM now provisions or reuses Java automatically"),
-        ("javaversion", "configure sbk.jdk.version in sbk-config.env instead"),
-    )
-    gem_only_options: tuple[str, ...] = (
-        "gemuser", "gempass", "hostkeycheck", "knownhosts", "gemport",
-        "javadir", "packagescleanup", "fullcopy", "localhost", "sbmport",
-        "sbmsleepms", "totalrecords", "totalthroughput",
-    )
-    boolean_options: tuple[str, ...] = (
-        "hostkeycheck", "packagescleanup", "fullcopy",
-    )
-    positive_integer_options: tuple[str, ...] = (
-        "idletimeoutseconds", "gemport", "sbmport", "totalrecords",
-    )
-    nonnegative_integer_options: tuple[str, ...] = ("sbmsleepms",)
-    positive_decimal_options: tuple[str, ...] = ("totalthroughput",)
-    mutually_exclusive_options: tuple[tuple[str, str], ...] = (
-        ("totalrecords", "records"),
-        ("totalrecords", "throughput"),
-        ("totalthroughput", "throughput"),
-    )
-    deprecated_cleanup_option: str = "runtimecleanup"
-    cleanup_option: str = "packagescleanup"
-    total_records_option: str = "totalrecords"
-    total_throughput_option: str = "totalthroughput"
-
-
-@dataclass(frozen=True)
-class MinioContractPolicy:
-    """Current baseline MinIO option vocabulary and compatibility rules."""
-
-    driver_name: str = "minio"
-    endpoint_option: str = "url"
-    removed_endpoint_options: tuple[str, ...] = ("endpoint", "endpoints")
-    endpoint_migration_guidance: str = (
-        "replace it with 'url', using one URL or a comma-separated URL pool"
-    )
-    boolean_options: tuple[str, ...] = (
-        "recreate", "insecure", "async", "fs-access", "list-fetch-owner",
-        "list-include-user-metadata", "partition-by-prefix",
-        "tagging-enabled", "versioning-enabled", "cleanup-created-buckets",
-        "data-dedupable", "verify-read-size", "retry-jitter",
-        "endpoint-metrics", "sse-enabled",
-    )
-    enum_options: tuple[tuple[str, tuple[str, ...]], ...] = (
-        ("write-operation", (
-            "put", "update", "copy", "delete", "tag-set", "tag-delete",
-            "bucket-create", "bucket-delete", "create", "overwrite",
-        )),
-        ("read-operation", (
-            "get", "range-get", "stat", "tag-get", "list", "bucket-stat",
-            "bucket-list", "head", "range-read",
-        )),
-        ("mixed-read-source", ("catalog",)),
-        ("range-offset-distribution", ("fixed", "sequential", "random")),
-        ("key-distribution", ("sequential", "hashed", "random")),
-        ("retry-strategy", ("fixed", "exponential")),
-        ("warmup-operation", ("connection", "put", "get", "put-get")),
-        ("endpoint-preflight", ("primary", "all")),
-        ("list-api-version", ("1", "2")),
-        ("auth-version", ("4",)),
-    )
-
-
-@dataclass(frozen=True)
 class ChartsInterfacePolicy:
     """Stable sbk-charts command and runtime resource names."""
 
@@ -789,9 +712,6 @@ class ConfigurationPolicy:
     default_workdir: str = os.path.join(tempfile.gettempdir(), APPLICATION.name)
     default_output: str = f"{APPLICATION.name}.xlsx"
     default_ai_model: str = "noai"
-    valid_ai_models: tuple[str, ...] = (
-        "huggingface", "ollama", "lmstudio", "noai",
-    )
     default_cleanup: str = "never"
     cleanup_on_success: str = "on-success"
     default_cleanup_before_run: bool = False
@@ -838,6 +758,22 @@ class ConfigurationPolicy:
     )
     instance_class_keys: tuple[str, ...] = ("class", "class_name")
     instance_name_key: str = "name"
+
+    @property
+    def orchestrator_top_level_keys(self) -> tuple[str, ...]:
+        """All YAML keys owned and interpreted by sbk-analytics."""
+        return (
+            *self.mode_keys,
+            *self.workdir_keys,
+            *self.cleanup_keys,
+            *self.cleanup_before_run_keys,
+            *self.sbk_group_keys,
+            *self.benchmarks_keys,
+            *self.legacy_classes_keys,
+            *self.class_params_keys,
+            *self.charts_group_keys,
+            *self.charts_legacy_keys,
+        )
 
     @property
     def valid_cleanup(self) -> tuple[str, ...]:
@@ -915,8 +851,6 @@ class RuntimePolicy:
     environment: EnvironmentPolicy = EnvironmentPolicy()
     platform: HostPlatformPolicy = HostPlatformPolicy()
     sbk_interface: SbkInterfacePolicy = SbkInterfacePolicy()
-    sbk_contract: SbkContractPolicy = SbkContractPolicy()
-    minio_contract: MinioContractPolicy = MinioContractPolicy()
     charts_interface: ChartsInterfacePolicy = ChartsInterfacePolicy()
     cli: CliPolicy = CliPolicy()
     diagnostics: DiagnosticFieldPolicy = DiagnosticFieldPolicy()

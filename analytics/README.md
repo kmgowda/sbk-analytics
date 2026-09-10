@@ -35,7 +35,9 @@ analytics/
 cleanup pipeline through injected service boundaries.
 
 ### config.py
-Parses and validates YAML configuration files. Defines the `OrchestratorConfig` class with all benchmark parameters.
+Rejects unknown top-level sbk-analytics keys and validates the outer workflow
+structure. Defines `OrchestratorConfig` while preserving SBK and sbk-charts
+backend parameters for validation by those applications.
 
 ### properties.py
 Parses .env-style configuration files (like sbk-config.env). Handles case-insensitive key matching.

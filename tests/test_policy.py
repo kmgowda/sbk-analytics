@@ -186,8 +186,8 @@ class PolicyTests(unittest.TestCase):
             len(RUNTIME_POLICY.system_info.column_widths),
         )
         self.assertIn(
-            RUNTIME_POLICY.sbk_contract.cleanup_option,
-            RUNTIME_POLICY.sbk_contract.gem_only_options,
+            RUNTIME_POLICY.configuration.benchmarks_keys[0],
+            RUNTIME_POLICY.configuration.orchestrator_top_level_keys,
         )
         self.assertIn(
             RUNTIME_POLICY.properties.sbk_url_keys[0],
@@ -303,7 +303,6 @@ class PolicyTests(unittest.TestCase):
             Path("processes.py"),
             Path("properties.py"),
             Path("runner.py"),
-            Path("sbk_contract.py"),
             Path("system_info.py"),
             Path("workflow.py"),
             *(path.relative_to(ROOT / "analytics") for path in sorted(
@@ -364,21 +363,6 @@ class PolicyTests(unittest.TestCase):
             *RUNTIME_POLICY.properties.ssl_ca_bundle_keys,
             *RUNTIME_POLICY.properties.sbk_version_keys,
             *RUNTIME_POLICY.properties.charts_version_keys,
-            *(
-                option
-                for option, _guidance
-                in RUNTIME_POLICY.sbk_contract.removed_gem_options
-            ),
-            *RUNTIME_POLICY.sbk_contract.gem_only_options,
-            RUNTIME_POLICY.minio_contract.driver_name,
-            RUNTIME_POLICY.minio_contract.endpoint_option,
-            *RUNTIME_POLICY.minio_contract.removed_endpoint_options,
-            *RUNTIME_POLICY.minio_contract.boolean_options,
-            *(
-                option
-                for option, _allowed
-                in RUNTIME_POLICY.minio_contract.enum_options
-            ),
             *RUNTIME_POLICY.system_info.columns,
             RUNTIME_POLICY.ssh.ssh_command,
             RUNTIME_POLICY.ssh.sshpass_command,

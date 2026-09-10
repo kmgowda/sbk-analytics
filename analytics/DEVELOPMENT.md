@@ -35,7 +35,6 @@ analytics/              # Main package
 ├── workflow.py        # ordered benchmark/report execution pipeline
 ├── policy.py          # runtime policy and managed-artifact metadata
 ├── config.py          # YAML config parsing
-├── sbk_contract.py    # supported SBK option contract and migrations
 ├── releases/          # Dependency resolution package
 │   ├── _shared.py     # cache/download/archive/provenance primitives
 │   ├── sbk.py         # SBK resolver
@@ -90,10 +89,17 @@ not an independent checksum of the Python archive. Do not duplicate those
 values in the launcher.
 
 Persistent JSON keys, CLI diagnostic keys, YAML/property aliases, environment
-variable names, SBK option contracts, and native command names are runtime
+variable names, and native command names are runtime
 interfaces. Define them in the appropriate frozen policy group, even when a
 single consumer currently uses them, so future consumers cannot silently
 diverge.
+
+The workflow parser owns only the outer sbk-analytics schema. Add every new
+analytics top-level key or alias to `ConfigurationPolicy` so unknown-key
+validation remains centralized. Do not add SBK driver/GEM/SBM option catalogs
+or sbk-charts backend catalogs to this repository: preserve those mappings and
+`ai_params` unchanged and let the selected downstream executable validate its
+own evolving interface.
 
 ## Common Tasks
 
@@ -198,8 +204,9 @@ Do not add SBK or sbk-charts as mandatory Git submodules, and do not add an SBK
 build step to the launcher, resolver, or workflow. sbk-analytics consumes
 versioned release providers or explicitly configured ready-to-run shared
 providers. The dependency project owns compilation, packaging, and its build
-toolchain; sbk-analytics owns validation, orchestration, lifecycle safety,
-provenance, and reporting.
+toolchain and parameter validation; sbk-analytics owns its outer workflow
+validation, dependency readiness, orchestration, lifecycle safety, provenance,
+and reporting.
 
 For unreleased integration work, build SBK in the SBK repository and configure
 the resulting distribution or checkout through `sbk.local.folder`. Point
