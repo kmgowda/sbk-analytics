@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Treat both zombie and dead process states as terminated during durable
+  lifecycle reconciliation. This prevents macOS from quarantining a stale-run
+  record after its workload was successfully stopped but not yet reaped.
+- Close the parent-side macOS log-forwarding pipe after each serial workload.
+
 ### Added
 - Added the canonical named benchmark hierarchy:
   `benchmarks.<instance-name>.<class>.<parameter>`. Instance names now come

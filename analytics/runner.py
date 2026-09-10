@@ -322,6 +322,8 @@ def _run_serial(
                 forward_thread.join(
                     timeout=BENCHMARK_POLICY.log_forward_join_s
                 )
+                if proc.stdout is not None:
+                    proc.stdout.close()
         dur = time.monotonic() - start
         results.append(
             RunResult(

@@ -164,7 +164,9 @@ def _identity_matches(
 ) -> bool:
     try:
         process = psutil.Process(pid)
-        if not process.is_running() or process.status() == psutil.STATUS_ZOMBIE:
+        if not process.is_running() or not _process_status_is_active(
+            process.status()
+        ):
             return False
         if abs(process.create_time() - created) > LIFECYCLE_POLICY.identity_tolerance_s:
             return False
@@ -195,6 +197,11 @@ def _identity_matches(
         return True
     except (psutil.Error, OSError, ValueError):
         return False
+
+
+def _process_status_is_active(status: str) -> bool:
+    """Return whether a psutil status represents executable work."""
+    return status not in (psutil.STATUS_ZOMBIE, psutil.STATUS_DEAD)
 
 
 def _group_exists(pgid: int) -> bool:
@@ -228,9 +235,8 @@ def _group_exists(pgid: int) -> bool:
         if process_pgid != pgid:
             continue
         try:
-            if (
+            if _process_status_is_active(
                 process.info[LIFECYCLE_POLICY.process_status_attribute]
-                != psutil.STATUS_ZOMBIE
             ):
                 return True
         except (psutil.AccessDenied, PermissionError):
@@ -246,7 +252,7 @@ def _pid_is_active(pid: int) -> bool:
         process = psutil.Process(pid)
         return (
             process.is_running()
-            and process.status() != psutil.STATUS_ZOMBIE
+            and _process_status_is_active(process.status())
         )
     except (psutil.Error, OSError, ValueError):
         return False
@@ -286,9 +292,8 @@ def _group_run_identity_matches(pgid: int, run_id: str) -> bool:
         if process_pgid != pgid:
             continue
         try:
-            if (
+            if not _process_status_is_active(
                 process.info[LIFECYCLE_POLICY.process_status_attribute]
-                == psutil.STATUS_ZOMBIE
             ):
                 continue
             matched = True

@@ -19,6 +19,7 @@ from analytics.lifecycle import (
     _group_exists,
     _group_run_identity_matches,
     _identity_matches,
+    _process_status_is_active,
     _termination_complete,
     current_run_id,
     inspect_records,
@@ -183,6 +184,12 @@ class ForcedParentExitTests(unittest.TestCase):
 
 
 class ManagedProcessTests(unittest.TestCase):
+    def test_terminal_process_statuses_are_not_active(self):
+        for status in (psutil.STATUS_ZOMBIE, psutil.STATUS_DEAD):
+            with self.subTest(status=status):
+                self.assertFalse(_process_status_is_active(status))
+        self.assertTrue(_process_status_is_active(psutil.STATUS_RUNNING))
+
     def test_termination_requires_known_leader_and_group_to_stop(self):
         with mock.patch(
             "analytics.lifecycle._group_exists", return_value=False
